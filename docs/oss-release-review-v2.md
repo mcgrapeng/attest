@@ -708,3 +708,35 @@ CHILD_SEES_DATABASE_URL=postgres://user:SECRET@db:5432/prod
 「一个把交付前提变成可机读、可核对、可审计的证据清单的需求级测试工具」
 这个定位（而不是"判断模块能不能交付"的裁判），并在 README 首屏明说
 「只支持 TS/JS/Python；runner 输出不是 TAP 格式时『测试全绿』这条会失真」。
+
+---
+
+## 6. 复评后的处理（集成方回执，2026-11-14）
+
+复评指出的每一条，集成方都复现过并处理了。处理结果如下（提交号见括号）：
+
+| 复评结论 | 处理 | 提交 |
+| --- | --- | --- |
+| **§5.3 TS 车道假绿**（jest/vitest/mocha 的失败用例被判「✓ 测试全绿」、退出码 0） | **已修**。新增 `_classify_run()`：按「runner 退出码 + 输出」一起判，三件事分开 —— 用例真失败⇒阻塞、环境没就绪⇒未实测、**输出格式认不出⇒未实测（绝不判绿）**。失败用例识别扩到 jest（● / ✕ / ×）、vitest、mocha（编号失败）；用例汇总解析扩到 vitest / jest / mocha 三种格式。TS 车道补上 `setup_errors` 通道（之前只有 Python 车道有）。闸门车道以退出码为权威（退出码非 0 = 闸门没过，不能因输出认不出就放过）。删掉死代码 `_run_coverage_single`（同一份 TAP-only 逻辑的副本）。 | `606d9ea` |
+| **§5.4 README 说 `DATABASE_URL` 不透传，代码里它在白名单** | **已修**（文档）。README 改成「这两个连接串会透传 —— 仓库自己的集成车道要连库，这是刻意的取舍」，并说明不想要就改用 `.pgpass`。 | `606d9ea` |
+| **§5.1 `.omx/ultragoal/` 会随包发布** | **已修**。`.omx/` 整个移出跟踪并加进 `.gitignore`；brief 移到 `docs/development-brief.md` 作为项目历史。 | `606d9ea` |
+| **§5.2 规则级 allowlist 让它日后悄悄多出 HIGH 也不被拦** | **已补一道精确的闸门**：`scripts/check_env_inheritance.py` —— 生产代码不得整份继承 `os.environ`（`**os.environ` / `dict(os.environ)` / `os.environ.copy()`），子进程环境必须走白名单。用 `tokenize` 判定真代码（注释、字符串不误报），测试文件不在范围内（脚手架刻意要传环境）。这条**不依赖位置** ⇒ 改代码不会误红，比逐条基线更适合开源协作。 | `606d9ea` |
+| **§4.5 末条 / §5.5 `_symbol_exists` 只扫 TS 扩展名** | **已修**。`index_repo()` 现在按语言分别认 Python 模块级 `def`/`class`、Rust `pub fn/struct/…`、Go 顶层 `func`/`type`（并排除 `_test.go`）。Python 仓的「重复造轮子」判据从"整条是死的"变成真的在查。 | `606d9ea` |
+| **§4.7 `$SKILL_DIR` 的定义** | SKILL.md 开头已给：`$SKILL_DIR` = 本 skill 所在目录（装在 `~/.agents/skills/req-test-plan` 时就是那个路径）；README 另给了 `install.sh` / `uninstall.sh` 的软链布局。 | `016abda` |
+| **§5.6 `--self-check` 只证了静态判据** | **未修，已写明**。自检副本不带 `node_modules` ⇒ 多数仓库在副本里跑不动测试 ⇒ 它证明的是"静态判据抓得住东西"。报告里明说这件事（`copy_runnable: false`），CHANGELOG 的「已知遗留」里也列了。 | — |
+
+复评后复跑的四道闸门（`606d9ea`）：
+
+```
+测试      21/21 全绿（新增 test_readiness_runners.py 6 组、test_env_inheritance.py 12 条）
+fixture   5/5 命中、0 不符、0 未判定
+eval      6/6 通过
+安全      HIGH/CRITICAL 全部落在 allowlist 内，未放行 0 条
+env 闸    OK：5 个生产脚本都没有整份继承 os.environ
+self-check 结论：反向验证通过
+```
+
+**总判定不变**：工程层与哲学层仍是 `NEEDS_WORK_BEFORE_PUBLISH` —— 复评说的那条
+"发布前必须再做的一件事"（§5.3）已修，但仍有几项开放项（见各报告的「仍开放」清单）。
+修完 §5.3 之后，这个工具在主流 JS 生态上不再会给假绿；这是它能发布的**前提条件**，
+现在这个前提成立了。

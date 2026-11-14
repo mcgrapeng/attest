@@ -125,7 +125,29 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
 
 ### 修复与已知遗留
 
-- **已知遗留（发布时仍开放）**：
+### 复评后修的（`606d9ea`）
+
+独立复评抓到一条会**直接推翻工具存在理由**的缺陷，已修：
+
+- **TS 车道的假绿**：`_failed_tests` 只认 TAP 的 `not ok N -`，而 jest / vitest / mocha
+  都不吐 TAP ⇒ 那些仓库里失败的用例一个都认不出来 ⇒ 报「✓ 测试全绿」、退出码 0。
+  实测复现过一个 jest 风格的失败套件拿到绿色裁决。现在按「runner 退出码 + 输出」
+  一起判：真失败⇒阻塞、环境没就绪⇒未实测、**输出格式认不出⇒未实测（绝不判绿）**。
+  配套扩了失败用例识别与用例汇总解析（jest / vitest / mocha 三种格式），TS 车道补上
+  `setup_errors` 通道，删掉死代码 `_run_coverage_single`。
+  回归：scripts/test_readiness_runners.py（6 组）。
+- **`index_repo` 只索引 TS 的 export** ⇒ Python/Rust/Go 仓的「重复造轮子」判据整条
+  是死的。现在按语言分别认 Python 模块级 def/class、Rust pub fn、Go 顶层 func/type。
+- **README 说 `DATABASE_URL` 不会透传**，代码里它在白名单里 ⇒ 文档改成"会透传"并说明取舍。
+- **`.omx/` 不再入库**（OMX 运行态与目标账本不进发布包），brief 移到
+  `docs/development-brief.md`。
+- **规则级 allowlist 的漏洞**（日后悄悄多出 HIGH 不被拦）补一道精确闸门：
+  `scripts/check_env_inheritance.py` —— 生产代码不得整份继承 `os.environ`。
+  回归：scripts/test_env_inheritance.py（12 条）。
+
+### 已知遗留（发布时仍开放）
+
+- **仍然开放**：
   - SkillSpector 的 `E2`（Env Variable Harvesting）仍会报 HIGH ——
     子进程必须透传环境变量（白名单实现，见 `scripts/readiness.py` 的 `child_env`）。
     逐条复核结论在 `docs/oss-release-review.md` 第六节；CI 用

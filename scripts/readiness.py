@@ -29,6 +29,43 @@ CODE_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
 SKIP_DIRS = {"node_modules", ".git", "dist", "build", "coverage", ".next",
              "out", "target", ".venv", "venv"}
 
+# 仓库级测试目录（独立于模块目录的常见布局）
+REPO_TEST_DIRS = ("test", "tests", "spec")
+
+# 子进程环境白名单 —— 目标仓库的脚本只拿到这些变量，其余不透传。
+# 之前是 `{**os.environ}`：父进程里的一切（含各家的密钥）都进了子进程。
+ENV_ALLOW_EXACT = {
+    "PATH", "HOME", "LANG", "LANGUAGE", "TZ", "TMPDIR", "TEMP", "TMP",
+    "SHELL", "USER", "LOGNAME", "TERM", "SYSTEMROOT", "COMSPEC", "CI",
+    # 工具自己要用、目标仓库的脚本也可能要的
+    "POSTGRES_URL", "DATABASE_URL", "MEMORY_ITEST",
+    "MEMORY_RECONCILE_OUT_DIR", "REQ_PLAN_RECONCILE_OUT_DIR",
+}
+ENV_ALLOW_PREFIX = ("LC_", "NODE_", "PYTHON", "NPM_", "PNPM_", "YARN_",
+                    "PIP_", "UV_")
+
+# 脚本白名单 —— 只认这些名字（前缀式：脚本名用冒号分段，前若干段命中即算）。
+# 之前是子串匹配（"coverage" in name）⇒ `reconcile:reset` 这种也会被选中执行。
+SCRIPT_NAMES = {
+    "gate": {
+        "exact": {"coverage", "test:coverage", "cov", "check:coverage",
+                  "coverage:check", "test:cov"},
+        "prefix": (("test", "coverage"), ("test", "cov"), ("check", "coverage")),
+    },
+    "itest": {
+        "exact": {"itest", "test:itest", "integration", "test:integration"},
+        "prefix": (("test", "integration"), ("test", "itest")),
+    },
+    "reconcile": {
+        "exact": {"reconcile", "data:reconcile", "test:reconcile"},
+        "prefix": (("data", "reconcile"), ("test", "reconcile")),
+    },
+    "baseline": {
+        "exact": {"baseline:check", "eval:baseline:check", "test:baseline"},
+        "prefix": (("eval", "baseline", "check"), ("test", "baseline")),
+    },
+}
+
 # 测试支撑文件 —— 不是被测的核心逻辑
 _SUPPORT_RE = re.compile(
     r"(itest-support|test-support|spec-support|fixtures?/|/helpers/|"
@@ -56,14 +93,18 @@ _TYPE_ONLY = {"interface", "type"}
 class Check:
     key: str
     title: str
-    status: str          # pass / fail / warn / skipped
+    status: str          # pass / fail / warn / skipped / untested
     detail: str = ""
     evidence: list[str] = field(default_factory=list)
     fix: str = ""
+    # 证据类别：executed（实测）/ static（静态信号）/ untested（没测到）。
+    # G004 用它分层输出 —— 静态信号永远不能单独支撑"通过"。
+    evidence_kind: str = "static"
 
     @property
     def mark(self) -> str:
-        return {"pass": "✓", "fail": "✗", "warn": "·", "skipped": "—"}[self.status]
+        return {"pass": "✓", "fail": "✗", "warn": "·", "skipped": "—",
+                "untested": "○"}[self.status]
 
 
 @dataclass
@@ -75,10 +116,27 @@ class Module:
     tests: list[Path] = field(default_factory=list)
     itests: list[Path] = field(default_factory=list)
     support: list[Path] = field(default_factory=list)
+    repo_tests: list[Path] = field(default_factory=list)
     tables: list[str] = field(default_factory=list)
     deps: list[str] = field(default_factory=list)
     workspace: Path | None = None
     lang: str = "other"      # ts / py / other
+
+
+def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
+    """给子进程的环境：只透传白名单里的，其余不透传。
+
+    之前是 `{**os.environ}` —— 父进程里的一切（含别的服务的密钥）都进了
+    目标仓库的脚本。白名单之外的一律不透传。
+    """
+    env: dict[str, str] = {}
+    for k, v in os.environ.items():
+        if k in ENV_ALLOW_EXACT or k.startswith(ENV_ALLOW_PREFIX):
+            env[k] = v
+    env["PYTHONUTF8"] = "1"
+    if extra:
+        env.update(extra)
+    return env
 
 
 # ---------------------------------------------------------------- 发现
@@ -97,7 +155,142 @@ def _walk(root: Path, exts: set[str]):
                 yield Path(dirpath) / fn
 
 
-def discover_module(root: Path, modpath: str) -> Module:
+def _looks_like_test_file(p: Path) -> bool:
+    """这个文件名像测试文件吗（仓库级测试目录里的判定）。"""
+    name = p.name
+    if re.search(r"\.(test|spec|itest)\.(ts|tsx|js|jsx|mjs|cjs|py)$", name):
+        return True
+    return bool(re.search(r"^(test_[^/]+|[^/]+_test)\.py$", name))
+
+
+def _module_tokens(m: Module) -> list[str]:
+    """这个模块在测试文件里可能出现的名字（路径 / 目录名 / Python 包名）。"""
+    toks: list[str] = []
+    try:
+        rel = str(m.base.relative_to(m.root))
+    except ValueError:
+        rel = ""
+    if rel and rel != ".":
+        toks.append(rel)
+        toks.append(Path(rel).name)
+    pkg = python_package_dir(m)
+    if pkg:
+        toks.append(pkg.name)
+    out: list[str] = []
+    for t in toks:
+        if t and t not in out:
+            out.append(t)
+    return out
+
+
+def _mentions_module_path(p: Path, tokens: list[str]) -> bool:
+    """这个测试文件提到这个模块吗（路径片段或文件名）。"""
+    for tag in tokens:
+        if tag and tag in p.name:
+            return True
+    if not tokens:
+        return False
+    try:
+        text = p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    for tag in tokens:
+        pat = r"(?<![A-Za-z0-9_.-])" + re.escape(tag) + r"(?![A-Za-z0-9_-])"
+        if re.search(pat, text):
+            return True
+    return False
+
+
+def repo_level_tests(root: Path, m: Module,
+                     extra_dirs: list[str] | None = None
+                     ) -> tuple[list[Path], list[Path]]:
+    """仓库级测试目录（`test/` `tests/` `spec/`）里的测试文件。
+
+    返回 (全部仓库级测试文件, 归属于这个模块的测试文件)。
+
+    模块目录之外的测试也是这个模块的测试 —— 之前只 walk 模块目录，
+    于是 `test/` 布局的仓库里健康代码被误判成"导出零引用"。
+    归属判定：文件提到这个模块（路径/目录名/Python 包名）才算它的测试；
+    `--test-dir` 显式指定的目录无条件算。
+    """
+    dirs: list[Path] = []
+    explicit: set[Path] = set()
+    for d in (extra_dirs or []):
+        p = Path(d)
+        p = p if p.is_absolute() else (root / p)
+        dirs.append(p)
+        explicit.add(p)
+    dirs += [root / d for d in REPO_TEST_DIRS]
+    tokens = _module_tokens(m)
+    all_files: list[Path] = []
+    attributed: list[Path] = []
+    seen: set[Path] = set()
+    for d in dirs:
+        if not d.is_dir():
+            continue
+        for p in sorted(d.rglob("*")):
+            if not p.is_file() or p in seen:
+                continue
+            if not _looks_like_test_file(p):
+                continue
+            seen.add(p)
+            all_files.append(p)
+            if p in explicit or _mentions_module_path(p, tokens):
+                attributed.append(p)
+    return all_files, attributed
+
+
+_JS_IMPORT_RES = (
+    re.compile(r"from\s+['\"]([^'\"]+)['\"]"),              # import/export … from 'x'
+    re.compile(r"require\(\s*['\"]([^'\"]+)['\"]\s*\)"),    # require('x')
+    re.compile(r"^\s*import\s+['\"]([^'\"]+)['\"]", re.M),  # import 'x'
+)
+_PY_IMPORT_RE = re.compile(r"^\s*import\s+([A-Za-z_][\w.]*)", re.M)
+_PY_FROM_RE = re.compile(r"^\s*from\s+([A-Za-z_][\w.]*)\s+import\b", re.M)
+# Python 标准库（3.10+ 有这个清单）—— 标准库不是第三方依赖
+_PY_STDLIB = set(getattr(sys, "stdlib_module_names", ()))
+
+
+def _import_specs(text: str, suffix: str) -> set[str]:
+    """文件里引用的第三方依赖。
+
+    JS/TS：`from 'x'`、`require('x')`、`import 'x'` 三种写法都算。
+    Python：`import x` 与 `from x import y`（取顶层包名，排除标准库）。
+    """
+    out: set[str] = set()
+    if suffix in (".py", ".pyi"):
+        specs = set()
+        for mm in _PY_IMPORT_RE.finditer(text):
+            specs.add(mm.group(1))
+        for mm in _PY_FROM_RE.finditer(text):
+            specs.add(mm.group(1))
+        for spec in specs:
+            if spec.startswith("."):
+                continue                      # 相对导入（包内）
+            root = spec.split(".")[0]
+            if not root or root in _PY_STDLIB:
+                continue
+            out.add(root)
+        return out
+    for rx in _JS_IMPORT_RES:
+        for mm in rx.finditer(text):
+            spec = mm.group(1)
+            # 内部路径别名（@/…）与相对路径不是第三方库
+            if spec.startswith(".") or spec.startswith("node:"):
+                continue
+            # 路径别名（@config/env.ts、@lib/x.ts）不是包名
+            if re.search(r"\.(ts|tsx|js|jsx|mjs|cjs|json)$", spec):
+                continue
+            if spec.startswith("@/") or spec.startswith("~"):
+                continue
+            if "/" in spec and not spec.startswith("@"):
+                continue          # 子路径导入，不是包名
+            out.add(spec)
+    return out
+
+
+def discover_module(root: Path, modpath: str,
+                    test_dirs: list[str] | None = None) -> Module:
     m = Module(root=root, path=modpath, base=root / modpath)
     if not m.base.exists():
         return m
@@ -116,6 +309,15 @@ def discover_module(root: Path, modpath: str) -> Module:
             m.support.append(p)      # 测试支撑，不是核心逻辑
         else:
             m.sources.append(p)
+    # 仓库级测试目录（test/ tests/ spec/ 或 --test-dir 指定的）
+    all_repo_tests, attributed = repo_level_tests(root, m, test_dirs)
+    m.repo_tests.extend(all_repo_tests)
+    for p in attributed:
+        rel = str(p.relative_to(root)) if p.is_relative_to(root) else str(p)
+        if ".itest." in rel:
+            m.itests.append(p)
+        else:
+            m.tests.append(p)
     for up in [m.base] + list(m.base.parents):
         if (up / "package.json").exists():
             m.workspace = up
@@ -137,18 +339,7 @@ def discover_module(root: Path, modpath: str) -> Module:
             tables.add(mm.group(1))
         for mm in re.finditer(r"\bTable\(\s*['\"](\w+)['\"]", text):
             tables.add(mm.group(1))
-        for mm in re.finditer(r"from\s+['\"]([^'\"]+)['\"]", text):
-            spec = mm.group(1)
-            # 内部路径别名（@/…）与相对路径不是第三方库
-            if spec.startswith(".") or spec.startswith("node:"):
-                continue
-            # 路径别名（@config/env.ts、@lib/x.ts）不是包名
-            if re.search(r"\.(ts|tsx|js|jsx|mjs|cjs|json)$", spec):
-                continue
-            if spec.startswith("@/") or spec.startswith("~"):
-                continue
-            if "/" in spec and not spec.startswith("@"):
-                continue          # 子路径导入，不是包名
+        for spec in _import_specs(text, p.suffix):
             deps.add(spec)
     m.tables = sorted(tables)
     m.deps = sorted(deps)
@@ -325,7 +516,13 @@ def run_gates(m: Module, gates: list[tuple[Path, str, str]],
         if agg:
             detail = (f"行 {agg['line']:.0f}% / 分支 {agg['branch']:.0f}% / "
                       f"函数 {agg['func']:.0f}%")
-        notes.append(f"{name}: {'✓ 通过' if code == 0 else '✗ 未达阈值'}"
+        if code == 0:
+            mark = "✓ 通过"
+        elif code == 127:
+            mark = "— 跑不起来（环境没就绪，不是阈值没过）"
+        else:
+            mark = "✗ 未达阈值"
+        notes.append(f"{name}: {mark}"
                      + (f"（{detail}）" if detail else "")
                      + ("" if code == 0 else f"（退出码 {code}）"))
     cov = _merge_coverage(per_run) if per_run else {}
@@ -375,6 +572,30 @@ def _node_summary(out: str) -> dict[str, int]:
     return out_d
 
 
+def coverage_globs(m: Module, inc: str) -> list[str]:
+    """覆盖率 include 的 glob —— 按模块里**实际存在**的扩展名推导。
+
+    之前写死 `**/*.ts` ⇒ JavaScript 项目（.js/.mjs）永远拿不到覆盖率。
+    """
+    exts = sorted({p.suffix for p in m.sources if p.suffix in CODE_EXT})
+    if not exts:
+        exts = [".ts"]
+    return [f"{inc}/**/*{e}" for e in exts]
+
+
+def coverage_flags(m: Module, inc: str, runner: str) -> list[str]:
+    """按 runner 给覆盖率参数（include glob 按实际扩展名逐个给）。"""
+    globs = coverage_globs(m, inc)
+    if runner in ("node", "tsx", "nodejs"):
+        return ["--experimental-test-coverage"] + \
+            [f"--test-coverage-include={g}" for g in globs]
+    if runner == "vitest":
+        return ["--coverage"] + [f"--coverage.include={g}" for g in globs]
+    if runner == "jest":
+        return ["--coverage", "--collectCoverageFrom"] + globs
+    return []
+
+
 def run_itest_lane(m: Module, scripts: list[tuple[Path, str, str]],
                    timeout: int = 900
                    ) -> tuple[dict[str, dict], list[str], list[str], list[str]]:
@@ -391,9 +612,9 @@ def run_itest_lane(m: Module, scripts: list[tuple[Path, str, str]],
     env_errors: list[str] = []
     notes: list[str] = []
     base = str(m.base.relative_to(m.workspace)) if m.workspace else m.path
-    inc = f"--test-coverage-include={base}/**/*.ts"
+    inc = coverage_flags(m, base, "node")
     for ws, name, cmd in scripts:
-        code, out, _ = run_gate(ws, name, cmd, extra=[inc], timeout=timeout)
+        code, out, _ = run_gate(ws, name, cmd, extra=inc, timeout=timeout)
         rows = _parse_cov_rows(out)
         if rows:
             per_run.append(rows)
@@ -435,16 +656,9 @@ def run_coverage(m: Module, timeout: int = 120,
     prefix, script_name = project_test_cmd(m)
     runner = prefix[0] if prefix else "node"
     cmd = list(prefix)
-    if runner in ("node", "tsx", "nodejs"):
-        cmd += ["--experimental-test-coverage",
-                f"--test-coverage-include={inc}/**/*.ts"]
-    elif runner == "vitest":
-        cmd += ["--coverage", f"--coverage.include={inc}/**/*.ts"]
-    elif runner == "jest":
-        cmd += ["--coverage", "--collectCoverageFrom",
-                f"{inc}/**/*.ts"]
+    cmd += coverage_flags(m, inc, runner)
     cmd_base = list(cmd)
-    env = {**os.environ, "PYTHONUTF8": "1"}
+    env = child_env()
     if include_itest:
         # itest 车道默认跳过（要 MEMORY_ITEST=1 + 本地 Milvus/PG）
         env["MEMORY_ITEST"] = "1"
@@ -483,6 +697,10 @@ def run_coverage(m: Module, timeout: int = 120,
         if rows:
             per_run.append(rows)
     if not per_run:
+        ran_any = any(not err for _, _, err in results)
+        if ran_any:
+            return {}, failed, ("测试跑了，但没解析出覆盖率表"
+                                "（runner 可能不支持覆盖率参数）")
         return {}, failed, ("；".join(notes) or
                             "没解析出覆盖率表（测试可能没跑起来）")
     cov = _merge_coverage(per_run)
@@ -504,15 +722,9 @@ def _run_coverage_single(m: Module, timeout: int = 120,
     prefix, _ = project_test_cmd(m)
     runner = prefix[0] if prefix else "node"
     cmd = list(prefix)
-    if runner in ("node", "tsx", "nodejs"):
-        cmd += ["--experimental-test-coverage",
-                f"--test-coverage-include={inc}/**/*.ts"]
-    elif runner == "vitest":
-        cmd += ["--coverage", f"--coverage.include={inc}/**/*.ts"]
-    elif runner == "jest":
-        cmd += ["--coverage", "--collectCoverageFrom", f"{inc}/**/*.ts"]
+    cmd += coverage_flags(m, inc, runner)
     cmd += [str(t.relative_to(m.workspace)) for t in tests]
-    env = {**os.environ, "PYTHONUTF8": "1"}
+    env = child_env()
     if include_itest:
         env["MEMORY_ITEST"] = "1"
     bin_dir = m.workspace / "node_modules" / ".bin"
@@ -535,25 +747,57 @@ def _run_coverage_single(m: Module, timeout: int = 120,
     cov = {k: {kk: vv for kk, vv in v.items() if kk != "_uncovered"}
            for k, v in cov.items()}
     return cov, failed, out
-    # 项目本地的可执行文件（tsx / vitest / jest）不在 PATH 上 ——
-    # pnpm 跑脚本时会把 node_modules/.bin 加进去，我们照做
-    env = {**os.environ, "PYTHONUTF8": "1"}
-    if include_itest:
-        # itest 车道默认跳过（要 MEMORY_ITEST=1 + 本地 Milvus/PG）
-        env["MEMORY_ITEST"] = "1"
-    bin_dir = m.workspace / "node_modules" / ".bin"
-    if bin_dir.is_dir():
-        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
 
 
 # ---------------------------------------------------------------- 实测：PG 表结构
 
 
+_PG_ENV_KEYS = ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE",
+                "PGSSLMODE")
+
+
+def pg_env(url: str) -> dict[str, str]:
+    """连接串 → `PG*` 环境变量（口令不落 argv、不进日志）。
+
+    之前是把整条连接串当 argv 传给 psql ⇒ 含口令的连接串出现在进程表，
+    本机其他用户可见。解析不出来就返回空 ⇒ 查不到表结构，而不是把口令
+    塞进命令行。
+    """
+    if url:
+        from urllib.parse import parse_qsl, unquote, urlparse
+        try:
+            u = urlparse(url)
+        except ValueError:
+            return {}
+        if not u.scheme or not u.hostname:
+            return {}
+        env = {"PGHOST": u.hostname}
+        if u.port:
+            env["PGPORT"] = str(u.port)
+        if u.username:
+            env["PGUSER"] = unquote(u.username)
+        if u.password:
+            env["PGPASSWORD"] = unquote(u.password)
+        db = (u.path or "").lstrip("/")
+        if db:
+            env["PGDATABASE"] = db
+        qs = dict(parse_qsl(u.query or "")) if u.query else {}
+        if qs.get("sslmode"):
+            env["PGSSLMODE"] = qs["sslmode"]
+        return env
+    # 没给连接串 ⇒ 用环境里已有的 PG* 变量（同样不进 argv）
+    return {k: v for k, v in os.environ.items() if k in _PG_ENV_KEYS}
+
+
 def _psql(url: str, sql: str) -> list[str]:
+    env = pg_env(url)
+    if not env:
+        return []
     try:
         r = subprocess.run(
-            ["psql", url, "-t", "-A", "-F", "\x1f", "-c", sql],
-            capture_output=True, text=True, encoding="utf-8", timeout=30)
+            ["psql", "-t", "-A", "-F", "\x1f", "-c", sql],
+            capture_output=True, text=True, encoding="utf-8", timeout=30,
+            env=child_env(env))
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return []
     if r.returncode != 0:
@@ -563,7 +807,7 @@ def _psql(url: str, sql: str) -> list[str]:
 
 def query_schema(m: Module, url: str) -> dict[str, dict]:
     """从 PG catalog 查真实的表结构事实。"""
-    if not m.tables or not shutil.which("psql") or not url:
+    if not m.tables or not shutil.which("psql") or not pg_env(url):
         return {}
     facts: dict[str, dict] = {}
     for tbl in m.tables:
@@ -621,6 +865,94 @@ def _script_files(cmd: str) -> list[str]:
                            ".py")) or "*" in a]
 
 
+def script_allowed(kind: str, name: str, cmd: str) -> bool:
+    """这个脚本该被自动执行吗？
+
+    显式白名单：脚本名命中白名单（精确名，或冒号分段的前缀模式）。
+    之前是子串匹配（`"coverage" in name`）⇒ `reconcile:reset` 这种
+    名字里带关键词的脚本也会被选中执行。
+
+    覆盖率闸门额外要求命令里带 `cov`（闸门名字可能很泛，命令能确认
+    它真的是覆盖率任务）。
+    """
+    spec = SCRIPT_NAMES.get(kind)
+    if not spec:
+        return False
+    low = name.lower()
+    if low not in spec["exact"]:
+        segs = low.split(":")
+        if not any(tuple(segs[:len(p)]) == p for p in spec["prefix"]):
+            return False
+    if kind == "gate":
+        return "cov" in cmd.lower()
+    return True
+
+
+def _python_gate_scripts(root: Path) -> list[tuple[Path, str, str]]:
+    """Python 仓库自己声明的覆盖率闸门（Makefile 目标 / tox 环境）。
+
+    之前只读 `package.json` ⇒ Python 仓库永远读不到自己的闸门。
+    """
+    out: list[tuple[Path, str, str]] = []
+    for mk in sorted(root.rglob("Makefile")):
+        if any(part in SKIP_DIRS for part in mk.parts):
+            continue
+        try:
+            text = mk.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for mm in re.finditer(r"^([A-Za-z0-9_.-]+)\s*:(?!=)", text, re.M):
+            target = mm.group(1)
+            if "cov" not in target.lower():
+                continue
+            out.append((mk.parent, f"make {target}", f"make {target}"))
+    for tox in sorted(root.rglob("tox.ini")):
+        if any(part in SKIP_DIRS for part in tox.parts):
+            continue
+        try:
+            text = tox.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for mm in re.finditer(r"^\[testenv:([A-Za-z0-9_.-]+)\]", text, re.M):
+            env_name = mm.group(1)
+            if "cov" not in env_name.lower():
+                continue
+            out.append((tox.parent, f"tox -e {env_name}", f"tox -e {env_name}"))
+    return out
+
+
+def repo_coverage_threshold(root: Path) -> tuple[float | None, float | None]:
+    """仓库自己在 `pyproject.toml` 里声明的覆盖率阈值（行、分支）。
+
+    阈值归仓库所有 —— 通用阈值（80/70）在没有仓库口径时是错的。
+    """
+    try:
+        import tomllib
+    except ModuleNotFoundError:
+        return (None, None)
+    for pj in sorted(root.rglob("pyproject.toml")):
+        if any(part in SKIP_DIRS for part in pj.parts):
+            continue
+        try:
+            data = tomllib.loads(pj.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, ValueError):
+            continue
+        rep = ((data.get("tool") or {}).get("coverage") or {}).get("report") or {}
+        line = rep.get("fail_under")
+        branch = rep.get("fail_under_branch")
+        try:
+            line = float(line) if line is not None else None
+        except (TypeError, ValueError):
+            line = None
+        try:
+            branch = float(branch) if branch is not None else None
+        except (TypeError, ValueError):
+            branch = None
+        if line is not None or branch is not None:
+            return (line, branch)
+    return (None, None)
+
+
 def find_gate_scripts(m: Module, root: Path) -> list[tuple[Path, str, str]]:
     """找仓库自己的覆盖率闸门入口。
 
@@ -632,14 +964,29 @@ def find_gate_scripts(m: Module, root: Path) -> list[tuple[Path, str, str]]:
         for name, cmd in scripts.items():
             if not isinstance(cmd, str) or not isinstance(name, str):
                 continue
-            if "coverage" not in name.lower() and "coverage" not in cmd.lower():
+            if not script_allowed("gate", name, cmd):
                 continue
             if not _mentions_module(m, cmd):
                 continue
             cands.append((ws, name, cmd))
     if not cands:
+        # Python 仓库：Makefile / tox.ini 里声明的闸门
+        for ws, name, cmd in _python_gate_scripts(root):
+            if not (_mentions_module(m, cmd) or _covers_module(m, ws)):
+                continue
+            cands.append((ws, name, cmd))
+    if not cands:
         return []
     return _entries(cands)
+
+
+def _covers_module(m: Module, ws: Path) -> bool:
+    """这个工作区目录是不是模块的祖先（Makefile / tox.ini 在模块上层）。"""
+    try:
+        m.base.relative_to(ws)
+    except ValueError:
+        return False
+    return True
 
 
 def _entries(cands: list[tuple[Path, str, str]]) -> list[tuple[Path, str, str]]:
@@ -685,8 +1032,7 @@ def find_itest_scripts(m: Module, root: Path) -> list[tuple[Path, str, str]]:
         for name, cmd in scripts.items():
             if not isinstance(cmd, str) or not isinstance(name, str):
                 continue
-            low = name.lower()
-            if "integration" not in low and "itest" not in low:
+            if not script_allowed("itest", name, cmd):
                 continue
             if not _mentions_module(m, cmd):
                 continue
@@ -711,7 +1057,7 @@ def run_gate(ws: Path, name: str, cmd: str, extra: list[str] | None = None,
     env_over, argv = split_env_cmd(cmd)
     if extra:
         argv = _insert_coverage_flags(argv, extra)
-    env = {**os.environ, "PYTHONUTF8": "1", **env_over}
+    env = child_env(env_over)
     bin_dir = ws / "node_modules" / ".bin"
     if bin_dir.is_dir():
         env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
@@ -750,7 +1096,7 @@ def find_reconcilers(m: Module, root: Path) -> list[tuple[Path, str, str]]:
         for name, cmd in scripts.items():
             if not isinstance(cmd, str) or not isinstance(name, str):
                 continue
-            if "reconcile" not in name.lower() and "reconcile" not in cmd.lower():
+            if not script_allowed("reconcile", name, cmd):
                 continue
             # 脚本文件里要提到这个模块的表名或模块路径
             body = ""
@@ -770,50 +1116,65 @@ def find_reconcilers(m: Module, root: Path) -> list[tuple[Path, str, str]]:
 
 
 def run_reconciler(m: Module, ws: Path, name: str, cmd: str,
-                   timeout: int = 180
-                   ) -> tuple[list[str], str, list[str], Path]:
-    """实跑对账脚本，返回 (漂移租户行, 原始输出)。
+                   timeout: int = 180,
+                   drift_re: "re.Pattern | None" = None,
+                   header_re: "re.Pattern | None" = None,
+                   tenant_col: str | None = None
+                   ) -> tuple[list[str], str, list[str], Path, int | None]:
+    """实跑对账脚本，返回 (漂移租户行, 原始输出, 表格行, 输出目录, 租户列位置)。
 
     对账脚本通常会把报告写到磁盘（人工看的那份）—— 自动化跑不能覆盖它，
-    所以把输出目录指到临时目录。
+    所以把输出目录指到临时目录（通用变量 `REQ_PLAN_RECONCILE_OUT_DIR`，
+    同时兼容旧的 `MEMORY_RECONCILE_OUT_DIR`）。
+
+    漂移行与表头的识别是可配置的（`--drift-pattern` / `--table-header-pattern`）
+    —— 之前写死中文「漂移」+「❌」，英文输出的对账脚本一律假绿。
+    租户列的位置从表头认（认不到就退回第一列）。
     """
     import shlex
     import tempfile
+    drift_re = drift_re or DRIFT_RE
+    header_re = header_re or HEADER_RE
     out_dir = tempfile.mkdtemp(prefix="reconcile-")
-    env = {**os.environ, "PYTHONUTF8": "1",
-           "MEMORY_RECONCILE_OUT_DIR": out_dir}
+    env = child_env({"REQ_PLAN_RECONCILE_OUT_DIR": out_dir,
+                     "MEMORY_RECONCILE_OUT_DIR": out_dir})
     bin_dir = ws / "node_modules" / ".bin"
     if bin_dir.is_dir():
         env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
-    # 用项目自己的 runner（路径别名要 tsx 才解析）
+    # 用项目自己的 runner（路径别名要 tsx 才解析）—— 不改被调脚本的语义
     parts = shlex.split(cmd)
-    runner = parts[0] if parts else "node"
     prefix = parts
     while prefix and ("*" in prefix[-1] or ".test." in prefix[-1]):
         prefix.pop()
-    if runner in ("node", "tsx", "nodejs"):
-        prefix += ["--experimental-test-coverage"]
-    elif runner == "vitest":
-        prefix += ["--run"]
     try:
         r = subprocess.run(prefix, cwd=ws, capture_output=True, text=True,
                            encoding="utf-8", timeout=timeout, env=env)
     except subprocess.TimeoutExpired:
-        return [], [], "", Path(out_dir)
-    except FileNotFoundError as e:
-        return [], [], "", Path(out_dir)
+        return [], [], [], Path(out_dir), None
+    except FileNotFoundError:
+        return [], [], [], Path(out_dir), None
     text = r.stdout + r.stderr
-    drift = [ln.strip() for ln in text.splitlines()
-             if "漂移" in ln and "❌" in ln]
+    drift = [ln.strip() for ln in text.splitlines() if drift_re.search(ln)]
+    table_rows = [ln.strip() for ln in text.splitlines()
+                  if ln.strip().startswith("|")]
+    # 租户列的位置：从表头认（认不到就退回第一列）
+    tenant_idx: int | None = None
+    for rrow in table_rows:
+        cells = [c.strip() for c in rrow.strip().strip("|").split("|")]
+        for i, c in enumerate(cells):
+            if (tenant_col and c.lower() == tenant_col.lower()) \
+                    or _TENANT_COL_RE.match(c):
+                tenant_idx = i
+                break
+        if tenant_idx is not None:
+            break
     # 一致的租户也留着 —— 只列漂移的会让人以为生产租户也漂了
-    all_rows = [ln.strip() for ln in text.splitlines()
-                if ln.strip().startswith("|") and "一致性" not in ln
-                and "---" not in ln and "租户" not in ln]
+    all_rows = [rrow for rrow in table_rows if not header_re.search(rrow)]
     if not drift and r.returncode != 0:
         # 顺带修一个隐患：出错时这里原来只返回 2 个值，调用方解包会炸
         return [], f"对账脚本退出码 {r.returncode}：\n" + text[-1500:], [], \
-            Path(out_dir)
-    return drift, text, all_rows, Path(out_dir)
+            Path(out_dir), tenant_idx
+    return drift, text, all_rows, Path(out_dir), tenant_idx
 
 
 def _read_csv(path: Path) -> tuple[list[str], list[dict[str, str]]]:
@@ -833,52 +1194,130 @@ def _key_col(cols: list[str]) -> str | None:
     return None
 
 
-def compare_csv_fields(out_dir: Path) -> tuple[list[dict], int]:
-    """成对 CSV 之间做字段级比对，返回 (不一致清单, 比过几对)。"""
-    import csv  # noqa: F401  (被 _read_csv 用)
+# 时间戳类字段 —— 两边天然不同，不算数据不一致
+_TS_COL_RE = re.compile(
+    r"(?:^|_)(?:at|timestamp|time|date)$|"
+    r"^(?:created|updated|deleted|modified|inserted|generated|exported)", re.I)
+# 正文类字段 —— 不一致要人判断（不能自动判 fail）
+_BODY_COL_RE = re.compile(
+    r"(?:^|_)(?:text|content|body|raw|payload|chunk|embedding|vector|"
+    r"doc|document|value)$|^(?:text|content|body|message)$", re.I)
+
+
+def _field_kind(col: str) -> str:
+    """字段分类：ts（时间戳）/ body（正文）/ plain（普通字段）。"""
+    if _TS_COL_RE.search(col):
+        return "ts"
+    if _BODY_COL_RE.search(col):
+        return "body"
+    return "plain"
+
+
+def _csv_pairs(files: list[Path],
+               declared: list[tuple[str, str]] | None = None
+               ) -> list[tuple[Path, Path]]:
+    """CSV 怎么配对。
+
+    优先用**声明的对照关系**（`--csv-pair pg.csv=vec.csv`）；
+    没声明时按"共同列最多的互为最佳"配对 —— 不是两两配对（3 个 CSV
+    会产生 3 组比较，含无关文件对）。
+    """
+    by_name = {p.name: p for p in files}
+    out: list[tuple[Path, Path]] = []
+    used: set[Path] = set()
+    for a, b in (declared or []):
+        pa, pb = by_name.get(a), by_name.get(b)
+        if pa and pb and pa != pb and pa not in used and pb not in used:
+            out.append((pa, pb))
+            used.add(pa)
+            used.add(pb)
+    rest = [p for p in files if p not in used]
+    if len(rest) < 2:
+        return out
+    cols = {p: _read_csv(p)[0] for p in rest}
+    score: dict[tuple[Path, Path], int] = {}
+    for i, a in enumerate(rest):
+        for b in rest[i + 1:]:
+            common = [c for c in cols[a] if c in cols[b]]
+            if not _key_col(common) or len(common) < 2:
+                continue
+            score[(a, b)] = len(common)
+    best: dict[Path, tuple[Path, int]] = {}
+    for (a, b), s in score.items():
+        for x, y in ((a, b), (b, a)):
+            cur = best.get(x)
+            if cur is None or s > cur[1]:
+                best[x] = (y, s)
+    for a, b in score:
+        if best.get(a, (None, 0))[0] == b and best.get(b, (None, 0))[0] == a:
+            out.append((a, b) if str(a) < str(b) else (b, a))
+    return out
+
+
+def compare_csv_fields(out_dir: Path,
+                       declared: list[tuple[str, str]] | None = None,
+                       tenant_col: str | None = None
+                       ) -> tuple[list[dict], list[dict], int, int]:
+    """成对 CSV 之间做字段级比对。
+
+    返回 (普通字段不一致, 正文类不一致, 比过几对, 排除的时间戳字段数)。
+    时间戳类字段排除（两边天然不同）；正文类字段仍报出来，但**不自动判
+    fail** —— 正文不一致要人判断。
+    """
     try:
         files = sorted(p for p in out_dir.iterdir() if p.suffix.lower() == ".csv")
     except OSError:
-        return [], 0
+        return [], [], 0, 0
     if len(files) < 2:
-        return [], 0
-    diffs: list[str] = []
+        return [], [], 0, 0
+    diffs: list[dict] = []
+    body_diffs: list[dict] = []
     pairs = 0
-    for i in range(len(files)):
-        for j in range(i + 1, len(files)):
-            cols_a, rows_a = _read_csv(files[i])
-            cols_b, rows_b = _read_csv(files[j])
-            if not cols_a or not cols_b:
-                continue
-            common = [c for c in cols_a if c in cols_b]
-            key = _key_col(common)
-            if not key or len(common) < 2:
-                continue
-            pairs += 1
-            map_a = {r.get(key, ""): r for r in rows_a}
-            map_b = {r.get(key, ""): r for r in rows_b}
-            fields = [c for c in common if c != key]
-            tcol = next((c for c in fields if _TENANT_COL_RE.match(c)), None)
-            for kid in sorted(set(map_a) & set(map_b)):
-                ra, rb = map_a[kid], map_b[kid]
-                for f in fields:
-                    va = (ra.get(f) or "").strip()
-                    vb = (rb.get(f) or "").strip()
-                    if va == vb:
-                        continue
-                    # 一侧空 vs 另一侧空：空串与缺失都算"同为空"
-                    if not va and not vb:
-                        continue
-                    diffs.append({
-                        "id": kid,
-                        "field": f,
-                        "a": va[:60],
-                        "b": vb[:60],
-                        "tenant": (ra.get(tcol) or "").strip() if tcol else "",
-                        "text": (f"{files[i].name} ↔ {files[j].name}：id={kid} 的 "
-                                 f"{f} 不一致（前者 {va[:40]!r} / 后者 {vb[:40]!r}）"),
-                    })
-    return diffs, pairs
+    ts_skipped = 0
+    for fa, fb in _csv_pairs(files, declared):
+        cols_a, rows_a = _read_csv(fa)
+        cols_b, rows_b = _read_csv(fb)
+        if not cols_a or not cols_b:
+            continue
+        common = [c for c in cols_a if c in cols_b]
+        key = _key_col(common)
+        if not key or len(common) < 2:
+            continue
+        pairs += 1
+        map_a = {r.get(key, ""): r for r in rows_a}
+        map_b = {r.get(key, ""): r for r in rows_b}
+        fields = [c for c in common if c != key]
+        tcol = tenant_col or next(
+            (c for c in fields if _TENANT_COL_RE.match(c)), None)
+        for kid in sorted(set(map_a) & set(map_b)):
+            ra, rb = map_a[kid], map_b[kid]
+            for f in fields:
+                va = (ra.get(f) or "").strip()
+                vb = (rb.get(f) or "").strip()
+                if va == vb:
+                    continue
+                # 一侧空 vs 另一侧空：空串与缺失都算"同为空"
+                if not va and not vb:
+                    continue
+                kind = _field_kind(f)
+                if kind == "ts":
+                    ts_skipped += 1
+                    continue
+                rec = {
+                    "id": kid,
+                    "field": f,
+                    "kind": kind,
+                    "a": va[:60],
+                    "b": vb[:60],
+                    "tenant": (ra.get(tcol) or "").strip() if tcol else "",
+                    "text": (f"{fa.name} ↔ {fb.name}：id={kid} 的 "
+                             f"{f} 不一致（前者 {va[:40]!r} / 后者 {vb[:40]!r}）"),
+                }
+                if kind == "body":
+                    body_diffs.append(rec)
+                else:
+                    diffs.append(rec)
+    return diffs, body_diffs, pairs, ts_skipped
 
 
 # 派生存储（权威在 PG、派生数据在别处 ⇒ 必须能校对）与旁路存储（缓存/队列）
@@ -908,18 +1347,27 @@ def detect_stores(m: Module) -> tuple[list[str], list[str]]:
     return sorted(set(derived)), sorted(set(side))
 
 
-# 测试租户的名字约定（lumen: itest-* / memtest-* / mock-* / eval-*）
+# 测试租户的名字约定（默认；可用 --test-tenant-prefix 覆盖）
 _TEST_TENANT_RE = re.compile(
     r"^(itest|memtest|mock|test|eval|e2e|ci|scratch|probe|tmp|temp)[-_]",
     re.I)
 # 租户列的名字（CSV 里用来定位这条记录属于哪个租户）
 _TENANT_COL_RE = re.compile(r"^(tenant_id|tenantId|tenant)$")
 
+# 对账输出的漂移行识别 —— 可配置（--drift-pattern）。
+# 之前写死「漂移」+「❌」两个中文/符号特征 ⇒ 英文输出的对账脚本一律假绿。
+DRIFT_RE = re.compile(r"❌|漂移|\bdrift(?:ed)?\b|mismatch", re.I)
+# 表格里的表头 / 分隔行 —— 可配置（--table-header-pattern）
+HEADER_RE = re.compile(r"一致性|租户|tenant|---", re.I)
 
-def is_test_tenant(name: str, declared: list[str]) -> bool:
+
+def is_test_tenant(name: str, declared: list[str],
+                   prefixes: list[str] | None = None) -> bool:
     """这个租户是测试专用的吗？
 
     判据：名字像测试租户，或仓库显式声明过（精确名或前缀）。
+    `prefixes` 给了就**替换**内置的测试租户前缀表（默认表是 lumen 的
+    itest-/memtest-/mock-/eval-，别的仓库要用自己的）。
     """
     if not name:
         return False
@@ -928,23 +1376,40 @@ def is_test_tenant(name: str, declared: list[str]) -> bool:
             continue
         if name == d or name.startswith(d):
             return True
+    if prefixes:
+        return any(p and name.startswith(p) for p in prefixes)
     return bool(_TEST_TENANT_RE.match(name))
 
 
-def _tenant_of_row(row: str) -> str:
-    """从对账报告的表格行里取租户名：`| tenant | ... |`"""
+def _tenant_of_row(row: str, idx: int | None = None) -> str:
+    """从对账报告的表格行里取租户名：`| tenant | ... |`
+
+    `idx` 是**单元格**序号（0 起，从表头认）；认不到就退回第一列。
+    """
     parts = row.split("|")
     if len(parts) < 2:
         return ""
-    return parts[1].strip()
+    # parts[0] 是首个 "|" 之前的空串 ⇒ 单元格 i 对应 parts[i+1]
+    i = (idx + 1) if idx is not None else 1
+    if not (0 <= i < len(parts)):
+        i = 1
+    return parts[i].strip()
 
 
 def check_data_flow(m: Module, root: Path,
-                    declared_test_tenants: list[str] | None = None) -> Check:
+                    declared_test_tenants: list[str] | None = None,
+                    drift_re: "re.Pattern | None" = None,
+                    header_re: "re.Pattern | None" = None,
+                    tenant_prefixes: list[str] | None = None,
+                    csv_pairs: list[tuple[str, str]] | None = None,
+                    tenant_col: str | None = None) -> Check:
     """D1 数据流一致 —— 实跑模块自己的对账机制。
 
     判交付只看**生产租户**：测试租户的状态是信息，不是阻塞项
     （测试用例常刻意注入失败态/直接插库占位）。
+
+    漂移/表头/租户列/测试租户前缀/CSV 对照关系都可配置 —— 之前写死
+    一种中文方言，别的仓库要么假绿要么假红。
     """
     declared_test_tenants = declared_test_tenants or []
     stores = []
@@ -975,80 +1440,116 @@ def check_data_flow(m: Module, root: Path,
         return Check("data-flow", "数据流一致（跨存储对账）", "skipped",
                      "模块只碰了 PG 一个存储 —— 没有派生层要跨存储校对", stores,
                      "若其实还有第二个存储（向量库/对象存储），"
-                     "先让工具认出来再判")
+                     "先让工具认出来再判",
+                     evidence_kind="untested")
     drift_all: list[str] = []
     notes: list[str] = []
     clean: list[str] = []
-    field_diffs: list[str] = []
+    field_diffs: list[dict] = []
+    body_diffs: list[dict] = []
     pairs_checked = 0
+    ts_skipped = 0
+    tenant_idx: int | None = None
     for ws, name, cmd in reconcilers:
-        drift, text, rows, out_dir = run_reconciler(m, ws, name, cmd)
+        drift, text, rows, out_dir, tidx = run_reconciler(
+            m, ws, name, cmd, drift_re=drift_re, header_re=header_re,
+            tenant_col=tenant_col)
+        if tenant_idx is None:
+            tenant_idx = tidx
         drift_all += drift
         clean += [r for r in rows if r not in drift]
         notes.append(f"{name}：{len(drift)} 个租户漂移")
         # 字段级：同一个 id 在两个存储里的同一个字段对不上
-        diffs, pairs = compare_csv_fields(out_dir)
+        diffs, bodies, pairs, ts_n = compare_csv_fields(
+            out_dir, csv_pairs, tenant_col)
         pairs_checked += pairs
+        ts_skipped += ts_n
         field_diffs += diffs
+        body_diffs += bodies
     # 按租户口径拆：生产租户的漂移才阻塞交付
     prod_drift = [r for r in drift_all
-                  if not is_test_tenant(_tenant_of_row(r), declared_test_tenants)]
+                  if not is_test_tenant(_tenant_of_row(r, tenant_idx),
+                                        declared_test_tenants,
+                                        tenant_prefixes)]
     test_drift = [r for r in drift_all
-                  if is_test_tenant(_tenant_of_row(r), declared_test_tenants)]
+                  if is_test_tenant(_tenant_of_row(r, tenant_idx),
+                                    declared_test_tenants,
+                                    tenant_prefixes)]
     prod_fields = [d for d in field_diffs
                    if not is_test_tenant(d.get("tenant", ""),
-                                         declared_test_tenants)]
+                                         declared_test_tenants,
+                                         tenant_prefixes)]
     test_fields = [d for d in field_diffs
-                   if is_test_tenant(d.get("tenant", ""), declared_test_tenants)]
+                   if is_test_tenant(d.get("tenant", ""), declared_test_tenants,
+                                     tenant_prefixes)]
+    prod_body = [d for d in body_diffs
+                 if not is_test_tenant(d.get("tenant", ""),
+                                       declared_test_tenants,
+                                       tenant_prefixes)]
+    test_body = [d for d in body_diffs
+                 if is_test_tenant(d.get("tenant", ""), declared_test_tenants,
+                                   tenant_prefixes)]
+    pair_note = (f"比了 {pairs_checked} 对存储导出"
+                 + (f"（排除了 {ts_skipped} 个时间戳类字段）" if ts_skipped else "")
+                 if pairs_checked
+                 else "字段级**无法比对**（没找到成对的 CSV 导出）")
 
     if prod_fields:
         return Check("data-flow", "数据流一致（跨存储对账）", "fail",
                      f"生产租户有 {len(prod_fields)} 处跨存储字段不一致"
-                     f"（比了 {pairs_checked} 对存储导出）",
+                     f"（{pair_note}）",
                      [d["text"] for d in prod_fields[:10]],
                      "同一 id 在两个存储里的同一字段值不同 ⇒ 读到的和写下的不是"
-                     "同一份数据（常见原因：截断、归一化不一致、写路径漏更新）")
+                     "同一份数据（常见原因：截断、归一化不一致、写路径漏更新）",
+                     evidence_kind="executed")
     if prod_drift:
         return Check("data-flow", "数据流一致（跨存储对账）", "fail",
                      f"{len(prod_drift)} 个**生产租户**的数据流漂移"
                      + (f"（另有 {len(test_drift)} 个测试租户漂移，不阻塞交付）"
                         if test_drift else "")
-                     + f"；字段级比对 {pairs_checked} 对无差异",
+                     + f"；{pair_note}"
+                     + (f"，{len(prod_body)} 处正文类字段不一致（需人工判断）"
+                        if prod_body else ""),
                      prod_drift[:10] + clean[:6],
                      "缺向量⇒召不回；多余向量⇒占 top-K 名额后被 join 丢掉；"
-                     "正文不一致⇒索引的是旧正文")
-    if test_drift or test_fields:
+                     "正文不一致⇒索引的是旧正文",
+                     evidence_kind="executed")
+    if prod_body:
+        # 正文类字段不一致 —— 报给人判断，**不自动判 fail**
+        return Check("data-flow", "数据流一致（跨存储对账）", "warn",
+                     f"生产租户有 {len(prod_body)} 处跨存储字段不一致"
+                     f"（正文类字段，需人工判断；{pair_note}）",
+                     [d["text"] for d in prod_body[:10]],
+                     "正文类字段（正文/向量/负载）不一致不自动判 fail —— "
+                     "仓库自己的对账脚本知道那些取舍，需要人判断是索引旧正文"
+                     "还是写路径漏更新",
+                     evidence_kind="executed")
+    if test_drift or test_fields or test_body:
         return Check("data-flow", "数据流一致（跨存储对账）", "warn",
                      f"生产租户一致；{len(test_drift)} 个测试租户有漂移"
                      + (f"、{len(test_fields)} 处字段不一致" if test_fields else "")
                      + "（测试夹具状态，不阻塞交付）",
-                     test_drift[:6] + [d["text"] for d in test_fields[:4]],
+                     test_drift[:6] + [d["text"] for d in test_fields[:4]]
+                     + [d["text"] for d in test_body[:4]],
                      "确认两件事：①这些租户不会流进生产；"
                      "②状态是刻意的失败注入/直接插库占位（不是漏镜像）。"
-                     "认错了用 --test-tenant 声明")
+                     "认错了用 --test-tenant 声明",
+                     evidence_kind="executed")
     return Check("data-flow", "数据流一致（跨存储对账）", "pass",
                  f"实跑了 {len(reconcilers)} 个对账脚本，生产租户无漂移"
-                 + (f"（字段级比对 {pairs_checked} 对无差异）" if pairs_checked
-                    else ""),
-                 notes)
+                 + (f"（{pair_note}）" if pairs_checked else f"；{pair_note}"),
+                 notes,
+                 evidence_kind="executed")
 
 
 def check_data_accuracy(m: Module, root: Path) -> Check:
     """D2 数据准确性 —— 实跑项目的基线对拍。"""
-    cands: list[tuple[Path, str, str]] = []
-    for ws, pkg in _workspace_manifests(root):
-        for name, cmd in (pkg.get("scripts") or {}).items():
-            if not isinstance(cmd, str) or not isinstance(name, str):
-                continue
-            low = name.lower()
-            if "baseline" in low and ("check" in low or cmd.endswith("--check")):
-                cands.append((ws, name, cmd))
-            elif "eval" in low and "check" in low:
-                cands.append((ws, name, cmd))
+    cands = find_baseline_scripts(m, root)
     if not cands:
         return Check("data-accuracy", "数据准确（基线对拍）", "skipped",
                      "项目里没有基线对拍脚本",
-                     fix="加一个：当前指标对拍已提交基线，低于阈值就红")
+                     fix="加一个：当前指标对拍已提交基线，低于阈值就红",
+                     evidence_kind="untested")
     import shlex
     fails: list[str] = []
     notes: list[str] = []
@@ -1058,7 +1559,7 @@ def check_data_accuracy(m: Module, root: Path) -> Check:
         prefix = parts
         while prefix and ("*" in prefix[-1] or ".test." in prefix[-1]):
             prefix.pop()
-        env = {**os.environ, "PYTHONUTF8": "1"}
+        env = child_env()
         bin_dir = ws / "node_modules" / ".bin"
         if bin_dir.is_dir():
             env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
@@ -1086,15 +1587,18 @@ def check_data_accuracy(m: Module, root: Path) -> Check:
     if fails:
         return Check("data-accuracy", "数据准确（基线对拍）", "fail",
                      f"{len(fails)} 项指标不达标/回归", fails[:10],
-                     "修数据或更新基线（先确认是缺陷还是基线过期）")
+                     "修数据或更新基线（先确认是缺陷还是基线过期）",
+                     evidence_kind="executed")
     if skipped and not notes:
         return Check("data-accuracy", "数据准确（基线对拍）", "skipped",
                      "基线对拍没跑成（不是数据回归，是没产物）", skipped[:6],
-                     "先跑对应的 eval 套件产出 artifacts，再对拍基线")
+                     "先跑对应的 eval 套件产出 artifacts，再对拍基线",
+                     evidence_kind="executed")
     return Check("data-accuracy", "数据准确（基线对拍）", "pass",
                  f"实跑了 {len(cands)} 个基线对拍脚本，通过 {len(notes)} 个"
                  + (f"，{len(skipped)} 个没跑成" if skipped else ""),
-                 notes + skipped[:4])
+                 notes + skipped[:4],
+                 evidence_kind="executed")
 
 
 # 测试往**库**里写数据的痕迹。
@@ -1168,27 +1672,48 @@ def check_test_hygiene(m: Module) -> Check:
 
 
 def check_tests_green(failed: list[str],
-                     setup_errors: list[str] | None = None) -> Check:
+                     setup_errors: list[str] | None = None,
+                     tests_found: bool = True,
+                     tests_ran: bool = True) -> Check:
     """R0 测试全绿 —— 测试红着就没有"达到交付条件"可言。
 
     只认**断言失败**（FAILED）。setup 报错（fixture/环境没就绪，例：连不上
     PG）不是断言失败 —— 那是"环境没准备好"，判 skipped 并说清缺什么。
+
+    **一个测试文件都没找到**时判 skipped（不是 pass）—— 之前这里直接
+    返回"没有失败用例"⇒ pass，于是零测试的模块被判"达到交付条件"。
+    找到测试文件但这次没跑起来（runner 缺失 / 只有真后端车道）同样判不了。
     """
     setup_errors = setup_errors or []
+    if not tests_found:
+        return Check("tests-green", "测试全绿", "skipped",
+                     "没有找到任何测试文件 —— 无法判定测试是否绿",
+                     ["模块目录与仓库级 test/ tests/ spec/ 下都没有测试文件"],
+                     "先写测试（或用 --test-dir 指到测试目录），再判交付",
+                     evidence_kind="untested")
+    if not tests_ran:
+        return Check("tests-green", "测试全绿", "skipped",
+                     "找到测试文件但这次一个都没跑起来 —— 无法判定测试是否绿",
+                     ["测试命令跑不起来 / 只有真后端车道（要 --include-itest）"],
+                     "把项目的 test 命令跑通（能用的 runner + 依赖），再判交付",
+                     evidence_kind="untested")
     if not failed:
         if setup_errors:
             return Check("tests-green", "测试全绿", "skipped",
                          f"{len(setup_errors)} 个用例 setup 报错（环境/依赖没就绪）"
                          f" —— 不是断言失败，判不了",
                          setup_errors[:10],
-                         "先把环境准备好（数据库/中间件/依赖），再判测试绿不绿")
-        return Check("tests-green", "测试全绿", "pass", "没有失败用例")
+                         "先把环境准备好（数据库/中间件/依赖），再判测试绿不绿",
+                         evidence_kind="executed")
+        return Check("tests-green", "测试全绿", "pass", "没有失败用例",
+                     evidence_kind="executed")
     return Check("tests-green", "测试全绿", "fail",
                  f"{len(failed)} 个用例失败"
                  + (f"（另有 {len(setup_errors)} 个用例 setup 报错，"
                     f"环境没就绪）" if setup_errors else ""),
                  failed[:10],
-                 "先修到全绿 —— 红的测试不能交付")
+                 "先修到全绿 —— 红的测试不能交付",
+                 evidence_kind="executed")
 
 
 # Python 模块级 def/class（公开的）—— Python 的"导出"
@@ -1257,7 +1782,7 @@ def run_python_coverage(m: Module, root: Path, timeout: int = 600
     cmd = [exe, f"--cov={pkg.name}", f"--cov-report=json:{out_dir}/cov.json",
            "-q"]
     cmd += tests or ["."]
-    env = {**os.environ, "PYTHONUTF8": "1"}
+    env = child_env()
     try:
         r = subprocess.run(cmd, cwd=root, capture_output=True, text=True,
                            encoding="utf-8", timeout=timeout, env=env)
@@ -1336,7 +1861,11 @@ def check_coverage(m: Module, cov: dict, raw_note: str,
                    runner_note: str = "",
                    lane_notes: list[str] | None = None,
                    itest_cov: dict[str, dict] | None = None,
-                   itest_notes: list[str] | None = None) -> Check:
+                   itest_notes: list[str] | None = None,
+                   min_line: float | None = None,
+                   min_branch: float | None = None,
+                   repo_threshold: tuple[float | None, float | None] | None = None
+                   ) -> Check:
     """R1 核心逻辑测试到位 —— 实测覆盖率。
 
     覆盖率判定当前只实现 JS/TS 的（node --experimental-test-coverage /
@@ -1345,32 +1874,70 @@ def check_coverage(m: Module, cov: dict, raw_note: str,
     门槛归仓库所有：仓库有自己的覆盖率闸门 ⇒ **用仓库的阈值**（它把文件按
     "只测自己那批"分闸，每闸自带阈值）⇒ 通用阈值在这里是错的
     （例：service.ts 行 56%，仓库 service 闸的阈值是 49 ⇒ 仓库认为合格）。
+    仓库在 `pyproject.toml` 里声明的 `fail_under` 同样是仓库的口径。
+
+    **没有仓库闸门、又没显式给阈值时判 skipped**（"缺少判据"）——
+    通用阈值 80/70 与文档矛盾，且会把仓库明确允许的文件判红。
+    要用通用阈值就显式 `--min-line-coverage`。
 
     真后端（itest）车道的覆盖**并进来**（逐文件取大 = 并集语义），两条车道
     分开报 —— 混成一个数会让人以为是一个口径。
     """
-    if m.lang == "py":
-        if not cov:
-            return Check("coverage", "核心逻辑测试到位", "skipped",
-                         raw_note or "没拿到 Python 覆盖率",
-                         fix="装 pytest-cov，确认 .venv/bin/pytest 可用")
-        vals = [v for k, v in cov.items() if k != "__all__"]
-        avg = sum(v["line"] for v in vals) / len(vals) if vals else 0
-        low = [(k, v) for k, v in cov.items()
-               if k != "__all__" and (v["line"] < 80 or v["branch"] < 70)]
-        ev = [f"{k}: 行{v['line']:.0f}% 分支{v['branch']:.0f}%"
-              for k, v in sorted(cov.items(), key=lambda kv: kv[1]["line"])[:10]
-              if k != "__all__"]
-        if low:
-            return Check("coverage", "核心逻辑测试到位", "fail",
-                         f"平均行覆盖 {avg:.0f}%；{len(low)}/{len(vals)} 个文件"
-                         f"低于门槛（行<80% 或 分支<70%）",
-                         ev, "补测试把低覆盖的文件拉过门槛")
-        return Check("coverage", "核心逻辑测试到位", "pass",
-                     f"平均行覆盖 {avg:.0f}%（pytest-cov 实跑）", ev)
+    repo_line, repo_branch = repo_threshold or (None, None)
+    thr_line = repo_line if repo_line is not None else min_line
+    thr_branch = repo_branch if repo_branch is not None else min_branch
+    thr_note = ""
+    if thr_line is not None or thr_branch is not None:
+        thr_note = (f"行<{thr_line:g}%" if thr_line is not None else "") + \
+                   (f" 分支<{thr_branch:g}%" if thr_branch is not None else "")
+        thr_note = thr_note.strip()
     lane_notes = lane_notes or []
     itest_cov = itest_cov or {}
     itest_notes = itest_notes or []
+    if m.lang == "py":
+        if not cov and not lane_notes:
+            return Check("coverage", "核心逻辑测试到位", "skipped",
+                         raw_note or "没拿到 Python 覆盖率",
+                         fix="装 pytest-cov，确认 .venv/bin/pytest 可用",
+                         evidence_kind="executed")
+        vals = [v for k, v in cov.items() if k != "__all__"]
+        avg = sum(v["line"] for v in vals) / len(vals) if vals else 0
+        ev = [f"{k}: 行{v['line']:.0f}% 分支{v['branch']:.0f}%"
+              for k, v in sorted(cov.items(), key=lambda kv: kv[1]["line"])[:10]
+              if k != "__all__"]
+        if lane_notes:
+            # 仓库自己的闸门 ⇒ 判定看闸门（它的阈值是权威），不套通用阈值
+            # 闸门说明的前缀是脚本名（"make coverage: ✗ 未达阈值"）⇒ 用 in 不用
+            # startswith —— startswith 永远不匹配 ⇒ 闸门红了也报「全过」
+            bad = [x for x in lane_notes if "✗" in x]
+            if bad:
+                return Check("coverage", "核心逻辑测试到位", "fail",
+                             f"仓库自己的覆盖率闸门有 {len(bad)} 个没过",
+                             lane_notes + ev[:6],
+                             "按闸的阈值补测试（阈值在闸门脚本或 pyproject 里）",
+                             evidence_kind="executed")
+            return Check("coverage", "核心逻辑测试到位", "pass",
+                         "仓库自己的覆盖率闸门全过", lane_notes + ev[:6],
+                         evidence_kind="executed")
+        if thr_line is None and thr_branch is None:
+            return Check("coverage", "核心逻辑测试到位", "skipped",
+                         f"仓库没有覆盖率闸门，缺少判据（pytest-cov 实测平均行覆盖 "
+                         f"{avg:.0f}%）；通用阈值默认不阻塞",
+                         ev,
+                         "补测试把低覆盖的文件拉过门槛，或让仓库声明自己的闸门"
+                         "（要按通用阈值判就加 --min-line-coverage）",
+                         evidence_kind="executed")
+        low = [(k, v) for k, v in cov.items()
+               if k != "__all__" and _below_threshold(v, thr_line, thr_branch)]
+        if low:
+            return Check("coverage", "核心逻辑测试到位", "fail",
+                         f"平均行覆盖 {avg:.0f}%；{len(low)}/{len(vals)} 个文件"
+                         f"低于门槛（{thr_note}）",
+                         ev, "补测试把低覆盖的文件拉过门槛",
+                         evidence_kind="executed")
+        return Check("coverage", "核心逻辑测试到位", "pass",
+                     f"平均行覆盖 {avg:.0f}%（pytest-cov 实跑，门槛 {thr_note}）", ev,
+                     evidence_kind="executed")
     merged: dict[str, dict] = {}
     for k, v in cov.items():
         if k == "__all__":
@@ -1392,6 +1959,34 @@ def check_coverage(m: Module, cov: dict, raw_note: str,
     elif m.itests:
         itest_lane_note = (f"（另有 {len(m.itests)} 个 itest 真后端用例未计入 "
                            f"本覆盖率 —— 它们的覆盖要跑 --include-itest 才看得到）")
+    avg_line = (sum(v["line"] for v in merged.values()) / len(merged)
+                if merged else 0)
+    avg_branch = (sum(v["branch"] for v in merged.values()) / len(merged)
+                  if merged else 0)
+    ev = [f"{k}: 行{v['line']:.0f}% 分支{v['branch']:.0f}% 函数{v['func']:.0f}%"
+          for k, v in sorted(merged.items(), key=lambda kv: kv[1]["line"])[:10]]
+    if lane_notes:
+        # 仓库自己的闸门 ⇒ 判定看闸门（它的阈值是权威），不套通用阈值。
+        # 闸门的退出码就是结论 —— 哪怕它的覆盖率表没被解析出来。
+        # 闸门说明的前缀是脚本名（"make coverage: ✗ 未达阈值"）⇒ 用 in 不用
+        # startswith —— startswith 永远不匹配 ⇒ 闸门红了也报「全过」
+        bad = [x for x in lane_notes if "✗" in x]
+        if bad:
+            return Check("coverage", "核心逻辑测试到位", "fail",
+                         f"仓库自己的覆盖率闸门有 {len(bad)} 个没过"
+                         + (f"（平均行覆盖 {avg_line:.0f}% / 分支 {avg_branch:.0f}%）"
+                            if merged else "")
+                         + " " + itest_lane_note,
+                         lane_notes + ev[:6],
+                         "按闸的阈值补测试（阈值在脚本命令里）",
+                         evidence_kind="executed")
+        return Check("coverage", "核心逻辑测试到位", "pass",
+                     "仓库自己的覆盖率闸门全过"
+                     + (f"（平均行覆盖 {avg_line:.0f}% / 分支 {avg_branch:.0f}%）"
+                        if merged else "")
+                     + " " + itest_lane_note,
+                     lane_notes + ev[:6],
+                     evidence_kind="executed")
     if not merged:
         # 覆盖率没拿到时，**真后端车道的状态仍要说出来**（别把它连同
         # 说明一起吞掉 —— 那是本次判定里唯一的真后端证据）
@@ -1399,36 +1994,43 @@ def check_coverage(m: Module, cov: dict, raw_note: str,
         return Check("coverage", "核心逻辑测试到位", "skipped",
                      (raw_note or "没能拿到覆盖率") + " " + runner_note + extra,
                      itest_notes,
-                     fix="先让模块的测试能独立跑起来")
-    avg_line = sum(v["line"] for v in merged.values()) / len(merged)
-    avg_branch = sum(v["branch"] for v in merged.values()) / len(merged)
-    ev = [f"{k}: 行{v['line']:.0f}% 分支{v['branch']:.0f}% 函数{v['func']:.0f}%"
-          for k, v in sorted(merged.items(), key=lambda kv: kv[1]["line"])[:10]]
-    if lane_notes:
-        # 仓库自己的闸门 ⇒ 判定看闸门（它的阈值是权威），不套通用阈值
-        bad = [x for x in lane_notes if x.startswith("✗")]
-        if bad:
-            return Check("coverage", "核心逻辑测试到位", "fail",
-                         f"仓库自己的覆盖率闸门有 {len(bad)} 个没过"
-                         f"（平均行覆盖 {avg_line:.0f}% / 分支 {avg_branch:.0f}%）"
-                         + " " + itest_lane_note,
-                         lane_notes + ev[:6],
-                         "按闸的阈值补测试（阈值在脚本命令里）")
-        return Check("coverage", "核心逻辑测试到位", "pass",
-                     f"仓库自己的覆盖率闸门全过（平均行覆盖 {avg_line:.0f}% / "
-                     f"分支 {avg_branch:.0f}%）" + " " + itest_lane_note,
-                     lane_notes + ev[:6])
+                     fix="先让模块的测试能独立跑起来",
+                     evidence_kind="executed")
+    if thr_line is None and thr_branch is None:
+        # 没有仓库闸门、也没显式阈值 ⇒ 缺少判据，不拿通用阈值判 fail
+        return Check("coverage", "核心逻辑测试到位", "skipped",
+                     f"仓库没有覆盖率闸门，缺少判据（实测平均行覆盖 "
+                     f"{avg_line:.0f}% / 分支 {avg_branch:.0f}%）；"
+                     f"通用阈值默认不阻塞" + " " + runner_note
+                     + " " + itest_lane_note,
+                     ev,
+                     "补测试把低覆盖的文件拉过门槛，或让仓库声明自己的闸门"
+                     "（要按通用阈值判就加 --min-line-coverage）",
+                     evidence_kind="executed")
     low = [(k, v) for k, v in merged.items()
-           if v["line"] < 80 or v["branch"] < 70]
+           if _below_threshold(v, thr_line, thr_branch)]
     if low:
         return Check("coverage", "核心逻辑测试到位", "fail",
                      f"平均行覆盖 {avg_line:.0f}% / 分支 {avg_branch:.0f}%；"
-                     f"{len(low)}/{len(merged)} 个文件低于门槛（行<80% 或 分支<70%）"
+                     f"{len(low)}/{len(merged)} 个文件低于门槛（{thr_note}）"
                      + " " + runner_note + " " + itest_lane_note,
-                     ev, "补测试把低覆盖的文件拉过门槛")
+                     ev, "补测试把低覆盖的文件拉过门槛",
+                     evidence_kind="executed")
     return Check("coverage", "核心逻辑测试到位", "pass",
                  f"平均行覆盖 {avg_line:.0f}% / 分支 {avg_branch:.0f}%"
-                 + " " + runner_note + " " + itest_lane_note, ev)
+                 f"（门槛 {thr_note}）"
+                 + " " + runner_note + " " + itest_lane_note, ev,
+                 evidence_kind="executed")
+
+
+def _below_threshold(v: dict, thr_line: float | None,
+                     thr_branch: float | None) -> bool:
+    """这个文件的覆盖率低于门槛吗。"""
+    if thr_line is not None and v["line"] < thr_line:
+        return True
+    if thr_branch is not None and v["branch"] < thr_branch:
+        return True
+    return False
 
 
 _EXPORT_FN_RE = re.compile(
@@ -1464,7 +2066,8 @@ def _check_py_exports(m: Module, root: Path) -> Check:
     exports = python_exports(m)
     if not exports:
         return Check("uncovered-exports", "导出的逻辑都有测试", "skipped",
-                     "这个模块没有公开的 def/class")
+                     "这个模块没有公开的 def/class",
+                     evidence_kind="untested")
     _, test_dirs = python_test_cmd(m, root)
     test_text = ""
     for d in test_dirs:
@@ -1474,9 +2077,18 @@ def _check_py_exports(m: Module, root: Path) -> Check:
                     test_text += p.read_text(encoding="utf-8", errors="replace")
                 except OSError:
                     pass
+    # 仓库级测试目录（test/ tests/ spec/）里的用例也算
+    for p in m.repo_tests:
+        if p.suffix != ".py":
+            continue
+        try:
+            test_text += p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
     if not test_text:
         return Check("uncovered-exports", "导出的逻辑都有测试", "skipped",
-                     "没找到 Python 测试文件（test/ 或 tests/ 下没有 test_*.py）")
+                     "没找到 Python 测试文件（test/ 或 tests/ 下没有 test_*.py）",
+                     evidence_kind="untested")
     zero = [k for k in exports if not re.search(r"\b" + re.escape(k) + r"\b",
                                                  test_text)]
     if zero:
@@ -1506,9 +2118,12 @@ def check_uncovered_exports(m: Module, idx: RepoIndex) -> Check:
     exports = {k: v for k, v in exports.items() if k not in support_names}
     if not exports:
         return Check("uncovered-exports", "导出的逻辑都有测试", "skipped",
-                     "这个模块没有导出的函数/类")
+                     "这个模块没有导出的函数/类",
+                     evidence_kind="untested")
     test_text = ""
-    for t in m.tests + m.itests:
+    # 仓库级测试目录（test/ tests/ spec/）里的用例也算 —— 之前只看模块
+    # 目录内的测试 ⇒ 标准 test/ 布局的仓库被误判成"导出零引用"
+    for t in m.tests + m.itests + m.repo_tests:
         try:
             test_text += t.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -1524,15 +2139,46 @@ def check_uncovered_exports(m: Module, idx: RepoIndex) -> Check:
                  f"{len(exports)} 个运行时导出都有测试引用")
 
 
+# 模块里出现租户字段 ⇒ 这个模块是租户隔离的（否则不要求租户列）
+_TENANT_HINT_RE = re.compile(r"\b(tenant_id|tenantId|tenant|org_id|orgId|"
+                             r"organization_id|workspace_id)\b")
+# 全局配置表 —— 不是业务数据，不要求租户列/唯一约束
+_CONFIG_TABLE_RE = re.compile(
+    r"(^|_)(config|configs|setting|settings|meta|metadata|migrations|"
+    r"schema_version|kv|feature_flag|feature_flags)(_|$)", re.I)
+# 日志/追加型表 —— 本来就会重复，不要求唯一约束
+_APPEND_TABLE_RE = re.compile(
+    r"(^|_)(log|logs|audit|audits|history|trace|event_log|append|append_only|"
+    r"journal)(_|$)", re.I)
+
+
 def check_schema(m: Module, facts: dict) -> Check:
-    """R3/R6 表设计 —— 查 PG catalog 的真实结构。"""
+    """R3/R6 表结构 —— 查 PG catalog 的真实结构。
+
+    判的是**自家五条规则**（主键/唯一约束/租户列/RLS/时间戳时区），
+    不是"主流" ⇒ 判据名是"表结构基本合规"，证据里说清查了哪几条。
+
+    租户列与唯一约束有豁免：单租户模块（模块里没有租户字段）、
+    全局配置表、日志/追加型表 —— 之前无条件要求 ⇒ 单租户仓库必假红。
+    """
     if not facts:
-        return Check("schema", "表设计符合主流", "skipped",
+        return Check("schema", "表结构基本合规", "skipped",
                      "没连上数据库（或模块不碰 PG）",
-                     fix="设好 POSTGRES_URL 再跑")
+                     fix="设好 POSTGRES_URL 再跑",
+                     evidence_kind="untested")
+    tenant_scoped = False
+    for p in m.sources:
+        try:
+            if _TENANT_HINT_RE.search(
+                    p.read_text(encoding="utf-8", errors="replace")):
+                tenant_scoped = True
+                break
+        except OSError:
+            continue
     problems: list[str] = []
     ev: list[str] = []
     missing: list[str] = []
+    exemptions: list[str] = []
     for tbl, f in facts.items():
         cols = {}
         for c in f["columns"]:
@@ -1544,16 +2190,30 @@ def check_schema(m: Module, facts: dict) -> Check:
             # 报红会让人去改表设计，而真正的问题在连接串。
             missing.append(tbl)
             continue
+        is_config = bool(_CONFIG_TABLE_RE.search(tbl))
+        is_append = bool(_APPEND_TABLE_RE.search(tbl))
+        # 豁免：单租户模块（没有租户列体系）、全局配置表、日志/追加型表
+        # —— 这三类无条件要求租户列/唯一约束 ⇒ 必假红
+        exempt = (not tenant_scoped) or is_config or is_append
+        why = ("单租户模块，模块里没有租户字段" if not tenant_scoped else
+               "全局配置表" if is_config else "追加型表")
         # 主键：pg_indexes.indexdef 里没有 "PRIMARY KEY" 字样（那是 \d 的
         # 输出），主键索引名以 _pkey 结尾
         if not any("_pkey" in ix for ix in f["indexes"]):
             problems.append(f"{tbl}: 没有主键")
         # 租户列（多租户表）
-        if not any(k in cols for k in ("tenant_id", "tenantId", "org_id")):
-            problems.append(f"{tbl}: 没有租户列")
+        has_tenant = any(k in cols for k in ("tenant_id", "tenantId", "org_id"))
+        if not has_tenant:
+            if exempt:
+                exemptions.append(f"{tbl}: 租户列（{why}）")
+            else:
+                problems.append(f"{tbl}: 没有租户列")
         # 唯一约束
         if not any("UNIQUE" in ix for ix in f["indexes"]):
-            problems.append(f"{tbl}: 没有唯一约束（并发写入会落重复行）")
+            if exempt:
+                exemptions.append(f"{tbl}: 唯一约束（{why}）")
+            else:
+                problems.append(f"{tbl}: 没有唯一约束（并发写入会落重复行）")
         # 时间戳用 timestamptz（避免时区歧义）
         for name, parts in cols.items():
             dtype = parts[2] if len(parts) > 2 else ""
@@ -1570,20 +2230,27 @@ def check_schema(m: Module, facts: dict) -> Check:
             problems.append(f"{tbl}: 有策略但 RLS 没开")
         ev.append(f"{tbl}: {len(cols)} 列 / {len(f['indexes'])} 索引 / "
                   f"{len(f['policies'])} 策略 / RLS={f['rls'] or '未开'}")
+    checked = ("查了：主键 / 租户列 / 唯一约束 / 时间戳时区 / RLS"
+               + ("（本模块是租户隔离的）" if tenant_scoped else "（单租户模块）"))
+    if exemptions:
+        ev.append("豁免：" + "；".join(exemptions[:6]))
     if missing:
         # 表没在连的库里找到 ⇒ 这批表的判定**没实测**，不算缺陷
         problems = [p for p in problems if not any(p.startswith(t + ":") for t in missing)]
         if not problems:
-            return Check("schema", "表设计符合主流", "skipped",
+            return Check("schema", "表结构基本合规", "skipped",
                          f"{len(missing)} 张表在连的库里没找到（可能连错库）",
                          [f"{t}: 表在库里不存在" for t in missing],
-                         "确认 POSTGRES_URL 指向的库里有这些表，再跑一次")
+                         "确认 POSTGRES_URL 指向的库里有这些表，再跑一次",
+                         evidence_kind="untested")
     if problems:
-        return Check("schema", "表设计符合主流", "fail",
+        return Check("schema", "表结构基本合规", "fail",
                      f"{len(problems)} 处问题", ev + problems[:8],
-                     "补主键/唯一约束/租户列/RLS，或把表移出多租户范围")
-    return Check("schema", "表设计符合主流", "pass",
-                 f"{len(facts)} 张表都合规", ev)
+                     "补主键/唯一约束/租户列/RLS，或把表移出多租户范围",
+                     evidence_kind="executed")
+    return Check("schema", "表结构基本合规", "pass",
+                 f"{len(facts)} 张表都合规", ev + [checked],
+                 evidence_kind="executed")
 
 
 def check_reconcile(m: Module) -> Check:
@@ -1606,7 +2273,8 @@ def check_requirement(m: Module, plan_path: str | None) -> Check:
     """R7 需求覆盖 —— 计划里的每条不变式都要有真实用例。"""
     if not plan_path:
         return Check("requirement", "需求覆盖到位", "skipped",
-                     "没给计划文件（--plan）")
+                     "没给计划文件（--plan）",
+                     evidence_kind="untested")
     pp = Path(plan_path)
     if not pp.is_absolute() and not pp.exists():
         pp = m.root / pp
@@ -1644,24 +2312,43 @@ def check_requirement(m: Module, plan_path: str | None) -> Check:
                  [f"{i}: {d[:40]}" for i, d, _ in plan.invariants[:6]])
 
 
+def _module_exports_any(m: Module) -> dict[str, str]:
+    """模块的导出符号（Python 用公开 def/class，TS 用 export）。"""
+    if m.lang == "py":
+        return python_exports(m)
+    return module_exports(m)
+
+
 def check_extensibility(m: Module, idx: RepoIndex) -> Check:
-    """R8 扩展性 —— 导出符号几乎没人用。"""
-    exports = module_exports(m)
+    """R8 不过度抽象 —— 导出符号几乎没人用（规则之三）。
+
+    之前叫"具备扩展性"，但它测的是"有没有过度抽象" ⇒ 名字反了。
+    Python 下导出集为空时不能判 pass（那是零分析的正面结论）。
+    """
+    exports = _module_exports_any(m)
+    if not exports:
+        return Check("extensibility", "不过度抽象", "skipped",
+                     "这个模块没有可分析的导出符号（零分析 ⇒ 不给结论）",
+                     evidence_kind="untested")
     thin = [f"{nm}（全仓 {idx.tokens[nm]} 处引用）"
             for nm in sorted(exports)
             if idx.tokens[nm] <= 2]
     if thin:
-        return Check("extensibility", "具备扩展性（不过度抽象）", "warn",
+        return Check("extensibility", "不过度抽象", "warn",
                      f"{len(thin)}/{len(exports)} 个导出符号几乎没有调用点",
                      thin[:8],
                      "规则之三：抽象要等第三个用例；只有一个调用点先内联")
-    return Check("extensibility", "具备扩展性（不过度抽象）", "pass",
+    return Check("extensibility", "不过度抽象", "pass",
                  f"{len(exports)} 个导出符号都有多个调用点")
 
 
 def check_no_wheels(m: Module, idx: RepoIndex) -> Check:
     """R9 没有重复造轮子 —— 全仓同名导出（排除通用名与测试文件）。"""
-    own = module_exports(m)
+    own = _module_exports_any(m)
+    if not own:
+        return Check("no-wheels", "没有重复造轮子", "skipped",
+                     "这个模块没有可分析的导出符号（零分析 ⇒ 不给结论）",
+                     evidence_kind="untested")
     dup: list[str] = []
     for nm, where in sorted(own.items()):
         if nm.lower() in _GENERIC_NAMES or len(nm) < 5:
@@ -1680,7 +2367,7 @@ def check_no_wheels(m: Module, idx: RepoIndex) -> Check:
                      dup[:8],
                      "是同一件事就复用；不同领域同名可以放过")
     return Check("no-wheels", "没有重复造轮子", "pass",
-                 "模块的导出符号在全仓都是独一份")
+                 f"模块的导出符号在全仓都是独一份")
 
 
 def check_open_source(m: Module) -> Check:
@@ -1688,7 +2375,8 @@ def check_open_source(m: Module) -> Check:
     if not m.deps:
         return Check("open-source", "使用主流开源库", "warn",
                      "模块没有第三方依赖 —— 确认这是有意的（简单优先）",
-                     fix="如果需求领域有成熟库，别自己写")
+                     fix="如果需求领域有成熟库，别自己写",
+                     evidence_kind="static")
     ev = [d for d in m.deps[:10]]
     return Check("open-source", "使用主流开源库", "pass",
                  f"{len(m.deps)} 个第三方依赖", ev)
@@ -1697,9 +2385,38 @@ def check_open_source(m: Module) -> Check:
 # ---------------------------------------------------------------- 主流程
 
 
+def find_baseline_scripts(m: Module, root: Path) -> list[tuple[Path, str, str]]:
+    """找仓库自己的基线对拍脚本（白名单精确名）。"""
+    cands: list[tuple[Path, str, str]] = []
+    for ws, pkg in _workspace_manifests(root):
+        for name, cmd in (pkg.get("scripts") or {}).items():
+            if not isinstance(cmd, str) or not isinstance(name, str):
+                continue
+            if not script_allowed("baseline", name, cmd):
+                continue
+            cands.append((ws, name, cmd))
+    return cands
+
+
+def _tests_ran(m: Module, gate_scripts, raw: str, cov: dict,
+               failed: list[str], itest_notes: list[str]) -> bool:
+    """这次判定里，测试到底跑没跑？
+
+    跑不动（找不到 runner / 超时 / 没 pytest）与"跑了全绿"是两回事 ——
+    之前两者都报"没有失败用例"⇒ pass。
+    """
+    if gate_scripts or failed or cov or itest_notes:
+        return True
+    if not (m.tests or m.itests):
+        return False
+    blockers = ("没有找到该模块的测试文件", "没找到 pytest",
+                "没认出 Python 包目录", "跑不起来", "测试跑超时")
+    return not any(b in raw for b in blockers)
+
+
 def run_readiness(args) -> int:
     root = Path(args.repo).resolve()
-    m = discover_module(root, args.module)
+    m = discover_module(root, args.module, getattr(args, "test_dir", None))
     if not m.base.exists():
         print(f"模块不存在: {m.base}", file=sys.stderr)
         return 2
@@ -1716,6 +2433,24 @@ def run_readiness(args) -> int:
     # 优先用**仓库自己的闸门**（它的阈值与批次划分是仓库的权威口径）
     setup_errors: list[str] = []
     gate_scripts = find_gate_scripts(m, root)
+    itest_scripts = find_itest_scripts(m, root)
+    reconcilers = find_reconcilers(m, root)
+    baselines = find_baseline_scripts(m, root)
+    if getattr(args, "dry_run", False):
+        # 只列出会执行什么，不执行
+        print(f"将要执行的仓库脚本 — {m.path}（--dry-run，不执行）")
+        print(f"仓库：{root}")
+        groups = (("覆盖率闸门", gate_scripts), ("真后端车道", itest_scripts),
+                  ("跨存储对账", reconcilers), ("基线对拍", baselines))
+        any_script = False
+        for label, scripts in groups:
+            for ws, name, cmd in scripts:
+                any_script = True
+                print(f"  [{label}] {name}（工作目录 {ws}）")
+                print(f"      $ {cmd}")
+        if not any_script:
+            print("  （没有命中白名单的仓库脚本）")
+        return 0
     lane_notes: list[str] = []
     if gate_scripts:
         cov, failed, lane_notes = run_gates(m, gate_scripts)
@@ -1725,12 +2460,12 @@ def run_readiness(args) -> int:
     else:
         cov, failed, raw = run_coverage(m, include_itest=args.include_itest)
     # 真后端车道：驱动仓库自己的 itest 脚本（自带环境与防挂参数）
+    # 默认**不跑** —— 要连 PG + 向量库，且慢；--include-itest 才跑。
     itest_cov: dict[str, dict] = {}
     itest_failed: list[str] = []
     itest_notes: list[str] = []
     itest_env: list[str] = []
-    itest_scripts = find_itest_scripts(m, root)
-    if itest_scripts and (args.include_itest or m.itests):
+    if itest_scripts and args.include_itest:
         itest_cov, itest_failed, itest_notes, itest_env = run_itest_lane(
             m, itest_scripts)
         failed += itest_failed
@@ -1741,16 +2476,27 @@ def run_readiness(args) -> int:
     if args.verbose and raw:
         print(raw[-3000:], file=sys.stderr)
 
+    tests_found = bool(m.tests or m.itests)
+    tests_ran = _tests_ran(m, gate_scripts, raw, cov, failed, itest_notes)
     checks = [
-        check_tests_green(failed, setup_errors),
+        check_tests_green(failed, setup_errors, tests_found=tests_found,
+                          tests_ran=tests_ran),
         check_test_hygiene(m),
         check_coverage(m, cov, "" if cov else raw, runner_note,
                        lane_notes=lane_notes, itest_cov=itest_cov,
-                       itest_notes=itest_notes),
+                       itest_notes=itest_notes,
+                       min_line=getattr(args, "min_line_coverage", None),
+                       min_branch=getattr(args, "min_branch_coverage", None),
+                       repo_threshold=repo_coverage_threshold(root)),
         check_uncovered_exports(m, idx),
         check_schema(m, query_schema(m, args.database_url or
                                      os.environ.get("POSTGRES_URL", ""))),
-        check_data_flow(m, root, getattr(args, "test_tenant", [])),
+        check_data_flow(m, root, getattr(args, "test_tenant", []),
+                        drift_re=getattr(args, "drift_re", None),
+                        header_re=getattr(args, "header_re", None),
+                        tenant_prefixes=getattr(args, "test_tenant_prefix", None),
+                        csv_pairs=getattr(args, "csv_pairs", None),
+                        tenant_col=getattr(args, "tenant_col", None)),
         check_data_accuracy(m, root),
         check_requirement(m, args.plan),
         check_extensibility(m, idx),
@@ -1768,6 +2514,8 @@ def run_readiness(args) -> int:
 
     print(f"\n交付就绪度分析 — {m.path}")
     print(f"仓库：{root}")
+    if getattr(args, "exec", False):
+        print("执行模式：--exec（会运行仓库自己的脚本）")
     print(f"源码 {len(m.sources)} 文件（+{len(m.support)} 个测试支撑）"
           f" / 单测 {len(m.tests)} 个"
           f" / itest {len(m.itests)} 个"
@@ -1781,6 +2529,11 @@ def run_readiness(args) -> int:
             print(f"      → {c.fix}")
     fails = [c for c in checks if c.status == "fail"]
     warns = [c for c in checks if c.status == "warn"]
+    # 核心判据**没实测**（零测试 / 环境没就绪）⇒ 不能说"达到交付条件"。
+    # 结论的整体措辞（三档：阻塞项 / 待人工确认 / 无信号）归 G004，
+    # 这里只保证"没实测 ⇒ 不给肯定结论"。
+    untested = [c for c in checks if c.key == "tests-green"
+                and c.status == "skipped" and c.evidence_kind == "untested"]
     print()
     if fails:
         print(f"结论：不可交付 —— {len(fails)} 项不通过"
@@ -1788,9 +2541,29 @@ def run_readiness(args) -> int:
         for c in fails:
             print(f"  ✗ {c.title}：{c.detail}")
         return 1
+    if untested:
+        print(f"结论：证据不足（{len(untested)} 项未实测）—— "
+              f"不能判『达到交付条件』")
+        for c in untested:
+            print(f"  ○ {c.title}：{c.detail}")
+        return 1
     print(f"结论：达到交付条件"
           + (f"（{len(warns)} 项待人工确认）" if warns else ""))
     return 0
+
+
+def _parse_csv_pairs(items: list[str]) -> list[tuple[str, str]]:
+    """`a.csv=b.csv` / `a.csv:b.csv` ⇒ [(a, b)]。"""
+    out: list[tuple[str, str]] = []
+    for it in items or []:
+        for sep in ("=", ":"):
+            if sep in it:
+                a, b = it.split(sep, 1)
+                a, b = a.strip(), b.strip()
+                if a and b:
+                    out.append((a, b))
+                break
+    return out
 
 
 def main(argv: list[str]) -> int:
@@ -1808,7 +2581,44 @@ def main(argv: list[str]) -> int:
                          "测试租户的漂移是夹具状态，不阻塞交付")
     ap.add_argument("--include-itest", action="store_true",
                     help="把真后端 itest 车道也算进覆盖率（要连 PG + 向量库，慢）")
+    ap.add_argument("--test-dir", action="append", default=[],
+                    help="额外的测试目录（相对仓库根；可重复）—— "
+                         "仓库级 test/ tests/ spec/ 之外还有别处放测试时用它")
+    ap.add_argument("--min-line-coverage", type=float, default=None,
+                    help="行覆盖率门槛（默认**不**用通用阈值：没有仓库闸门时"
+                         "判 skipped，不判 fail）")
+    ap.add_argument("--min-branch-coverage", type=float, default=None,
+                    help="分支覆盖率门槛（同上）")
+    ap.add_argument("--drift-pattern", default=None,
+                    help="对账输出里『漂移行』的正则（默认认 漂移/❌/drift）")
+    ap.add_argument("--table-header-pattern", default=None,
+                    help="对账输出里表头/分隔行的正则（默认认 一致性/租户/---）")
+    ap.add_argument("--test-tenant-prefix", action="append", default=[],
+                    help="测试租户前缀（可重复；给了就**替换**内置默认表）")
+    ap.add_argument("--csv-pair", action="append", default=[],
+                    help="CSV 对照关系 a.csv=b.csv（可重复）—— 按声明配对，"
+                         "不做两两配对")
+    ap.add_argument("--tenant-col", default=None,
+                    help="租户列名（CSV 里定位租户的那一列）")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="只列出候选脚本与将执行的命令，然后退出（不执行）")
+    ap.add_argument("--exec", action="store_true",
+                    help="显式执行仓库自己的脚本（默认也执行；"
+                         "--dry-run 时只列不跑）")
     args = ap.parse_args(argv)
+    for name, pat in (("--drift-pattern", args.drift_pattern),
+                      ("--table-header-pattern", args.table_header_pattern)):
+        if pat:
+            try:
+                re.compile(pat)
+            except re.error as e:
+                print(f"{name} 不是合法正则：{pat!r}（{e}）", file=sys.stderr)
+                return 2
+    args.drift_re = re.compile(args.drift_pattern) if args.drift_pattern else None
+    args.header_re = (re.compile(args.table_header_pattern)
+                      if args.table_header_pattern else None)
+    args.csv_pairs = _parse_csv_pairs(args.csv_pair)
+    args.test_tenant_prefix = args.test_tenant_prefix or None
     return run_readiness(args)
 
 

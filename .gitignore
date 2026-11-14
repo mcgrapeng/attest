@@ -15,3 +15,6 @@ __pycache__/
 
 # 打包产物
 dist/
+
+# agent 的机器本地设置
+.claude/

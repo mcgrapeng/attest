@@ -28,7 +28,7 @@ SKILL_NAME = "req-test-plan"
 
 EXCLUDE_DIRS = {"__pycache__", "node_modules", ".git", ".github", ".omx",
                 "dist", "fixtures", "evals", ".venv", "venv", ".pytest_cache",
-                ".ruff_cache", ".mypy_cache", ".omx-state-locks"}
+                ".ruff_cache", ".mypy_cache", ".omx-state-locks", ".claude"}
 EXCLUDE_GLOBS = ("*.pyc", "*.pyo", ".DS_Store", "*.identity.json")
 # 回归套件是**仓库**的开发资产（21 个文件、约 3000 行），不是 skill 的运行时 ——
 # 不打进包；仓库里照旧有。

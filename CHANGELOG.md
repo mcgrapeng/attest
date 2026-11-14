@@ -144,6 +144,7 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
 - **打包元数据**（产出可安装的 `.skill`）已做：新增自包含的 `package.py`
   （不依赖外部 skill 的打包脚本；排除字节码/`.git`/`fixtures/`/回归测试；
   打进包前检查有没有字节码）。实测产出 20 个文件、191 KB。
+- **Python 仓库的真后端车道与对账脚本认不到**：之前只扫 `package.json` ⇒ Python 仓库的跨存储对账判据基本用不上。现在 `find_itest_scripts` 与 `find_reconcilers` 也接上 Python 兜底（Makefile 目标 / tox 环境，按配方体判归属）—— 覆盖率闸门那条早就有这个模式，现在三条路一致了。
 - **规则级 allowlist 的漏洞**（日后悄悄多出 HIGH 不被拦）补一道精确闸门：
   `scripts/check_env_inheritance.py` —— 生产代码不得整份继承 `os.environ`。
   回归：scripts/test_env_inheritance.py（12 条）。
@@ -167,8 +168,6 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
     加 `--dry-run` 可只看不做）。理由：工具的定位就是实测（不跑测试的交付判定没有
     意义），而执行面已经收敛到脚本白名单 + 环境变量白名单；再叠一个必填开关，
     每次调用都要多打一个参数，实际收益不大。想看执行清单用 `--dry-run`。
-  - **Python 没有真后端（itest）车道**：TS 侧有 `--include-itest`，Python 侧没有对应
-    机制。属 P1，未修。
   - Windows / 非 bash 环境未验证。
   - 触发准确度未实测（`skill-creator` 的 `run_loop` 需要 `claude` CLI）。
   - **自检副本不带 `node_modules`** ⇒ 多数仓库在副本里跑不动测试，`--self-check`

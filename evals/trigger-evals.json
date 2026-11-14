@@ -1,0 +1,23 @@
+[
+  {"query": "下周三要开工做「订单导出」这个功能，代码在 src/orders/。先别写代码 —— 帮我把测试计划列出来：哪些维度要覆盖、用仓库自己的哪些测试车道、已有��些 helper 能直接复用", "should_trigger": true},
+  {"query": "help me write a test plan for the new billing endpoint before I start coding", "should_trigger": true},
+  {"query": "我们要把 src/billing 这个模块交付给客户了，跑一下交付就绪度 —— 但别只给我一句「可以交付」，已经实测证明的、还没测出来的、这条工具根本判不了的，分开说", "should_trigger": true},
+  {"query": "can we ship src/billing? don't just say yes or no, tell me what's actually proven and what isn't", "should_trigger": true},
+  {"query": "订单数据 PG 和向量库各存了一份，今天有人说两边对不上。我们的对账脚本在 package.json 里叫 reconcile，输出是英文的。你跑一下，看哪个租户漂了。itest-abc 这个租户是我们故意注入的失败态，别当成阻塞项", "should_trigger": true},
+  {"query": "上游上周提了个需求测试计划在 docs/refund-test-plan.md。我自己核了一遍总觉得对不上代码 —— 帮我核一遍：钉指向的文件到底在不在仓库里，矩阵里引用的测试文件是不是真的存在", "should_trigger": true},
+  {"query": "上游说这个需求已经测过了，报告里列了 8 条用例，钉在 src/orders/never_written.test.ts::分页导出。可我在仓库里翻不到这个文件 —— 他们是不是吹牛？给我个说法", "should_trigger": true},
+  {"query": "写这个新功能要覆盖哪些测试维度？仓库里已经有哪些 helper 能直接复用、别让我重复造轮子", "should_trigger": true},
+  {"query": "cross-store data is drifting between postgres and milvus in our memory module - the reconcile script prints english. which tenant drifted?", "should_trigger": true},
+  {"query": "按这份测试计划生成测试工具包骨架，计划在 docs/refund-test-plan.md", "should_trigger": true},
+
+  {"query": "帮我 review 一下这个 PR 的代码风格和命名", "should_trigger": false},
+  {"query": "unit test 一般怎么写？我想测一个纯函数，输入两个数返回它们的和", "should_trigger": false},
+  {"query": "把上个月的覆盖率报告导出来发给我", "should_trigger": false},
+  {"query": "我们 CI 挂了，帮我看看是哪个 job 红的", "should_trigger": false},
+  {"query": "写个 python 脚本，把 csv 转成 json", "should_trigger": false},
+  {"query": "这个接口线上返回 500，帮我查一下原因", "should_trigger": false},
+  {"query": "帮我给这个新模块写个 README，说明怎么用", "should_trigger": false},
+  {"query": "怎么搭一套端到端测试环境？我们现在什么都没有", "should_trigger": false},
+  {"query": "perf: 这个 SQL 查询太慢了，帮我看看怎么优化索引", "should_trigger": false},
+  {"query": "把仓库里的 jest 换成 vitest，测试本身不用改", "should_trigger": false}
+]

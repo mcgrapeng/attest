@@ -997,12 +997,17 @@ def script_allowed(kind: str, name: str, cmd: str) -> bool:
     return True
 
 
-def _python_gate_scripts(root: Path) -> list[tuple[Path, str, str]]:
-    """Python 仓库自己声明的覆盖率闸门（Makefile 目标 / tox 环境）。
+def _python_script_targets(root: Path, *keywords: str
+                           ) -> list[tuple[Path, str, str, str]]:
+    """Python 仓库自己声明的脚本目标（Makefile 目标 / tox 环境）。
 
-    之前只读 `package.json` ⇒ Python 仓库永远读不到自己的闸门。
+    按关键词挑：覆盖率闸门传 "cov"，对账脚本传 "reconcile"，
+    真后端车道传 "integration" / "itest"。
+
+    之前只读 `package.json` ⇒ Python 仓库永远读不到自己的闸门；
+    车道与对账那两条路当时也没接上，于是 Python 仓库的跨存储对账判据基本用不上。
     """
-    out: list[tuple[Path, str, str]] = []
+    out: list[tuple[Path, str, str, str]] = []
     for mk in sorted(root.rglob("Makefile")):
         if any(part in SKIP_DIRS for part in mk.parts):
             continue
@@ -1012,9 +1017,16 @@ def _python_gate_scripts(root: Path) -> list[tuple[Path, str, str]]:
             continue
         for mm in re.finditer(r"^([A-Za-z0-9_.-]+)\s*:(?!=)", text, re.M):
             target = mm.group(1)
-            if "cov" not in target.lower():
+            low = target.lower()
+            if not any(k in low for k in keywords):
                 continue
-            out.append((mk.parent, f"make {target}", f"make {target}"))
+            # 目标配方体：判"这个目标是不是这个模块的"要看它跑的是什么
+            body = ""
+            for nxt in text[mm.end():].splitlines():
+                if nxt.strip() and not nxt.startswith(("\t", " ")):
+                    break
+                body += nxt + "\n"
+            out.append((mk.parent, f"make {target}", f"make {target}", body))
     for tox in sorted(root.rglob("tox.ini")):
         if any(part in SKIP_DIRS for part in tox.parts):
             continue
@@ -1024,10 +1036,18 @@ def _python_gate_scripts(root: Path) -> list[tuple[Path, str, str]]:
             continue
         for mm in re.finditer(r"^\[testenv:([A-Za-z0-9_.-]+)\]", text, re.M):
             env_name = mm.group(1)
-            if "cov" not in env_name.lower():
+            low = env_name.lower()
+            if not any(k in low for k in keywords):
                 continue
-            out.append((tox.parent, f"tox -e {env_name}", f"tox -e {env_name}"))
+            out.append((tox.parent, f"tox -e {env_name}",
+                        f"tox -e {env_name}", text))
     return out
+
+
+def _python_gate_scripts(root: Path) -> list[tuple[Path, str, str]]:
+    """Python 仓库自己声明的覆盖率闸门（Makefile 目标 / tox 环境）。"""
+    return [(ws, name, cmd) for ws, name, cmd, _body
+            in _python_script_targets(root, "cov")]
 
 
 def repo_coverage_threshold(root: Path) -> tuple[float | None, float | None]:
@@ -1146,6 +1166,11 @@ def find_itest_scripts(m: Module, root: Path) -> list[tuple[Path, str, str]]:
             if not _mentions_module(m, cmd):
                 continue
             cands.append((ws, name, cmd))
+    if not cands:
+        # Python 仓库：Makefile 目标 / tox 环境里声明的真后端车道
+        cands = [(ws, name, cmd) for ws, name, cmd, body
+                 in _python_script_targets(root, "integration", "itest")
+                 if _mentions_module(m, cmd) or _mentions_module(m, body)]
     entries = _entries(cands)
     explicit = [c for c in entries if not _has_glob(c[2])]
     return explicit or entries
@@ -1220,6 +1245,11 @@ def find_reconcilers(m: Module, root: Path) -> list[tuple[Path, str, str]]:
             mentions = (m.tables and any(t in body for t in m.tables)) \
                 or m.path in body
             if mentions:
+                out.append((ws, name, cmd))
+    if not out:
+        # Python 仓库：Makefile 目标 / tox 环境里声明的对账脚本
+        for ws, name, cmd, body in _python_script_targets(root, "reconcile"):
+            if _mentions_module(m, cmd) or _mentions_module(m, body):
                 out.append((ws, name, cmd))
     return out
 

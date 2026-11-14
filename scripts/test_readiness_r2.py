@@ -389,6 +389,29 @@ def main() -> int:
     expect("仓库自己的覆盖率闸门全过" not in rg.stdout,
            "闸门没过时不得说「全过」")
 
+    print("\n子项 11b：Python 仓库的 Makefile 目标（对账 / 真后端）也要认")
+    py2 = mkdtemp()
+    write(py2 / "pyproject.toml", "[project]\nname='pkg'\n")
+    write(py2 / "src" / "pkg" / "__init__.py", "")
+    write(py2 / "src" / "pkg" / "store.py",
+          "import psycopg\ndef upsert(x):\n    pass\n")
+    write(py2 / "Makefile",
+          "coverage:\n\tpytest --cov=pkg\n\n"
+          "reconcile-store:\n\tpython -m pkg.reconcile src/pkg\n\n"
+          "integration-store:\n\tpytest -m integration src/pkg\n")
+    m2 = readiness.discover_module(py2, "src")
+    expect(m2.lang == "py", "认出这是 Python 模块")
+    gates2 = readiness.find_gate_scripts(m2, py2)
+    expect(any("coverage" in g[1] for g in gates2),
+           "Makefile 的覆盖率目标被认出来")
+    recs2 = readiness.find_reconcilers(m2, py2)
+    expect(any("reconcile" in r[1] for r in recs2),
+           "Makefile 的对账目标被认出来（之前只扫 package.json ⇒ Python 仓库用不上）")
+    lanes2 = readiness.find_itest_scripts(m2, py2)
+    expect(any("integration" in l[1] for l in lanes2),
+           "Makefile 的真后端目标被认出来")
+
+
     # ---------------------------------------------------------- 子项 12
     print("\n子项 12：真后端车道默认不跑")
     lane = mkdtemp()

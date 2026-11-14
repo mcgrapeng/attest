@@ -382,6 +382,15 @@ def index_repo(root: Path) -> RepoIndex:
         r"^\s*export\s+(?:default\s+)?(?:async\s+)?"
         r"(function|const|let|var|class|interface|type|enum)\s+"
         r"([A-Za-z_$][\w$]*)", re.M)
+    # 非 TS 的导出 —— 之前只索引 TS 的 export ⇒ Python/Rust/Go 仓库的
+    # 「重复造轮子」判据整条是死的（找不到同名实现）。
+    # Python：模块级（不在缩进里）的公开 def/class
+    py_re = re.compile(r"^(?:async\s+)?(?:def|class)\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
+    # Rust：pub fn/struct/enum/trait/type/const
+    rs_re = re.compile(
+        r"^\s*pub\s+(?:fn|struct|enum|trait|type|const)\s+([A-Za-z_][A-Za-z0-9_]*)", re.M)
+    # Go：顶层 func / type（首字母大写 = 导出）
+    go_re = re.compile(r"^(?:func|type)\s+([A-Z][A-Za-z0-9_]*)", re.M)
     for p in _walk(root, CODE_EXT):
         rel = str(p.relative_to(root))
         try:
@@ -390,10 +399,18 @@ def index_repo(root: Path) -> RepoIndex:
             continue
         idx.texts.append((rel, text))
         idx.tokens.update(tok_re.findall(text))
-        if "/node_modules/" in f"/{rel}" or re.search(r"\.(test|spec)\.", rel):
+        if ("/node_modules/" in f"/{rel}"
+                or re.search(r"\.(test|spec)\.", rel)
+                or rel.endswith("_test.go")):
             continue
         for mm in exp_re.finditer(text):
             idx.exports.setdefault(mm.group(2), rel)
+        for rex, is_py in ((py_re, True), (rs_re, False), (go_re, False)):
+            for mm in rex.finditer(text):
+                name = mm.group(1)
+                if is_py and name.startswith("_"):
+                    continue        # Python 的私有名不是导出
+                idx.exports.setdefault(name, rel)
     return idx
 
 
@@ -429,10 +446,118 @@ def project_test_cmd(m: Module) -> tuple[list[str], str]:
     return ["node", "--test"], "(默认)"
 
 
+# 失败用例的识别 —— TAP 之外，jest / vitest / mocha 都不吐 TAP。
+# 之前只认 `not ok N -` ⇒ jest 风格的失败用例一个都认不出来 ⇒
+# 「测试全绿」在 jest/vitest/mocha 仓库上是**假绿**（实测复现）。
+_FAIL_PATTERNS = (
+    re.compile(r"^not ok \d+ - (.+)$", re.M),        # TAP（node:test）
+    re.compile(r"^\s*[×✕]\s+(.+)$", re.M),          # vitest / jest 的失败用例
+    re.compile(r"^\s+●\s+(.+)$", re.M),              # jest 的失败详情
+    re.compile(r"^\s+\d+\)\s+(.+)$", re.M),           # mocha 的编号失败
+)
+
+
 def _failed_tests(out: str) -> list[str]:
-    """从 node 测试输出里挑出失败的用例名。"""
-    return [mm.group(1).strip()
-            for mm in re.finditer(r"^not ok \d+ - (.+)$", out, re.M)]
+    """从测试运行器的输出里挑出失败的用例名。"""
+    names: list[str] = []
+    for pat in _FAIL_PATTERNS:
+        for mm in pat.finditer(out):
+            name = mm.group(1).strip()
+            if name and name not in names:
+                names.append(name)
+    return names
+
+
+# 认不出具体用例名、但确实是"跑挂了"的标记。
+_FAILED_RUN_MARKERS = (
+    re.compile(r"^\s*FAIL\s+\S", re.M),              # jest: " FAIL  src/a.test.ts"
+    re.compile(r"^\s*\d+\s+failed\b", re.M | re.I),   # vitest: "Tests  1 failed | ..."
+    re.compile(r"^\s*Tests:\s+.*\bfailed\b", re.M),   # jest: "Tests: 1 failed, ..."
+    re.compile(r"^\s*\d+\s+failing\b", re.M | re.I),  # mocha: "1 failing"
+)
+
+
+def _looks_like_failed_run(out: str) -> bool:
+    """输出里有"这次跑挂了"的标记（但认不出具体用例名）。"""
+    return any(p.search(out) for p in _FAILED_RUN_MARKERS)
+
+
+def _node_summary(out: str) -> dict[str, int]:
+    """测试运行器的汇总。
+
+    TAP（node:test）：`# tests 3` / `# pass 3` / `# fail 0` / `# skipped 0`
+    vitest：`Tests  1 failed | 1 passed (2)`
+    jest：`Tests:  1 failed, 1 passed, 2 total`
+    mocha：`1 passing` / `1 failing`
+    """
+    out_d: dict[str, int] = {}
+    for key in ("tests", "pass", "fail", "skipped"):
+        mm = re.search(rf"^#\s+{key}\s+(\d+)", out, re.M)
+        out_d[key] = int(mm.group(1)) if mm else 0
+    if out_d["tests"]:
+        return out_d
+    # vitest
+    mm = re.search(r"^Tests\s+(?:(\d+)\s+failed\s*\|)?\s*"
+                   r"(?:(\d+)\s+failed,\s*)?(\d+)\s+passed", out, re.M)
+    if mm:
+        failed_n = int(mm.group(1) or mm.group(2) or 0)
+        passed_n = int(mm.group(3) or 0)
+        out_d = {"tests": failed_n + passed_n, "pass": passed_n,
+                 "fail": failed_n, "skipped": 0}
+        return out_d
+    # jest: "Tests:       1 failed, 1 passed, 2 total"
+    mm = re.search(r"^Tests:\s+(?:(\d+)\s+failed,\s*)?(?:(\d+)\s+passed,\s*)?"
+                   r"(\d+)\s+total", out, re.M)
+    if mm:
+        failed_n = int(mm.group(1) or 0)
+        passed_n = int(mm.group(2) or 0)
+        out_d = {"tests": int(mm.group(3) or 0), "pass": passed_n,
+                 "fail": failed_n, "skipped": 0}
+        return out_d
+    # mocha: "1 passing" / "1 failing"
+    mp = re.search(r"^\s*(\d+)\s+passing", out, re.M)
+    mf = re.search(r"^\s*(\d+)\s+failing", out, re.M)
+    if mp or mf:
+        passed_n = int(mp.group(1)) if mp else 0
+        failed_n = int(mf.group(1)) if mf else 0
+        out_d = {"tests": passed_n + failed_n, "pass": passed_n,
+                 "fail": failed_n, "skipped": 0}
+    return out_d
+
+
+def _classify_run(code: int, out: str, name: str) -> tuple[list[str], list[str]]:
+    """一次测试运行 ⇒ (失败用例, 未实测原因)。
+
+    三件事必须分开（与「跑不起来 ≠ 不达标」同一条规矩）：
+    - **用例真失败** ⇒ 阻塞
+    - **环境没就绪**（连不上中间件、runner 起不来）⇒ 未实测
+    - **输出格式认不出** ⇒ 未实测 —— 绝不判绿
+
+    最后一条是这轮修的关键：以前只认 TAP 的 `not ok N -`，jest/vitest/mocha 的
+    失败用例一个都认不出来，于是「没有失败用例」⇒ 报 ✓ 测试全绿。实测复现过：
+    一个 jest 风格的失败套件被判「✓ 测试全绿」、退出码 0。
+    """
+    fails = _failed_tests_detail(out) or _failed_tests(out)
+    if fails:
+        # 失败里如果**全是**环境类报错（连不上中间件/鉴权失败）⇒ 那是环境没就绪，
+        # 不是产品缺陷 ⇒ 未实测，不阻塞。判据看 error 详情（用例名里没有报错文本）。
+        env_like = [f for f in fails if _ENV_ERROR_RE.search(f)]
+        if env_like and len(env_like) == len(fails):
+            return [], [f"{name}: 环境没就绪（{len(fails)} 个用例连不上"
+                        f"中间件/依赖，不算产品缺陷）"]
+        return fails, []
+    if code == 0:
+        summ = _node_summary(out)
+        if summ["tests"] == 0:
+            return [], [f"{name}: 没解析出任何用例结果（退出码 0，但没有用例汇总）"]
+        return [], []
+    # 退出码非 0 —— 这次跑没通过
+    if _ENV_ERROR_RE.search(out):
+        return [], [f"{name}: 环境没就绪（{_ENV_ERROR_RE.search(out).group(0)}）"]
+    if _looks_like_failed_run(out):
+        return [], [f"{name}: runner 退出码 {code}，输出里有失败标记但认不出用例名"]
+    return [], [f"{name}: runner 退出码 {code}，输出格式认不出"
+                f"（不是 TAP / jest / vitest / mocha 的汇总？）"]
 
 
 _COV_ROW = re.compile(
@@ -514,33 +639,42 @@ def _merge_coverage(per_run: list[dict[str, dict]]) -> dict[str, dict]:
 
 def run_gates(m: Module, gates: list[tuple[Path, str, str]],
                timeout: int = 900
-               ) -> tuple[dict[str, dict], list[str], list[str]]:
-    """跑仓库自己的覆盖率闸门 ⇒ (逐文件覆盖率, 失败用例, 逐闸说明)。"""
+               ) -> tuple[dict[str, dict], list[str], list[str], list[str]]:
+    """跑仓库自己的覆盖率闸门 ⇒ (逐文件覆盖率, 失败用例, 未实测原因, 逐闸说明)。"""
     per_run: list[dict[str, dict]] = []
     failed: list[str] = []
+    setup_errors: list[str] = []
     notes: list[str] = []
     for ws, name, cmd in gates:
         code, out, _ = run_gate(ws, name, cmd, timeout=timeout)
         rows = _parse_cov_rows(out)
         if rows:
             per_run.append(rows)
-        failed += [f"{name}: {x}" for x in _failed_tests(out)]
+        # 闸门脚本往往就是"跑测试 + 报覆盖率"，所以它的退出码可能来自
+        # **用例失败**而不是阈值没过 —— 用 _classify_run 分开，别一律说"未达阈值"。
+        f_list, s_list = _classify_run(code, out, name)
+        failed += [f"{name}: {x}" for x in f_list]
+        setup_errors += s_list
         agg = rows.get("__all__")
         detail = ""
         if agg:
             detail = (f"行 {agg['line']:.0f}% / 分支 {agg['branch']:.0f}% / "
                       f"函数 {agg['func']:.0f}%")
-        if code == 0:
+        if f_list:
+            mark = f"✗ 有失败用例（{len(f_list)} 个）"
+        elif code == 0:
             mark = "✓ 通过"
         elif code == 127:
             mark = "— 跑不起来（环境没就绪，不是阈值没过）"
         else:
+            # 闸门的退出码就是它的契约：非 0 = 闸门没过。
+            # **不能**因为"输出认不出"就放过 —— 那会让覆盖判据假绿。
             mark = "✗ 未达阈值"
         notes.append(f"{name}: {mark}"
                      + (f"（{detail}）" if detail else "")
                      + ("" if code == 0 else f"（退出码 {code}）"))
     cov = _merge_coverage(per_run) if per_run else {}
-    return cov, failed, notes
+    return cov, failed, setup_errors, notes
 
 
 # 环境没就绪的报错特征（连不上 Milvus/PG、鉴权失败、连接超时）
@@ -575,15 +709,6 @@ def _failed_tests_detail(out: str) -> list[str]:
                 break
         res.append(f"{title} | {detail}" if detail else title)
     return res
-
-
-def _node_summary(out: str) -> dict[str, int]:
-    """node 测试运行器的汇总（# tests / pass / fail / skipped）。"""
-    out_d: dict[str, int] = {}
-    for key in ("tests", "pass", "fail", "skipped"):
-        mm = re.search(rf"^#\s+{key}\s+(\d+)", out, re.M)
-        out_d[key] = int(mm.group(1)) if mm else 0
-    return out_d
 
 
 def coverage_globs(m: Module, inc: str) -> list[str]:
@@ -633,7 +758,9 @@ def run_itest_lane(m: Module, scripts: list[tuple[Path, str, str]],
         if rows:
             per_run.append(rows)
         summ = _node_summary(out)
-        fails = _failed_tests_detail(out)
+        # TAP 的失败块（含 error 详情）优先；非 TAP 的 runner
+        # （jest/vitest/mocha）退回按标记识别。
+        fails = _failed_tests_detail(out) or _failed_tests(out)
         if summ["tests"] == 0:
             # 一个用例都没跑 ⇒ 车道被跳过或没起来
             env_errors.append(f"{name}: 车道没跑起来（0 个用例）")
@@ -655,7 +782,7 @@ def run_itest_lane(m: Module, scripts: list[tuple[Path, str, str]],
 
 def run_coverage(m: Module, timeout: int = 120,
                  include_itest: bool = False
-                 ) -> tuple[dict[str, dict], list[str], str]:
+                 ) -> tuple[dict[str, dict], list[str], list[str], str]:
     """真跑模块的测试，拿真实覆盖率。
 
     默认只跑**单元测试车道**（*.test.ts）。*.itest.ts 是"真后端"车道，
@@ -663,7 +790,7 @@ def run_coverage(m: Module, timeout: int = 120,
     """
     tests = m.tests + (m.itests if include_itest else [])
     if not tests or not m.workspace:
-        return {}, [], "没有找到该模块的测试文件"
+        return {}, [], [], "没有找到该模块的测试文件"
     # include 的 glob 要相对**工作区根**（测试从 workspace 跑）——
     # 用仓库相对路径会永远匹配不到，per-file 覆盖率全丢
     inc = str(m.base.relative_to(m.workspace)) if m.workspace else m.path
@@ -684,88 +811,56 @@ def run_coverage(m: Module, timeout: int = 120,
     # 7% 和 59% 两个覆盖率）—— 一个会随机变的数字不能用来判交付。
     from concurrent.futures import ThreadPoolExecutor
 
-    def one(t: Path) -> tuple[Path, str, str]:
+    def one(t: Path) -> tuple[Path, str, str, int]:
         c = cmd_base + [str(t.relative_to(m.workspace))]
         try:
             r = subprocess.run(c, cwd=m.workspace, capture_output=True,
                                text=True, encoding="utf-8", timeout=timeout,
                                env=env)
         except subprocess.TimeoutExpired:
-            return t, "", f"{t.name}: 测试跑超时（{timeout}s）"
+            return t, "", f"{t.name}: 测试跑超时（{timeout}s）", 124
         except FileNotFoundError as e:
-            return t, "", f"项目的测试命令跑不起来（{e.filename}）"
-        return t, r.stdout + r.stderr, ""
+            return t, "", f"{t.name}: 项目的测试命令跑不起来（{e.filename}）", 127
+        return t, r.stdout + r.stderr, "", r.returncode
 
     jobs = max(1, min(8, (os.cpu_count() or 2)))
     with ThreadPoolExecutor(max_workers=jobs) as pool:
         results = list(pool.map(one, tests))
     per_run: list[dict[str, dict]] = []
     failed: list[str] = []
+    setup_errors: list[str] = []
     notes: list[str] = []
-    for t, out, err in results:
+    for t, out, err, code in results:
         if err:
             notes.append(err)
+            setup_errors.append(err)
             continue
-        failed += [f"{t.name}: {x}" for x in _failed_tests(out)]
+        # 退出码 + 输出一起判：只靠 TAP 正则会漏掉 jest/vitest/mocha 的失败用例
+        # ⇒ 假绿（这轮修的关键）。
+        f_list, s_list = _classify_run(code, out, t.name)
+        failed += [f"{t.name}: {x}" for x in f_list]
+        setup_errors += s_list
         rows = _parse_cov_rows(out)
         if rows:
             per_run.append(rows)
     if not per_run:
-        ran_any = any(not err for _, _, err in results)
+        ran_any = any(not err for _, _, err, _ in results)
         if ran_any:
-            return {}, failed, ("测试跑了，但没解析出覆盖率表"
-                                "（runner 可能不支持覆盖率参数）")
-        return {}, failed, ("；".join(notes) or
-                            "没解析出覆盖率表（测试可能没跑起来）")
+            return {}, failed, setup_errors, ("测试跑了，但没解析出覆盖率表"
+                                             "（runner 可能不支持覆盖率参数）")
+        return {}, failed, setup_errors, ("；".join(notes) or
+                                          "没解析出覆盖率表（测试可能没跑起来）")
     cov = _merge_coverage(per_run)
     note = (f"逐个测试文件跑（{len(tests)} 个）后取覆盖并集 —— 整包并发跑时 "
             f"node 的覆盖率合并会竞态")
     if notes:
         note += "；" + "；".join(notes[:3])
-    return cov, failed, note
-
-
-def _run_coverage_single(m: Module, timeout: int = 120,
-                         include_itest: bool = False
-                         ) -> tuple[dict[str, dict], list[str], str]:
-    """整包跑一次（快，但覆盖率在有 mock.module 时不稳定）。"""
-    tests = m.tests + (m.itests if include_itest else [])
-    if not tests or not m.workspace:
-        return {}, [], "没有找到该模块的测试文件"
-    inc = str(m.base.relative_to(m.workspace)) if m.workspace else m.path
-    prefix, _ = project_test_cmd(m)
-    runner = prefix[0] if prefix else "node"
-    cmd = list(prefix)
-    cmd += coverage_flags(m, inc, runner)
-    cmd += [str(t.relative_to(m.workspace)) for t in tests]
-    env = child_env()
-    if include_itest:
-        env["MEMORY_ITEST"] = "1"
-    bin_dir = m.workspace / "node_modules" / ".bin"
-    if bin_dir.is_dir():
-        env["PATH"] = f"{bin_dir}{os.pathsep}{env.get('PATH', '')}"
-    try:
-        r = subprocess.run(cmd, cwd=m.workspace, capture_output=True,
-                           text=True, encoding="utf-8", timeout=timeout,
-                           env=env)
-    except subprocess.TimeoutExpired:
-        return {}, [], f"测试跑超时（{timeout}s）"
-    except FileNotFoundError as e:
-        return {}, [], f"项目的测试命令跑不起来（找不到可执行文件：{e.filename}）"
-    out = r.stdout + r.stderr
-    failed = _failed_tests(out)
-    cov = _parse_cov_rows(out)
-    if not cov:
-        tail = "\n".join(out.splitlines()[-25:])
-        return {}, failed, "覆盖率表没解析出来（测试可能没跑起来）：\n" + tail
-    cov = {k: {kk: vv for kk, vv in v.items() if kk != "_uncovered"}
-           for k, v in cov.items()}
-    return cov, failed, out
+    return cov, failed, setup_errors, note
 
 
 # ---------------------------------------------------------------- 实测：PG 表结构
 
-
+# psql 认的环境变量 —— 连接串解析成这些，口令不落 argv。
 _PG_ENV_KEYS = ("PGHOST", "PGPORT", "PGUSER", "PGPASSWORD", "PGDATABASE",
                 "PGSSLMODE")
 
@@ -1716,11 +1811,23 @@ def check_tests_green(failed: list[str],
                      evidence_kind="untested")
     if not failed:
         if setup_errors:
+            # 措辞要准：setup_errors 里不全是"环境没就绪"，也可能是
+            # "runner 退出码非 0 但输出格式认不出" —— 说成"setup 报错"会误导。
+            env_like = [e for e in setup_errors
+                        if ("环境没就绪" in e or "跑不起来" in e
+                            or "超时" in e or "车道没跑起来" in e)]
+            other = [e for e in setup_errors if e not in env_like]
+            if other and not env_like:
+                detail = (f"{len(other)} 个测试文件这次没测出来 —— "
+                          f"无法判定测试是否绿")
+            else:
+                detail = (f"{len(setup_errors)} 个用例 setup 报错（环境/依赖没就绪）"
+                          f" —— 不是断言失败，判不了")
             return Check("tests-green", "测试全绿", "skipped",
-                         f"{len(setup_errors)} 个用例 setup 报错（环境/依赖没就绪）"
-                         f" —— 不是断言失败，判不了",
+                         detail,
                          setup_errors[:10],
-                         "先把环境准备好（数据库/中间件/依赖），再判测试绿不绿",
+                         "先把环境/输出准备好（能用的 runner、能认出的输出格式），"
+                         "再判测试绿不绿",
                          evidence_kind="executed")
         return Check("tests-green", "测试全绿", "pass", "没有失败用例",
                      evidence_kind="executed")
@@ -2558,12 +2665,13 @@ def run_readiness(args) -> int:
                       reconcilers, baselines)
     lane_notes: list[str] = []
     if gate_scripts:
-        cov, failed, lane_notes = run_gates(m, gate_scripts)
+        cov, failed, setup_errors, lane_notes = run_gates(m, gate_scripts)
         raw = ""
     elif m.lang == "py":
         cov, failed, setup_errors, raw = run_python_coverage(m, root)
     else:
-        cov, failed, raw = run_coverage(m, include_itest=args.include_itest)
+        cov, failed, setup_errors, raw = run_coverage(
+            m, include_itest=args.include_itest)
     # 真后端车道：驱动仓库自己的 itest 脚本（自带环境与防挂参数）
     # 默认**不跑** —— 要连 PG + 向量库，且慢；--include-itest 才跑。
     itest_cov: dict[str, dict] = {}

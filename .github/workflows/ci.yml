@@ -134,6 +134,13 @@ jobs:
         # PyPI 上取不到时不阻塞发布（下面的扫描步骤会自己跳过并告警）。
         continue-on-error: true
         run: python -m pip install --disable-pip-version-check skillspector
+      - name: 生产代码不得整份继承 os.environ
+        # SkillSpector 的 E2（Env Variable Harvesting）是**规则级**放行的 ——
+        # 规则太粗，会把所有 {**os.environ} 都算进来。真正的收口在代码里，
+        # 所以这里用一条精确的检查替它把关：生产脚本不得整份继承环境变量，
+        # 子进程环境必须走白名单（readiness.py 的 child_env /
+        # selfcheck.py 的 _child_env）。这条不依赖位置 ⇒ 改代码不会误红。
+        run: python3 scripts/check_env_inheritance.py
       - name: 扫描（allowlist 之外不得有 HIGH / CRITICAL）
         run: |
           if ! command -v skillspector >/dev/null 2>&1; then

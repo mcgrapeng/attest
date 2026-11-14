@@ -9,3 +9,6 @@ __pycache__/
 .omx-state-locks/
 .omx-state-locks.identity.json
 .omx/tmux-hook.json
+
+# OMX 运行态（机器本地）：目标账本与 handoff 状态不进包
+.omx/

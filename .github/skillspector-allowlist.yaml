@@ -20,13 +20,18 @@ version: 1
 rules:
   # E2「Env Variable Harvesting」：扫描器看到 {**os.environ, ...} 就报。
   # 这里是**必要且已收口**的：子进程要拿到 PATH/HOME 才能跑目标仓库的测试命令；
-  # 真正传给目标脚本的环境是白名单（readiness.py 的 child_env）。
+  # 真正传给目标脚本的环境是白名单（readiness.py 的 child_env、
+  # selfcheck.py 的 _child_env 都只透传白名单键）。
   # 复核记录：docs/oss-release-review.md 第六节。
+  #
+  # 真正的把关不是这条 allowlist，而是 CI 里那条精确检查
+  # 「生产代码不得整份继承 os.environ」—— 它不依赖位置，改代码不会误红。
   - id: E2
     reason: >-
       子进程只透传白名单环境变量（child_env / _child_env）—— 逐处复核过，
       见 docs/oss-release-review.md 第六节。扫描器按 {**os.environ} 模式匹配，
-      看不到白名单那一层。
+      看不到白名单那一层。真正的收口是 CI 里那条「生产代码不得整份继承
+      os.environ」的精确检查。
 
   # AE1「Artifact Evidence」：文档（SKILL.md / README）引用 scripts/*.py 时
   # 只引了片段 —— 那是文档里的引用，不是缺失的产物。

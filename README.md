@@ -124,9 +124,11 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清"当前只实现了 
    那是审计入口。脚本选取走**显式白名单**（精确脚本名或白名单前缀）——
    名字里带关键词的脚本（例如 `reconcile:reset`）不会被自动执行。
 2. **子进程只拿到白名单环境变量**。`PATH`、`HOME`、`LANG`/`LC_*`、`TMPDIR`、
-   `NODE_*`、`PYTHON*`，以及工具自己需要的 `POSTGRES_URL` / `MEMORY_ITEST` /
-   `REQ_PLAN_RECONCILE_OUT_DIR`。**其余环境变量一律不透传** ——
-   你的 `DATABASE_URL`、各种 API key 不会进目标仓库的脚本。
+   `NODE_*`、`PYTHON*`，以及工具自己需要的 `POSTGRES_URL` / `DATABASE_URL` /
+   `MEMORY_ITEST` / `REQ_PLAN_RECONCILE_OUT_DIR`。**其余环境变量一律不透传** ——
+   你的云厂商密钥、npm token 之类不会进目标仓库的脚本。
+   注意那两个连接串**会**透传：仓库自己的集成车道要连库，这是刻意的取舍 ——
+   不想要就把它们从白名单里去掉，或改用 `.pgpass`。
    `psql` 的口令走 `PGPASSWORD` 环境变量，不出现在命令行参数里。
 3. **信任一个仓库的 `test` 脚本，就等于把它交给了你的环境变量**。
    这一层的风险等级 = 它所运行的每一个脚本的风险等级。

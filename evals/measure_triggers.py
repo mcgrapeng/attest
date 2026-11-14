@@ -195,6 +195,10 @@ def run_query(query: str, timeout: int, max_turns: int
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--only", type=int, default=None)
+    ap.add_argument("--from", dest="lo", type=int, default=None,
+                    help="只跑第 N 条起（1-based，含）")
+    ap.add_argument("--to", dest="hi", type=int, default=None,
+                    help="只跑到第 N 条止（1-based，含）")
     ap.add_argument("--timeout", type=int, default=120)
     ap.add_argument("--max-turns", type=int, default=3,
                     help="给模型几轮：1 会让它来不及加载 skill（测量偏保守）")
@@ -204,6 +208,10 @@ def main() -> int:
     queries = json.loads(EVAL_SET.read_text(encoding="utf-8"))
     if args.only is not None:
         queries = [queries[args.only]]
+    elif args.lo is not None or args.hi is not None:
+        lo = (args.lo or 1) - 1
+        hi = args.hi or len(queries)
+        queries = queries[lo:hi]
     results = []
     for i, q in enumerate(queries, 1):
         hit, note, cost, others, considered = run_query(

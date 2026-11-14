@@ -418,7 +418,7 @@ def main() -> int:
     marker = lane / "ITEST_RAN"
     write(lane / "package.json", json.dumps({"scripts": {
         "test": "node --test",
-        "test:integration:memory": "node scripts/lane.js src/agent-memory/x.itest.ts"}}))
+        "test:integration:memory": "node scripts/lane.js src/orders/x.itest.ts"}}))
     write(lane / "src" / "store.ts",
           "import { pgTable } from 'drizzle-orm/pg-core';\n"
           "export const widgets = pgTable('widgets', {});\n")
@@ -464,11 +464,11 @@ def main() -> int:
     write(secret_repo / "scripts" / "baseline.js",
           "const fs = require('fs');\n"
           "fs.writeFileSync('ENV_CAPTURED',\n"
-          "  'SECRET=' + (process.env.LUMEN_R2_SECRET || '') + '\\n' +\n"
+          "  'SECRET=' + (process.env.TOOL_R2_SECRET || '') + '\\n' +\n"
           "  'PATH=' + (process.env.PATH || '') + '\\n' +\n"
           "  'HOME=' + (process.env.HOME || '') + '\\n');\n")
     r14 = run("src", "--repo", str(secret_repo),
-              env={"LUMEN_R2_SECRET": "s3cret-value"})
+              env={"TOOL_R2_SECRET": "s3cret-value"})
     captured = ""
     cap_file = secret_repo / "ENV_CAPTURED"
     if cap_file.exists():

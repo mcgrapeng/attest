@@ -82,7 +82,7 @@ def main() -> int:
           "export const agentMemory = pgTable('agent_memory', {});\n")
     write(d2 / "src" / "vector.ts",
           "import { MilvusClient } from '@zilliz/milvus2-sdk-node';\n"
-          "export const PREFIX = 'lumen_mem';\n")
+          "export const PREFIX = 'mem_prefix';\n")
     write(d2 / "src" / "files.ts",
           "export async function putObject(k: string) { return k; }\n")
     stores = scan_stores(d2, ["src"])

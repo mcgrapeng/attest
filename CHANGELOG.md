@@ -5,7 +5,7 @@
 
 ## [Unreleased]
 
-本轮目标：把 `req-test-plan` 从"本机一个 skill 目录"推进到"可发布的制品" ——
+本轮目标：把 `attest` 从"本机一个 skill 目录"推进到"可发布的制品" ——
 工程缺口与哲学缺口逐条修完，并用**可复现证据**证明每一条已关闭。
 
 发布前置清单见 [docs/oss-release-review.md](docs/oss-release-review.md)（只读评测记录）
@@ -13,7 +13,7 @@
 
 ### 搬运
 
-- 搬成独立 git 仓库（原先只是 `~/.agents/skills/req-test-plan/` 下的一个目录，
+- 搬成独立 git 仓库（原先只是 `~/.agents/skills/attest/` 下的一个目录，
   没有版本历史、没有 LICENSE 正文、没有发布骨架）。
 - 补 LICENSE 正文（MIT，与 `SKILL.md` frontmatter 的 `license: MIT` 一致）。
 - 仓库根加 `AGENTS.md` 级的工作约定：每个工作区自己的依赖边界、

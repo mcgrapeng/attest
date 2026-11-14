@@ -1,8 +1,8 @@
-# req-test-plan 发布就绪推进 brief
+# attest 发布就绪推进 brief
 
 ## 目标
 
-把 `req-test-plan` skill 推进到**可发布**：修完 `docs/oss-release-review.md` 的工程缺口与
+把 `attest` skill 推进到**可发布**：修完 `docs/oss-release-review.md` 的工程缺口与
 `docs/testing-philosophy-review.md` 的哲学缺口，并用**可复现证据**证明每一条已关闭。
 
 终极目标按用户的原话是"一条命令、基于实测，判定这个模块能不能直接交付给客户"。
@@ -54,7 +54,7 @@
    "表设计符合主流"改成能反映实际内容的名字（例如"表结构基本合规"），并在证据里说清查了哪几条。
 7. **判据"具备扩展性"名不副实**（`readiness.py:1647-1659`）。改名"不过度抽象"。
 8. **对账层只懂一种中文方言**（`readiness.py:806-807` 的 `"漂移" in ln and "❌" in ln`、
-   `810` 的中文"一致性"表头排除、`934-939` 的租户列位置、`783-784` 的 lumen 专属
+   `810` 的中文"一致性"表头排除、`934-939` 的租户列位置、`783-784` 的 示例项目 专属
    `MEMORY_RECONCILE_OUT_DIR`、`911-914` 的硬编码测试租户前缀）。
    要求：漂移/租户/表头的识别可配置（参数或 JSON 输出）；测试租户前缀可配置；
    输出目录用工具自设自读的通用变量并兼容旧变量；**找不到可比对的 CSV 对时必须报"无法比对"**，
@@ -98,7 +98,7 @@
    必须加 Python / Rust / Go 分支；**在实现之前，遇到仓库里没有 JS/TS 测试文件时必须
    拒绝生成并报错**，不得把 TypeScript 写进 `.py` 路径。
 4. **r3/r4 硬编码家目录**（`test_req_plan_r3.py:122,142,173`、
-   `test_req_plan_r4.py:14,16` 指向 `/Users/zhangpeng/.agents/skills/ai-testing-system/scripts/`）。
+   `test_req_plan_r4.py:14,16` 指向 `~/.agents/skills/ai-testing-system/scripts/`）。
    必须改为从 `__file__` 推导；`ai-testing-system` 不存在时**跳过相关断言并打印清晰的 skip
    提示**，不得崩溃、不得静默失败。
 5. **`req_plan.py:9` 的"只读代码，不改任何东西"**与 `scaffold` 写文件矛盾。改准确。
@@ -154,7 +154,7 @@
 2. `skillspector scan --no-llm --format json` **无 HIGH** finding。
 3. 5 个黄金 fixture 的期望判定全部命中（逐个核对退出码与输出关键串）。
 4. `--self-check` 能让至少一条判据从通过翻成不通过。
-5. `~/.agents/skills/req-test-plan/scripts/*.py` 仍然存在且可跑（软链路径未断）。
+5. `~/.agents/skills/attest/scripts/*.py` 仍然存在且可跑（软链路径未断）。
 6. `git status` 干净，所有改动已提交。
 
 ## 文件所有权（并行车道不得越界）

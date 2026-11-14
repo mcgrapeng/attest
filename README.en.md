@@ -1,10 +1,19 @@
-# req-test-plan
+# attest
 
 [中文](README.md) | English
 
-Requirement-level test toolkit: turn one requirement into a checkable test plan,
-then measure which of a module's delivery preconditions are actually proven —
-and which ones are not.
+**A requirement-level test toolkit that turns delivery preconditions into a
+machine-checkable, auditable evidence list.**
+
+It turns one requirement into a **plan you can pin down** — every invariant pinned
+to a test case that actually exists, every row of the coverage matrix checked
+against the repo — then measures which of a module's delivery preconditions are
+**proven** (已实测), which are only **static signals** read out of the source
+(静态信号), which were **never measured** (无信号), and which it does not judge
+at all (本工具不判定: whether the requirement was understood, performance,
+security, availability, operational readiness).
+
+**It is not a "can we ship" referee.** It produces evidence; the decision is yours.
 
 Python 3.11+ standard library only — there is nothing to install.
 
@@ -15,7 +24,7 @@ python3 install.py              # cross-platform (stdlib only, no bash needed)
 # or: bash install.sh           # a thin shell wrapper around the same code
 ```
 
-It symlinks this repository to `~/.agents/skills/req-test-plan`, then symlinks
+It symlinks this repository to `~/.agents/skills/attest`, then symlinks
 that entry to `~/.claude/skills/`, `~/.codex/skills/` and
 `~/.config/opencode/skills/`. An existing symlink with the same name is
 replaced (the script says so); if the target path is a **real directory** the
@@ -25,16 +34,16 @@ script skips it and never deletes user data. Uninstall with `bash uninstall.sh`
 Doing it by hand is equivalent to:
 
 ```bash
-ln -s "$(pwd)" ~/.agents/skills/req-test-plan
-ln -s ~/.agents/skills/req-test-plan ~/.claude/skills/req-test-plan
-ln -s ~/.agents/skills/req-test-plan ~/.codex/skills/req-test-plan
-ln -s ~/.agents/skills/req-test-plan ~/.config/opencode/skills/req-test-plan
+ln -s "$(pwd)" ~/.agents/skills/attest
+ln -s ~/.agents/skills/attest ~/.claude/skills/attest
+ln -s ~/.agents/skills/attest ~/.codex/skills/attest
+ln -s ~/.agents/skills/attest ~/.config/opencode/skills/attest
 ```
 
 ## Packaging (`.skill`)
 
 ```bash
-python3 package.py            # → dist/req-test-plan.skill
+python3 package.py            # → dist/attest.skill
 python3 package.py --check    # list what would be packaged, write nothing
 ```
 
@@ -47,7 +56,7 @@ to the skill's runtime).
 **It refuses to package bytecode.** Compiled artifacts leak the author's
 environment and give users an unreadable bundle.
 
-`~/.agents/skills/req-test-plan` is the stable entry point.
+`~/.agents/skills/attest` is the stable entry point.
 `~/.agents/testkit/doctor.sh` runs the regression suite from there.
 
 ## The four commands
@@ -55,20 +64,20 @@ environment and give users an unreadable bundle.
 ```bash
 # 1. Generate a requirement test plan skeleton (scans the target module for
 #    existing helpers and for the repo's own test lanes)
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py new <feature> \
+python3 ~/.agents/skills/attest/scripts/req_plan.py new <feature> \
   --repo <repo root> --module <subpath> [--module <subpath>...]
 
 # 2. Generate test file skeletons from the plan (follows the repo's own
 #    test conventions)
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py scaffold \
+python3 ~/.agents/skills/attest/scripts/req_plan.py scaffold \
   <plan file> --repo <repo root> [--out-dir <generation root>]
 
 # 3. Check the plan against the code as it actually is (exit code 1 on errors)
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py check \
+python3 ~/.agents/skills/attest/scripts/req_plan.py check \
   <plan file> --repo <repo root>
 
 # 4. Delivery-readiness verdict for a module (one command, it measures)
-python3 ~/.agents/skills/req-test-plan/scripts/readiness.py <module path> \
+python3 ~/.agents/skills/attest/scripts/readiness.py <module path> \
   --repo <repo root> \
   [--plan <requirement test plan>] [--include-itest] [--test-tenant <name or prefix>] [--json]
 ```

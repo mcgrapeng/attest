@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""把 req-test-plan skill 装到各 agent 的 skills 目录（软链）。
+"""把 attest skill 装到各 agent 的 skills 目录（软链）。
 
     python3 install.py              # 装
     python3 install.py --uninstall  # 卸
@@ -9,10 +9,10 @@ Windows 上 `os.symlink` 可能需要管理员/开发者模式 —— 失败时�
 不删用户数据。
 
 布局：
-    ~/.agents/skills/req-test-plan          ← 稳定入口，指向本仓库
-    ~/.claude/skills/req-test-plan          → 指向上面那个
-    ~/.codex/skills/req-test-plan           → 指向上面那个
-    ~/.config/opencode/skills/req-test-plan → 指向上面那个
+    ~/.agents/skills/attest          ← 稳定入口，指向本仓库
+    ~/.claude/skills/attest          → 指向上面那个
+    ~/.codex/skills/attest           → 指向上面那个
+    ~/.config/opencode/skills/attest → 指向上面那个
 
 只动**软链**。目标位置已经是真实目录 ⇒ 跳过并告警，绝不删用户数据。
 """
@@ -24,16 +24,16 @@ import sys
 from pathlib import Path
 
 SRC = Path(__file__).resolve().parent
-PRIMARY = Path.home() / ".agents" / "skills" / "req-test-plan"
+PRIMARY = Path.home() / ".agents" / "skills" / "attest"
 LINK_TARGETS = [
-    Path.home() / ".claude" / "skills" / "req-test-plan",
-    Path.home() / ".codex" / "skills" / "req-test-plan",
-    Path.home() / ".config" / "opencode" / "skills" / "req-test-plan",
+    Path.home() / ".claude" / "skills" / "attest",
+    Path.home() / ".codex" / "skills" / "attest",
+    Path.home() / ".config" / "opencode" / "skills" / "attest",
 ]
 
 
 def install() -> int:
-    print(f"安装 req-test-plan（来源：{SRC}）")
+    print(f"安装 attest（来源：{SRC}）")
     problems = 0
 
     def link(path: Path, target: Path) -> None:
@@ -80,7 +80,7 @@ def install() -> int:
 
 
 def uninstall() -> int:
-    print("卸载 req-test-plan")
+    print("卸载 attest")
     removed = skipped = 0
     for path in [PRIMARY] + LINK_TARGETS:
         if path.is_symlink():

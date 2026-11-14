@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 卸载 req-test-plan skill —— 只删软链，绝不删真实目录。
+# 卸载 attest skill —— 只删软链，绝不删真实目录。
 #
 #   bash uninstall.sh
 #

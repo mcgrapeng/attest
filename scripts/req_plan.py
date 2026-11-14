@@ -1652,7 +1652,7 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
 TEMPLATE = """# 测试计划：{feature}
 
 - 范围：{scope}
-- 生成方式：机器级 `req-test-plan` skill
+- 生成方式：机器级 `attest` skill
 - 目标模块：{modules_line}
 - 判据：每条断言都要有钉；钉不到就说明这条没测。
 
@@ -2336,7 +2336,7 @@ def cmd_new(args: argparse.Namespace) -> int:
     lanes = lane_scripts(repo)
     if lanes:
         # 车道太多时按"名字含目标模块"优先，其余截断 —— 刷 100 行没人看
-        # 目标模块用路径末段匹配（service/src/agent-memory → agent-memory）
+        # 目标模块用路径末段匹配（service/src/orders → orders）
         mod_keys = [m.split("/")[-1] for m in modules if m]
         def rank(k: str) -> tuple[int, int, str]:
             hit = 0 if any(mk and mk in k for mk in mod_keys) else 1

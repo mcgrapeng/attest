@@ -1,8 +1,15 @@
-# req-test-plan
+# attest
 
 中文 | [English](README.en.md)
 
-需求级测试工具包：把一条需求拆成可核对的测试计划，并实测这个模块**能不能交付**。
+**一个把交付前提变成可机读、可核对、可审计的证据清单的需求级测试工具。**
+
+把一条需求拆成**钉得住**的测试计划 —— 每条不变式钉在一个真实存在的用例上，计划里写的
+覆盖矩阵在 `check` 时逐条核对 —— 再实测这个模块的交付前提：哪些已被证明（**已实测**）、
+哪些只是读源码得出的信号（**静态信号**）、哪些根本没测到（**无信号**）、哪些它**根本不判**
+（需求是否被正确理解、性能、安全、可用性、运维就绪）。
+
+**它不是"能不能交付"的裁判。** 它给的是证据，决策仍然归人。
 
 只依赖 Python 3.11+ 标准库，无第三方依赖。
 
@@ -13,7 +20,7 @@ python3 install.py              # 跨平台（纯标准库，没有 bash 依赖�
 # 或者：bash install.sh         # 同一份实现的薄壳
 ```
 
-它把本仓库软链到 `~/.agents/skills/req-test-plan`，再软链到
+它把本仓库软链到 `~/.agents/skills/attest`，再软链到
 `~/.claude/skills/`、`~/.codex/skills/`、`~/.config/opencode/skills/`。
 已存在的同名软链会被覆盖（会打印提示）；目标位置若是**真实目录**则跳过，
 不删用户数据。装完会自检一次（`readiness.py --help` 能跑通）。
@@ -25,18 +32,18 @@ Windows 上 `os.symlink` 可能需要管理员或开发者模式 —— 失败�
 手工装等价于：
 
 ```bash
-ln -s "$(pwd)" ~/.agents/skills/req-test-plan
-ln -s ~/.agents/skills/req-test-plan ~/.claude/skills/req-test-plan
-ln -s ~/.agents/skills/req-test-plan ~/.codex/skills/req-test-plan
-ln -s ~/.agents/skills/req-test-plan ~/.config/opencode/skills/req-test-plan
+ln -s "$(pwd)" ~/.agents/skills/attest
+ln -s ~/.agents/skills/attest ~/.claude/skills/attest
+ln -s ~/.agents/skills/attest ~/.codex/skills/attest
+ln -s ~/.agents/skills/attest ~/.config/opencode/skills/attest
 ```
 
-`~/.agents/skills/req-test-plan` 是稳定入口，`~/.agents/testkit/doctor.sh` 从这里跑回归套件。
+`~/.agents/skills/attest` 是稳定入口，`~/.agents/testkit/doctor.sh` 从这里跑回归套件。
 
 ## 打包（.skill）
 
 ```bash
-python3 package.py            # → dist/req-test-plan.skill
+python3 package.py            # → dist/attest.skill
 python3 package.py --check    # 只看会打进包的内容，不写文件
 ```
 
@@ -51,19 +58,19 @@ python3 package.py --check    # 只看会打进包的内容，不写文件
 
 ```bash
 # 1. 生成需求测试计划骨架（扫目标模块的已有 helper + 项目自己的测试车道）
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py new <feature> \
+python3 ~/.agents/skills/attest/scripts/req_plan.py new <feature> \
   --repo <项目根> --module <子路径> [--module <子路径>...]
 
 # 2. 从计划生成测试文件骨架（按仓库自己的测试约定）
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py scaffold \
+python3 ~/.agents/skills/attest/scripts/req_plan.py scaffold \
   <计划文件> --repo <项目根> [--out-dir <生成根>]
 
 # 3. 核对计划 vs 代码实况（报红退出码 1）
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py check \
+python3 ~/.agents/skills/attest/scripts/req_plan.py check \
   <计划文件> --repo <项目根>
 
 # 4. 模块交付就绪度判定（一条命令，实测）
-python3 ~/.agents/skills/req-test-plan/scripts/readiness.py <模块路径> --repo <项目根> \
+python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项目根> \
   [--plan <需求测试计划>] [--include-itest] [--test-tenant <名字或前缀>] [--json]
 ```
 
@@ -197,7 +204,7 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清"当前只实现了 
 | oracle 独立性 | 扫测试文件，标出"期望值取自被测对象自身"的形态（断言两侧调同一模块、快照自比对…）—— 提醒级，不判红 |
 | 发布骨架缺失（无 LICENSE / README / CHANGELOG / evals / CI） | 本轮补齐，见 [CHANGELOG.md](CHANGELOG.md) |
 | `SKILL.md` 的范围声明与实现对不上 | 降级为"哪些已被实测证明、哪些还没被证明、哪些本工具判不了" —— `016abda` |
-| `~/.agents/skills/req-test-plan/scripts/...` 硬编码路径 | `SKILL.md` 改成解析本 skill 所在目录（`$SKILL_DIR`）—— `016abda` |
+| `~/.agents/skills/attest/scripts/...` 硬编码路径 | `SKILL.md` 改成解析本 skill 所在目录（`$SKILL_DIR`）—— `016abda` |
 
 ### 仍开放
 

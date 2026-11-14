@@ -1,4 +1,6 @@
 # req-test-plan 开源发布条件评测
+> **命名说明**：本文写作时项目名为 `req-test-plan`；发布时改名为 **attest**。
+> 正文里的旧名保留 —— 它是当时的事实记录，不做追溯性改写。
 
 评测日期：2026-11-14
 评测对象：`~/.agents/skills/req-test-plan/`（SKILL.md 464 行 / readiness.py 1816 行 / req_plan.py 1913 行 / 14 个回归脚本）
@@ -129,7 +131,7 @@ drift = [ln.strip() for ln in text.splitlines()
 ```
 
 配套还有：租户取 `|` 表格第一列（`934-939`）、表头排除中文"一致性"（`810`）、输出目录靠
-lumen 专属的 `MEMORY_RECONCILE_OUT_DIR`（`783-784`）、测试租户前缀表写死 lumen 的
+示例项目 专属的 `MEMORY_RECONCILE_OUT_DIR`（`783-784`）、测试租户前缀表写死 示例项目 的
 `itest-/memtest-/mock-/eval-`（`911-914`）。
 
 两个方向的不可靠：
@@ -206,7 +208,7 @@ SkillSpector 的数字不是判据依据：它 100/CRITICAL 完全由字节码�
 ## 七、可移植性
 
 **回归套件不独立。** `test_req_plan_r3.py`（122、142、173 行）与 `test_req_plan_r4.py`
-（14、16 行）硬编码 `/Users/zhangpeng/.agents/skills/ai-testing-system/scripts/`。
+（14、16 行）硬编码 `~/.agents/skills/ai-testing-system/scripts/`。
 
 干净临时目录复现：
 
@@ -260,7 +262,7 @@ r4 更难发现：那 5 条断言测的是 `ai-testing-system` 的脚本，与�
    `1421-1422` / `1359-1360` / `1733`。
 6. **「这不是一个可发布的制品。」**
    无 LICENSE / README / CHANGELOG / evals / CI；`__pycache__` 里躺着两个编译字节码；
-   回归套件硬编码 `/Users/zhangpeng/`；SKILL.md 正文全中文而 description 是英文，
+   回归套件硬编码 `~`；SKILL.md 正文全中文而 description 是英文，
    英文用户拿不到任何用法说明。
 
 ## 十、发布前改动清单
@@ -305,13 +307,13 @@ r4 更难发现：那 5 条断言测的是 `ai-testing-system` 的脚本，与�
 | 24 | 9 处 `~/.agents/skills/req-test-plan/scripts/...` 改成"解析本 skill 所在目录" | 装到任意目录都能跑 |
 | 25 | 建 `evals/`：至少 5 个黄金 fixture —— TS 仓、Python 仓、Rust 仓（应得退出码 2）、**输出英文的对账脚本**（应暴露漂移而非假绿）、**无测试模块**（应不得判"达到交付条件"） | 每条声明都可证伪 |
 | 26 | CI：Node 22 + Python 3.11/3.13 跑全部 14 个脚本，再跑打包冒烟（装进临时目录跑 `new|check` 与 `readiness.py --json`） | 绿标 |
-| 27 | 把 lumen 私货从正文移出（`SKILL.md:42、100-101、131、133-134、152、344`）到 `examples/lumen.md`；脱敏 `memtest-r5-skip` / `~/workspace/zhiman/innies-memory` 等内部标识 | 全文搜索无内部项目名 |
+| 27 | 把 示例项目 私货从正文移出（`SKILL.md:42、100-101、131、133-134、152、344`）到 `examples/示例项目.md`；脱敏 `memtest-skip` / `另一个 Python 仓库` 等内部标识 | 全文搜索无内部项目名 |
 | 28 | 出英文版正文（或 EN + ZH 双份）+ 术语表 | 英文社区可读 |
 | 29 | 打包元数据（skill-creator 的 `package_skill.py`） | 产出可安装的 `.skill` |
 
 ## 十一、评测局限与一处分歧
 
-- 第三方仓库用合成仓库代替，没跑真实公开项目。lumen 与 innies-memory 上的行为由交接文档
+- 第三方仓库用合成仓库代替，没跑真实公开项目。示例项目 与 另一个 Python 仓库 上的行为由交接文档
   背书，本轮未复验。
 - 触发准确度没实测（skill-creator 的 `run_loop` 需要 `claude` CLI），四轴分是按
   plugin-eval rubric 的人工判断。

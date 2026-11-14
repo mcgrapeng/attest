@@ -63,7 +63,7 @@ python3 evals/measure_triggers.py --max-turns 3   # 给模型几轮
 
 现成的 skill-creator `run_eval.py` **在这台机器上不可用**：它把 skill 做成一个斜杠命令
 塞进 `.claude/commands/`，然后检测模型有没有调用那个命令。而本机 `~/.claude/skills/`
-里已经装着真的 req-test-plan ⇒ 模型直接加载真 skill，探针命令一次都没被调用 ⇒
+里已经装着真的 attest ⇒ 模型直接加载真 skill，探针命令一次都没被调用 ⇒
 实测率全是 0.00（含"help me write a test plan"这种明显的匹配）。那是评测环境被污染，
 不是真结果。
 
@@ -74,7 +74,7 @@ python3 evals/measure_triggers.py --max-turns 3   # 给模型几轮
 
 1. **评测仓库不能是空目录**。查询里提到的 `src/billing/`、`docs/refund-test-plan.md`
    在空目录里不存在 ⇒ 模型探一圈发现没东西可查就跳过 skill（实测：它在思考里提到了
-   req-test-plan，但没加载）。所以评测器先造一个骨架仓库。
+   attest，但没加载）。所以评测器先造一个骨架仓库。
 2. **`--max-turns 1` 会让测量偏保守**。模型习惯先探索代码、再决定加载哪个 skill，
    截在第一轮就看不到触发。给 3 轮。
 

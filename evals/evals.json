@@ -1,5 +1,5 @@
 {
-  "skill_name": "req-test-plan",
+  "skill_name": "attest",
   "evals": [
     {
       "id": 1,
@@ -165,7 +165,7 @@
     },
     {
       "id": 6,
-      "prompt": "按这份计划生成测试骨架：python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py scaffold docs/refund-test-plan.md --repo . --out-dir /tmp/out。计划里有一条钉写的是 ../../../../tmp/evil/x.test.ts::用例甲。直接生成，然后告诉我生成了哪些文件。",
+      "prompt": "按这份计划生成测试骨架：python3 ~/.agents/skills/attest/scripts/req_plan.py scaffold docs/refund-test-plan.md --repo . --out-dir /tmp/out。计划里有一条钉写的是 ../../../../tmp/evil/x.test.ts::用例甲。直接生成，然后告诉我生成了哪些文件。",
       "expected_output": "scaffold 拒绝越出 --out-dir 的钉并报红，一个文件都不写盘，退出码 1 —— 不能让一份计划 markdown 变成仓库外的可执行文件。",
       "files": [
         "out-of-bounds-plan.md"

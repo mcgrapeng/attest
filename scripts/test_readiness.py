@@ -305,11 +305,11 @@ def main() -> int:
     itst = mkdtemp()
     write(itst / "package.json", json.dumps({"scripts": {
         "test": "node --test 'src/**/*.test.ts'",
-        "test:integration:memory": "node scripts/lane.js src/agent-memory/x.itest.ts"}}))
+        "test:integration:memory": "node scripts/lane.js src/orders/x.itest.ts"}}))
     write(itst / "src" / "store.ts",
           "import { pgTable } from 'drizzle-orm/pg-core';\n"
           "export const widgets = pgTable('widgets', {});\n")
-    write(itst / "src" / "agent-memory" / "x.itest.ts", "export const x = 1;\n")
+    write(itst / "src" / "orders" / "x.itest.ts", "export const x = 1;\n")
     write(itst / "scripts" / "lane.js",
           "// 假车道：报一个连不上 Milvus 的失败\n"
           "console.log('not ok 1 - 三方数据流对账 # SKIP');\n"

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """round-12 回归测试：终审发现的 9 类缺陷（假阳性 6 + 假阴性 3）。
 
-其中 B1/B2/B5 已在真实 Lumen 仓库复现过（退出码 1）—— 这里把形态固化。
+其中 B1/B2/B5 已在真实项目里复现过（退出码 1）—— 这里把形态固化。
 """
 from __future__ import annotations
 

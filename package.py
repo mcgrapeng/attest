@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """把 skill 打包成可分发的 `.skill` 文件（zip 格式）。
 
-    python3 package.py                 # → dist/req-test-plan.skill
+    python3 package.py                 # → dist/attest.skill
     python3 package.py --out /tmp/x    # 指定输出目录
     python3 package.py --check         # 只检查会打进包的内容，不写文件
 
@@ -24,7 +24,7 @@ import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-SKILL_NAME = "req-test-plan"
+SKILL_NAME = "attest"
 
 EXCLUDE_DIRS = {"__pycache__", "node_modules", ".git", ".github", ".omx",
                 "dist", "fixtures", "evals", ".venv", "venv", ".pytest_cache",

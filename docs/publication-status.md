@@ -1,7 +1,7 @@
 # 发布状态：能不能发，还差什么
 
 日期：2026-11-14
-仓库：`~/workspace/liaohe/req-test-plan`（分支 main）
+仓库：`<repo>`（分支 main）
 本文是**唯一的现状结论**。前面的 `oss-release-review.md` / `oss-release-review-v2.md` /
 `testing-philosophy-review.md` / `testing-philosophy-review-v2.md` 是历史评测记录，
 它们的结论已逐条处理，处理结果见 `oss-release-review-v2.md` 第 6 节与本文。
@@ -49,7 +49,7 @@ CI（`.github/workflows/ci.yml`）四个 job：字节码卫生 / 回归+fixture+
 ## 触发准确度（实测了，附边界）
 
 已用**真实机制**测过：skill 装在 skills 目录里，看模型有没有真的发出
-`Skill(skill=req-test-plan)` 调用（`evals/measure_triggers.py`，20 条查询，
+`Skill(skill=attest)` 调用（`evals/measure_triggers.py`，20 条查询，
 10 正 + 10 近邻反例，每条 3 轮）。
 
 | description | 精确率 | 召回率 | F1 |
@@ -90,7 +90,7 @@ itest 车道的**全量**支持（Makefile/tox 兜底已接，但只覆盖脚本
 ## 怎么复核这份状态
 
 ```bash
-cd ~/workspace/liaohe/req-test-plan
+cd <repo>
 for t in scripts/test_*.py; do python3 "$t" || echo "FAIL $t"; done
 PATH="/tmp/ptcov-venv/bin:$PATH" bash fixtures/run_fixtures.sh    # 需要 pytest-cov
 python3 evals/run_evals.py

@@ -7,7 +7,7 @@
 
 为什么不用 skill-creator 的 run_eval.py：它把 skill 做成**斜杠命令**塞进
 .claude/commands/，然后检测模型有没有调用那个命令。而本机 `~/.claude/skills/`
-里已经装着真的 req-test-plan ⇒ 模型直接加载真 skill，探针命令一次都没被调用
+里已经装着真的 attest ⇒ 模型直接加载真 skill，探针命令一次都没被调用
 ⇒ 实测率全是 0.00（实测过，2026-11-14）。那是评测环境被污染，不是真结果。
 
 这个脚本测的是真机制：skill 装在 skills 目录里，模型看到 name+description，
@@ -15,7 +15,7 @@
 
 **评测仓库不是空目录**：查询里提到的 `src/billing/`、`src/orders/`、
 `docs/refund-test-plan.md` 在空目录里不存在 ⇒ 模型探一圈发现没东西可查就跳过
-skill（实测：它在思考里提到了 req-test-plan，但没加载）。所以先造一个像个真
+skill（实测：它在思考里提到了 attest，但没加载）。所以先造一个像个真
 仓库的骨架，让"要不要用这个 skill"这个问题是真的。
 
 每个查询跑一次 `claude -p`（--max-turns 3：够它探完再决定加载不加载；
@@ -35,7 +35,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 EVAL_SET = ROOT / "evals" / "trigger-evals.json"
-SKILL_NAME = "req-test-plan"
+SKILL_NAME = "attest"
 
 #: 评测用的假仓库骨架 —— 查询里提到的路径都要存在，否则模型会认为没东西可查。
 FIXTURE_FILES = {
@@ -116,7 +116,7 @@ def considered_in_thinking(stdout: str) -> bool:
     skill 列表一直��模型的上下文里，所以"没提到"不等于"没看见"。真正要问的是：
     描述够不够显眼，让我们在候选集里出现过一次。
     """
-    markers = ("req-test-plan", "交付就绪度", "测试就绪度", "需求测试计划")
+    markers = ("attest", "交付就绪度", "测试就绪度", "需求测试计划")
     for line in stdout.splitlines():
         line = line.strip()
         if not line.startswith("{"):

@@ -373,7 +373,7 @@ class RepoIndex:
 def index_repo(root: Path) -> RepoIndex:
     """扫全仓一次：文本、标识符词频、导出符号。
 
-    逐个符号走全仓是 O(符号数 × 文件数) —— agent-memory 上百个导出符号，
+    逐个符号走全仓是 O(符号数 × 文件数) —— 一个上百个导出符号的模块，
     那是几十万次文件读。
     """
     idx = RepoIndex()
@@ -420,7 +420,7 @@ def index_repo(root: Path) -> RepoIndex:
 def project_test_cmd(m: Module) -> tuple[list[str], str]:
     """项目声明的测试命令（runner + flags），文件部分我们自己换。
 
-    必须用项目自己的 runner —— lumen 用 tsx（解析 tsconfig 路径别名），
+    必须用项目自己的 runner —— 有些项目用 tsx（解析 tsconfig 路径别名），
     裸 node --test 会让一堆测试假挂。
     """
     import shlex
@@ -1121,8 +1121,8 @@ def _covers_module(m: Module, ws: Path) -> bool:
 def _entries(cands: list[tuple[Path, str, str]]) -> list[tuple[Path, str, str]]:
     """入口 = 没被**别的候选按整个名字引用**的那些。
 
-    不能用子串判断：`test:coverage:agent-memory` 是
-    `test:coverage:agent-memory:core` 的前缀 ⇒ 子串会把入口误删。
+    不能用子串判断：`test:coverage:svc` 是
+    `test:coverage:svc:core` 的前缀 ⇒ 子串会把入口误删。
     """
     referenced = " ".join(c[2] for c in cands)
     entries = []
@@ -1508,7 +1508,7 @@ def is_test_tenant(name: str, declared: list[str],
     """这个租户是测试专用的吗？
 
     判据：名字像测试租户，或仓库显式声明过（精确名或前缀）。
-    `prefixes` 给了就**替换**内置的测试租户前缀表（默认表是 lumen 的
+    `prefixes` 给了就**替换**内置的测试租户前缀表（默认表是常见的
     itest-/memtest-/mock-/eval-，别的仓库要用自己的）。
     """
     if not name:

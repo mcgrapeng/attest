@@ -42,10 +42,10 @@ def run(home: Path, *args: str) -> subprocess.CompletedProcess:
 
 
 def links(home: Path) -> list[Path]:
-    return [home / ".agents" / "skills" / "req-test-plan",
-            home / ".claude" / "skills" / "req-test-plan",
-            home / ".codex" / "skills" / "req-test-plan",
-            home / ".config" / "opencode" / "skills" / "req-test-plan"]
+    return [home / ".agents" / "skills" / "attest",
+            home / ".claude" / "skills" / "attest",
+            home / ".codex" / "skills" / "attest",
+            home / ".config" / "opencode" / "skills" / "attest"]
 
 
 def test_install_and_uninstall() -> None:
@@ -56,7 +56,7 @@ def test_install_and_uninstall() -> None:
     expect("自检通过" in r.stdout, "装完做了自检")
     for p in links(home):
         expect(p.is_symlink(), f"{p.relative_to(home)} 是软链")
-    primary = home / ".agents" / "skills" / "req-test-plan"
+    primary = home / ".agents" / "skills" / "attest"
     expect(primary.resolve() == ROOT.resolve(),
            "稳定入口指向本仓库")
     for p in links(home)[1:]:
@@ -71,7 +71,7 @@ def test_install_and_uninstall() -> None:
 
     print("\n真实目录不被删")
     home2 = mkdtemp()
-    real = home2 / ".claude" / "skills" / "req-test-plan"
+    real = home2 / ".claude" / "skills" / "attest"
     real.mkdir(parents=True)
     (real / "keep.txt").write_text("用户数据\n", encoding="utf-8")
     r3 = run(home2)
@@ -103,7 +103,7 @@ def test_shell_wrapper_is_thin() -> None:
                           capture_output=True, text=True, encoding="utf-8",
                           env={**os.environ, "HOME": str(home)})
     expect(proc.returncode == 0, "bash install.sh 能跑通")
-    expect((home / ".agents" / "skills" / "req-test-plan").is_symlink(),
+    expect((home / ".agents" / "skills" / "attest").is_symlink(),
            "薄壳装出了软链")
 
 

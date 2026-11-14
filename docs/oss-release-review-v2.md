@@ -1,4 +1,6 @@
 # req-test-plan 开源发布条件复评（v2）
+> **命名说明**：本文写作时项目名为 `req-test-plan`；发布时改名为 **attest**。
+> 正文里的旧名保留 —— 它是当时的事实记录，不做追溯性改写。
 
 复评日期：2026-11-14
 复评对象：`req-test-plan` skill 独立仓库
@@ -39,7 +41,7 @@
 ### 闸门 1：全部回归脚本
 
 ```
-cd /Users/zhangpeng/workspace/liaohe/req-test-plan/scripts
+cd <repo>/scripts
 for t in $(ls test_*.py | sort -V); do python3 "$t" >/dev/null 2>&1 || echo "FAIL $t"; done
 ```
 
@@ -143,7 +145,7 @@ python3 scripts/readiness.py src --repo fixtures/ts-colocated --self-check
 
 ```
 $ node --test test/
-Error: Cannot find module '/private/tmp/g5-std-testdir/test'
+Error: Cannot find module '/tmp/g5-std-testdir/test'
 not ok 1 - test
   failureType: 'testCodeFailure'
 ```
@@ -260,7 +262,7 @@ $ ls -la /tmp/g5-pwned/     # 空目录，零文件
 | --- | --- | --- |
 | 漂移识别只懂「中文『漂移』+ ❌」 | 已关闭 | `drift_re` / `header_re` / `tenant_col` / `tenant_prefixes` / `csv_pairs` 全部参数化（`scripts/readiness.py:1132-1136`、CLI `--drift-pattern` / `--table-header-pattern` / `--csv-pair` / `--tenant-col`）。`fixtures/english-reconciler`（输出英文）期望「暴露漂移，**不**报『生产租户无漂移』」，实跑**命中**。 |
 | 租户列写死第一列、表头排除中文「一致性」 | 已关闭 | 租户列改为从表头认（`scripts/readiness.py:1182`，认不到才退回第一列）；表头正则可配。 |
-| 输出目录靠 lumen 专属 `MEMORY_RECONCILE_OUT_DIR` | **部分关闭** | 通用变量 `REQ_PLAN_RECONCILE_OUT_DIR` 已落地并优先（`scripts/readiness.py:1148-1152`），自动跑时指向临时目录、不覆盖人工当天那份。但**旧的 `MEMORY_RECONCILE_OUT_DIR` 仍被兼容保留并写进子进程环境**（`scripts/readiness.py:42` 的 `ENV_ALLOW_EXACT`），lumen 私货没清干净。 |
+| 输出目录靠 示例项目 专属 `MEMORY_RECONCILE_OUT_DIR` | **部分关闭** | 通用变量 `REQ_PLAN_RECONCILE_OUT_DIR` 已落地并优先（`scripts/readiness.py:1148-1152`），自动跑时指向临时目录、不覆盖人工当天那份。但**旧的 `MEMORY_RECONCILE_OUT_DIR` 仍被兼容保留并写进子进程环境**（`scripts/readiness.py:42` 的 `ENV_ALLOW_EXACT`），示例项目 私货没清干净。 |
 | CSV 两两配对 + 比对 `created_at` ⇒ 生产租户假红 | 已关闭 | `_csv_pairs()`（`scripts/readiness.py:1233-1271`）优先用 `--csv-pair` 声明的对照关系，没声明时按"共同列最多的互为最佳"配对（不是两两配对）；时间戳类字段排除、正文类字段单独归类报「需人工判断」。找不到成对 CSV 时报「无法比对」而不是「0 对无差异」。 |
 | `run_reconciler` 往被调脚本里塞 `--experimental-test-coverage` / `--run` | 已关闭 | 现在的实现注释明写「用项目自己的 runner（路径别名要 tsx 才解析）—— **不改被调脚本的语义**」（`scripts/readiness.py:1132-1160`），对账脚本不再被追加参数。 |
 
@@ -334,7 +336,7 @@ CI 有独立 job（`.github/workflows/ci.yml` 的 `hygiene` job）：`find . -pa
 ```
 $ python3 scripts/readiness.py src --repo /tmp/g5-wl --dry-run
 将要执行的仓库脚本 — src（--dry-run，不执行）
-  [基线对拍] baseline:check（工作目录 /private/tmp/g5-wl）
+  [基线对拍] baseline:check（工作目录 /tmp/g5-wl）
       $ node baseline.js
 ```
 
@@ -390,7 +392,7 @@ CHILD_SEES_DATABASE_URL=postgres://user:SECRET@db:5432/prod
 
 ### 4.7 七、可移植性
 
-#### 回归套件不独立（r3/r4 硬编码 `/Users/zhangpeng/...`）
+#### 回归套件不独立（r3/r4 硬编码 `~...`）
 **结论**：已关闭
 **证据**：`grep -rn "/Users/" scripts/` 只命中 `scripts/test_req_plan_scaffold_safety.py` 里
 **断言字符串本身**（337-338 行：`expect("/Users/" not in r3src, ...)`），没有真实硬编码。
@@ -435,7 +437,7 @@ hygiene / test+fixture / package-smoke / skillspector）、`install.sh` + `unins
 | 3 | 「你的 `scaffold` 能往仓库外写文件，还能把计划 markdown 变成可执行代码。」 | 已关闭 | 越界钉被拒、零文件写盘；注入载荷完整留在字符串字面量里（§4.1）。 |
 | 4 | 「你有两条永远打勾的判据，两条对 Python 空转。」 | 已关闭 | 两条判据都有 Python 分支且空集判 `skipped`；「使用主流开源库」降级为静态信号（不再假装是实测判据）。 |
 | 5 | 「文档说通用阈值是错的，代码把它当门槛用；文档说 itest 要 `--include-itest`，代码默认就跑。」 | 已关闭 | 通用阈值默认不阻塞、要阈值得显式 `--min-line-coverage`；itest 默认不跑（`scripts/readiness.py:2573`）。 |
-| 6 | 「这不是一个可发布的制品。」 | **部分关闭** | LICENSE / README / CHANGELOG / evals / CI / install / fixtures 都有了，回归套件不再依赖作者家目录。**但**：`.omx/ultragoal/`（29KB 内部编排状态）仍被 git 跟踪（§5.1）；正文仍只有中文（P2 #28）；打包元数据仍缺（P2 #29）；SKILL.md 里仍有 5 处 lumen 私货（P2 #27）。 |
+| 6 | 「这不是一个可发布的制品。」 | **部分关闭** | LICENSE / README / CHANGELOG / evals / CI / install / fixtures 都有了，回归套件不再依赖作者家目录。**但**：`.omx/ultragoal/`（29KB 内部编排状态）仍被 git 跟踪（§5.1）；正文仍只有中文（P2 #28）；打包元数据仍缺（P2 #29）；SKILL.md 里仍有 5 处 示例项目 私货（P2 #27）。 |
 
 ### 4.10 十、P0 清单（9 条）
 
@@ -477,7 +479,7 @@ hygiene / test+fixture / package-smoke / skillspector）、`install.sh` + `unins
 | 24 | 9 处硬编码路径 → 解析本 skill 目录 | **部分关闭** | SKILL.md 已换 `$SKILL_DIR`，但**该变量无人定义**；README 四条命令仍写死 `~/.agents/skills/...`（§4.7）。 |
 | 25 | 建 `evals/`（≥5 黄金 fixture） | 已关闭 | `fixtures/` 5 个 + `evals/evals.json` 6 条 eval，断言可机检。 |
 | 26 | CI（Node 22 + Python 3.11/3.13 + 打包冒烟） | 已关闭 | `.github/workflows/ci.yml` 的 matrix 是 node 22 × python 3.11/3.13；四个 step（逐个跑 `scripts/test_*.py`、跑 fixtures、打包冒烟、skillspector）**本轮都在本机等价跑通**（闸门 1/2/3 + 打包冒烟步骤）。**GitHub Actions 本体未观测**（无网络/CI 环境）。 |
-| 27 | lumen 私货移出正文 + 脱敏 | **仍开放** | `grep -rn "lumen\|memtest-r5-skip" SKILL.md` 命中 5 处：57 行「lumen 用 tsx」、128 行「lumen 的 service 闸阈值是行 49」、164 行「lumen agent-memory」、199 行「memtest-r5-skip」、394 行「lumen：`service/scripts/memory-data-reconcile.ts`」。没有 `examples/lumen.md`。 |
+| 27 | 示例项目 私货移出正文 + 脱敏 | **仍开放** | `grep -rn "示例项目\|memtest-skip" SKILL.md` 命中 5 处：57 行「示例项目 用 tsx」、128 行「示例项目 的 service 闸阈值是行 49」、164 行「示例项目的向量记忆模块」、199 行「memtest-skip」、394 行「示例项目：`service/scripts/memory-data-reconcile.ts`」。没有 `examples/示例项目.md`。 |
 | 28 | 英文版正文 | **仍开放** | `SKILL.md`（580 行）与 `README.md`（222 行）全是中文（`grep -c "[一-鿿]"` ⇒ 395 / 134）。 |
 | 29 | 打包元数据（`.skill`） | **仍开放** | 仓库里没有 `package_skill.py` / `*.skill` / 打包 manifest。 |
 
@@ -528,7 +530,7 @@ hygiene / test+fixture / package-smoke / skillspector）、`install.sh` + `unins
    **没有排除 `.omx`**，但因为 E2/PE3 是**规则级**放行，那 4 条即使进 HEAD 也**不会被拦**。
    ⇒ 上轮的"改了那一行就要重新看一眼"这条纪律，在规则级 allowlist 下对 `.omx` 完全失效。
 2. **它不是这个 skill 的一部分**。`brief.md` 是实现方自己的任务 brief，
-   含作者的 `/Users/zhangpeng/.agents/skills/ai-testing-system/scripts/` 绝对路径。
+   含作者的 `~/.agents/skills/ai-testing-system/scripts/` 绝对路径。
    对外部用户零价值，对发布者来说是噪声与内部信息外泄。
 3. **它会持续漂移**。一个每次提交都在变的内部状态文件进了发布制品，
    仓库的 diff 里会混进与产品无关的噪声。
@@ -564,7 +566,7 @@ TS 侧**没有 `setup_errors` 概念**（Python 侧有，见 `scripts/readiness.
   ✗ 测试全绿 — 1 个用例失败
       · calc.test.ts: test
 真实原因（node --test test/ 的真实输出）：
-  Error: Cannot find module '/private/tmp/g5-std-testdir/test'
+  Error: Cannot find module '/tmp/g5-std-testdir/test'
   not ok 1 - test   failureType: 'testCodeFailure'
 ```
 ⇒ 阻塞项。而 SKILL.md:42 自己承诺「**只认断言失败**；setup 报错=环境没就绪 ⇒ 未实测」。
@@ -701,7 +703,7 @@ CHILD_SEES_DATABASE_URL=postgres://user:SECRET@db:5432/prod
   4. **【顺手】§4.5 末条 + §4.7** —— `_symbol_exists` 补上 `.py/.rs/.go`；
      `$SKILL_DIR` 给出可用的定义（或 README 统一走 `~/.agents/skills/...`）。
 
-其余仍开放的项（英文正文、打包元数据、lumen 私货）**都不构成"不能发"** ——
+其余仍开放的项（英文正文、打包元数据、示例项目 私货）**都不构成"不能发"** ——
 它们影响的是受众规模与观感，不是正确性。
 
 **推荐发布姿势**：先修 §5.3 + §5.4 + §5.1 三条，再发；发的时候用

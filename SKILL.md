@@ -1,5 +1,5 @@
 ---
-name: req-test-plan
+name: attest
 description: >-
   Requirement-level test planning and delivery verification. Generate a test plan
   covering every test type and key flow detail, pin each invariant to a real
@@ -21,7 +21,7 @@ description: >-
   生成测试骨架。
 license: MIT
 metadata:
-  author: zhangpeng
+  author: mcgrapeng
   version: "1.0"
 ---
 
@@ -37,7 +37,7 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> \
   [--plan <需求测试计划>] [--include-itest] [--test-tenant <名字或前缀>] [--json]
 ```
 
-`$SKILL_DIR` = 本 skill 所在目录（装在 `~/.agents/skills/req-test-plan` 时就是那个路径）。
+`$SKILL_DIR` = 本 skill 所在目录（装在 `~/.agents/skills/attest` 时就是那个路径）。
 
 回答的是：**这个模块的交付前提里，哪些已被实测证明、哪些还没被证明、哪些本工具判不了。**
 

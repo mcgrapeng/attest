@@ -6,7 +6,7 @@
 
 ## 场景
 
-模块 `agent-memory`（向量记忆）同时写两个存储：
+一个向量记忆模块同时写两个存储：
 
 - **权威库**（PostgreSQL）：行数据、租户、状态
 - **派生库**（Milvus）：向量与文档内容
@@ -21,13 +21,13 @@
 | 租户 | 怎么来的 | 算不算漂移 |
 | --- | --- | --- |
 | `default` | 生产租户 | **fail** —— 阻塞交付 |
-| `memtest-r5-skip` | 测试用例**直接 DB insert** 塞的配额占位（绕过写路径 ⇒ 天然无向量） | warn —— 夹具状态，不是缺陷 |
-| `itest-r4-contract` | 测试用例**注入镜像失败**造出来的 | warn —— 同上 |
+| `memtest-skip` | 测试用例**直接 DB insert** 塞的配额占位（绕过写路径 ⇒ 天然无向量） | warn —— 夹具状态，不是缺陷 |
+| `itest-contract` | 测试用例**注入镜像失败**造出来的 | warn —— 同上 |
 
 判定结论：生产租户一致 ✅；两个测试租户的"缺向量"是刻意的。
 
-**这两行数据不能清** —— 清理脚本（`memory-r5-cleanup`）只清 `memtest-` 前缀，
-显式保留 `default` / `r4-review` / `mock-tenant` / `eval-tenant`。
+**这两行数据不能清** —— 清理脚本（`memory-cleanup`）只清 `memtest-` 前缀，
+显式保留 `default` / `review-tenant` / `mock-tenant` / `eval-tenant`。
 R4/R5 的验收报告指着它们：清了报告引用的交付物就毁了。
 
 > 这就是"租户口径"这条判据的由来：把夹具状态算成阻塞项 = 假阳性；

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """req_plan.py 自测。
 
-跑法: python3 ~/.agents/skills/req-test-plan/scripts/test_req_plan.py
+跑法: python3 ~/.agents/skills/attest/scripts/test_req_plan.py
 """
 from __future__ import annotations
 

@@ -23,6 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from req_plan import case_matches, parse_pins, parse_plan, test_case_names  # noqa: E402
+import mutation_check  # noqa: E402
 
 CODE_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
             ".py", ".pyi"}
@@ -2348,6 +2349,106 @@ def check_uncovered_exports(m: Module, idx: RepoIndex) -> Check:
                  f"{len(exports)} 个运行时导出都有测试引用")
 
 
+def check_test_strength(m: Module, args) -> Check:
+    """测试强度：把源码改坏，看测试会不会红（变异测试的轻量版）。
+
+    覆盖率只说明代码被执行过，不说明断言会失败 —— 一个"杀不死缺陷"的
+    测试套件，覆盖率再高也不说明问题。这一条回答的是
+    **这套测试能不能发现缺陷**。
+
+    默认**不跑**（要复制工作区并多次跑测试，很贵）⇒ 默认状态是"未实测"。
+    判据不设分数线（杀不杀得死多少算够，门槛归项目）：
+        0 个杀死 ⇒ ✗ 这套测试发现不了这类缺陷
+        部分存活 ⇒ · 有杀不死的点（列出位置）
+        全部杀死 ⇒ ✓（但样本有限 ⇒ 不等于"这套测试够强"）
+    """
+    if not getattr(args, "mutation_check", False):
+        return Check("test-strength", "测试能发现缺陷", "skipped",
+                     "未实测：加 --mutation-check 才会把源码改坏再跑测试"
+                     "（要复制工作区并多次跑测试，很贵）",
+                     evidence_kind="untested")
+    root = m.root
+    # runner 与测试文件（相对工作区）
+    if m.lang == "py":
+        exe, ptests = python_test_cmd(m, root)
+        if not exe:
+            return Check("test-strength", "测试能发现缺陷", "skipped",
+                         "没找到 pytest ⇒ 没法跑测试 ⇒ 这项没法测",
+                         evidence_kind="untested")
+        runner: list[str] = [exe]
+        test_rels = list(ptests or ["."])
+        ws_rel = "."
+        src_base = root
+    else:
+        if not m.workspace:
+            return Check("test-strength", "测试能发现缺陷", "skipped",
+                         "没有 package.json ⇒ 认不出项目自己的测试命令",
+                         evidence_kind="untested")
+        prefix, _script = project_test_cmd(m)
+        runner = list(prefix)
+        ws_rel = str(m.workspace.relative_to(root)) or "."
+        test_rels = [str(t.relative_to(m.workspace)) for t in m.tests]
+        src_base = m.workspace
+    if not test_rels:
+        return Check("test-strength", "测试能发现缺陷", "skipped",
+                     "这个模块没有测试文件 ⇒ 无从判断测试能不能发现缺陷",
+                     evidence_kind="untested")
+
+    # 优先改**测试碰过的**源码 —— 改动落在没人碰的代码上，变异多半会活下来，
+    # 那是覆盖问题不是测试强度问题。
+    test_text = ""
+    for t in m.tests:
+        try:
+            test_text += t.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
+
+    def _rank(p: Path) -> tuple[int, str]:
+        stem = p.stem
+        touched = 0 if (stem and stem in test_text) else 1
+        return (touched, str(p))
+
+    srcs = sorted(m.sources, key=_rank)
+    source_rels = []
+    for p in srcs[:40]:
+        try:
+            source_rels.append(str(p.relative_to(src_base)))
+        except ValueError:
+            continue
+
+    res = mutation_check.run_mutation_check(
+        repo=root, ws_rel=ws_rel, source_rels=source_rels,
+        test_rels=test_rels, runner=runner, max_mutants=6,
+        timeout=getattr(args, "mutation_timeout", 120))
+    attempted = res["attempted"]
+    killed = res["killed"]
+    survivors = res["survivors"]
+    notes = res["notes"]
+    ev = [f"{s['where']}  {s['kind']}（{s['change']}）—— 改了它测试还是绿的"
+          for s in survivors]
+    if res["timeouts"]:
+        ev.append(f"其中 {res['timeouts']} 个是超时（也算发现了，但值得看一眼）")
+    ev += notes
+    if attempted == 0:
+        return Check("test-strength", "测试能发现缺陷", "skipped",
+                     "没跑起来：" + ("；".join(notes) or "没有可注入的变异点"),
+                     ev, evidence_kind="untested")
+    if killed == 0:
+        return Check("test-strength", "测试能发现缺陷", "fail",
+                     f"{attempted} 个变异点全部杀不死 ⇒ 这套测试发现不了这类缺陷",
+                     ev, "给这些点补断言：改动后用例应该红", evidence_kind="executed")
+    if survivors:
+        return Check("test-strength", "测试能发现缺陷", "warn",
+                     f"{killed}/{attempted} 个变异被杀死，{len(survivors)} 个杀不死"
+                     f"（杀不杀得死多少算够，门槛归项目）",
+                     ev, "给杀不死的点补断言，或确认那些行为没测到也无所谓",
+                     evidence_kind="executed")
+    return Check("test-strength", "测试能发现缺陷", "pass",
+                 f"{killed}/{attempted} 个变异全部被测试杀死"
+                 f"（样本有限 ⇒ 不等于“这套测试够强”）",
+                 ev, evidence_kind="executed")
+
+
 # 模块里出现租户字段 ⇒ 这个模块是租户隔离的（否则不要求租户列）
 _TENANT_HINT_RE = re.compile(r"\b(tenant_id|tenantId|tenant|org_id|orgId|"
                              r"organization_id|workspace_id)\b")
@@ -2460,6 +2561,146 @@ def check_schema(m: Module, facts: dict) -> Check:
     return Check("schema", "表结构基本合规", "pass",
                  f"{len(facts)} 张表都合规", ev + [checked],
                  evidence_kind="executed")
+
+
+# ---------------------------------------------------------------- 向量集合
+
+# 集合调用点 —— 只认这些操作名，别的一律不管
+_VECTOR_CALL_RE = re.compile(
+    r"\b(createCollection|create_collection|insert|upsert|search|query|delete|"
+    r"hasCollection|has_collection|describeCollection|describe_collection|"
+    r"getCollection|get_collection)\s*\(", re.I)
+_VECTOR_COLL_RE = re.compile(
+    r"""(?:collection_?name|collectionName|collection)\s*[:=]\s*['"]?(\w+)['"]?""")
+_VECTOR_DIM_RE = re.compile(
+    r"\b(?:dimension|dim|vector_dim|vectorDim)\s*[:=]\s*['\"]?(\w+)['\"]?")
+_VECTOR_METRIC_RE = re.compile(
+    r"\b(?:metric_?type|metricType|metric)\s*[:=]\s*['\"]?([\w-]+)['\"]?")
+_VECTOR_PART_RE = re.compile(
+    r"\b(?:partition_?key(?:_?field)?|partitionKey(?:Field)?)\s*[:=]\s*"
+    r"['\"]?(\w+)['\"]?")
+#: 模块里声明为向量类型的字段名
+_VECTOR_FIELD_RE = re.compile(
+    r"""(\w+)\s*[:=]\s*['"](\w+)['"][^;{}\n]{0,140}?"""
+    r"(?:FLOAT_VECTOR|BINARY_VECTOR)")
+_VECTOR_PG_FIELD_RE = re.compile(r"\b(\w+)\s*[:=]\s*(?:sql\.)?Vector\s*\(")
+#: 模块里的字符串常量（用来把 collection_name: MEM_COLLECTION 解析成真值）
+_CONST_STR_RE = re.compile(
+    r"""\b(\w+)\s*(?::\s*string\s*)?=\s*['"]([^'"]{1,120})['"]""")
+_VECTOR_WRITE_OPS = {"createcollection", "create_collection", "insert", "upsert"}
+_VECTOR_READ_OPS = {"search", "query"}
+
+
+def _call_args(text: str, open_idx: int) -> str:
+    """取调用点的参数文本（括号配平）。"""
+    depth = 0
+    for i in range(open_idx, min(len(text), open_idx + 2000)):
+        c = text[i]
+        if c in "([{":
+            depth += 1
+        elif c in ")]}":
+            depth -= 1
+            if depth == 0:
+                return text[open_idx:i + 1]
+    return text[open_idx:open_idx + 600]
+
+
+def check_vector_schema(m: Module) -> Check:
+    """向量集合属性自洽 —— PG 那侧有五条自有规则，集合这侧也得有。
+
+    判的是**调用点之间是否自相矛盾**，不猜项目的命名规范：
+
+      1. 同一集合在不同调用点的维度/度量/分区键不一致 ⇒ 报
+         （写入用 1536、检索用 768 这种，工具看不出来就等于没测）
+      2. 分区键指向一个向量字段 ⇒ 报（Milvus 不允许按向量字段分区）
+      3. 写入的集合与检索的集合不是同一个 ⇒ 提醒
+         （若本意是同一份数据，这就是"写入 A、检索 B"的缺陷）
+
+    **不判**：集合命名规范、集合与线上真实租户是否一致 ——
+    前者要项目的约定，后者要连活的向量库（本工具不替项目保管向量库凭据）。
+    """
+    calls: list[tuple[str, str, str, str, str, str]] = []
+    vector_fields: set[str] = set()
+    consts: dict[str, str] = {}
+    for p in m.sources:
+        try:
+            text = p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if not re.search(r"milvus|Milvus|qdrant|Qdrant|weaviate|chroma|"
+                         r"pgvector|Vector\(", text, re.I):
+            continue
+        for mm in _VECTOR_FIELD_RE.finditer(text):
+            vector_fields.add(mm.group(2))
+        for mm in _VECTOR_PG_FIELD_RE.finditer(text):
+            vector_fields.add(mm.group(1))
+        for mm in _CONST_STR_RE.finditer(text):
+            consts.setdefault(mm.group(1), mm.group(2))
+        for mm in _VECTOR_CALL_RE.finditer(text):
+            args = _call_args(text, mm.end() - 1)
+            cm = _VECTOR_COLL_RE.search(args)
+            if not cm:
+                continue
+            coll = cm.group(1)
+            if not coll.isidentifier():
+                continue
+            coll = consts.get(coll, coll)
+            if not coll:
+                continue
+            dim_m = _VECTOR_DIM_RE.search(args)
+            met_m = _VECTOR_METRIC_RE.search(args)
+            part_m = _VECTOR_PART_RE.search(args)
+            dim = consts.get(dim_m.group(1), dim_m.group(1)) if dim_m else ""
+            metric = consts.get(met_m.group(1), met_m.group(1)) if met_m else ""
+            part = consts.get(part_m.group(1), part_m.group(1)) if part_m else ""
+            calls.append((p.name, mm.group(1).lower(), coll, dim, metric, part))
+    if not calls:
+        return Check("vector-schema", "向量集合属性自洽", "skipped",
+                     "这个模块没有向量集合调用点（判不了）",
+                     evidence_kind="untested")
+
+    problems: list[str] = []
+    ev: list[str] = []
+    # 1. 同一集合的属性在调用点之间是否一致
+    by_coll: dict[str, list[tuple]] = {}
+    for c in calls:
+        by_coll.setdefault(c[2], []).append(c)
+    for coll, cs in sorted(by_coll.items()):
+        for label, idx in (("维度", 3), ("度量", 4), ("分区键", 5)):
+            vals = {c[idx] for c in cs if c[idx]}
+            if len(vals) > 1:
+                problems.append(
+                    f"集合 {coll}：{label}在各调用点不一致（{', '.join(sorted(vals))}）")
+        ev.append(f"集合 {coll}：{len(cs)} 个调用点"
+                  + (f" / 维度 {sorted({c[3] for c in cs if c[3]})}" if any(c[3] for c in cs) else "")
+                  + (f" / 分区键 {sorted({c[5] for c in cs if c[5]})}" if any(c[5] for c in cs) else ""))
+    # 2. 分区键不能是向量字段
+    for _f, _op, coll, _d, _m, part in calls:
+        if part and part in vector_fields:
+            problems.append(f"集合 {coll}：分区键 {part} 是向量字段"
+                            f"（向量库不允许按向量字段分区）")
+    # 3. 写入的集合与检索的集合是不是同一个
+    writes = {c[2] for c in calls if c[1] in _VECTOR_WRITE_OPS}
+    reads = {c[2] for c in calls if c[1] in _VECTOR_READ_OPS}
+    split_hint = ""
+    if writes and reads and not (writes & reads):
+        split_hint = (f"写入集合 {', '.join(sorted(writes))} 与检索集合 "
+                      f"{', '.join(sorted(reads))} 不是同一个")
+    if problems:
+        return Check("vector-schema", "向量集合属性自洽", "fail",
+                     f"{len(problems)} 处自相矛盾", ev + problems[:8],
+                     "把同一集合的属性统一（维度/度量/分区键），"
+                     "分区键换成标量字段",
+                     evidence_kind="static")
+    if split_hint:
+        return Check("vector-schema", "向量集合属性自洽", "warn",
+                     "集合属性一致，但" + split_hint,
+                     ev, "若本意是同一份数据，这就是“写入 A、检索 B”的缺陷；"
+                     "若确实是两份数据，忽略这条",
+                     evidence_kind="static")
+    return Check("vector-schema", "向量集合属性自洽", "pass",
+                 f"{len(by_coll)} 个集合、{len(calls)} 个调用点，属性一致",
+                 ev, evidence_kind="static")
 
 
 def _print_script_plan(gate_scripts, itest_scripts, reconcilers, baselines
@@ -2792,8 +3033,10 @@ def run_readiness(args) -> int:
                        min_branch=getattr(args, "min_branch_coverage", None),
                        repo_threshold=repo_coverage_threshold(root)),
         check_uncovered_exports(m, idx),
+        check_test_strength(m, args),
         check_schema(m, query_schema(m, args.database_url or
                                      os.environ.get("POSTGRES_URL", ""))),
+        check_vector_schema(m),
         check_data_flow(m, root, getattr(args, "test_tenant", []),
                         drift_re=getattr(args, "drift_re", None),
                         header_re=getattr(args, "header_re", None),
@@ -2990,6 +3233,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--self-check-deps", action="store_true",
                     help="配合 --self-check：把 node_modules / .venv 软链进副本，"
                          "让副本能真跑测试（这样才验得到实测类判据）")
+    ap.add_argument("--mutation-check", action="store_true",
+                    help="测试强度：把源码改坏，看测试会不会红（变异测试的轻量版）"
+                         "—— 要复制工作区并多次跑测试，很贵，默认不跑")
     args = ap.parse_args(argv)
     for name, pat in (("--drift-pattern", args.drift_pattern),
                       ("--table-header-pattern", args.table_header_pattern)):

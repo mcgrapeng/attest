@@ -500,11 +500,35 @@ def main() -> int:
     r16 = run("src", "--repo", str(layout), "--json")
     data16 = json.loads(r16.stdout)
     keys16 = [c["key"] for c in data16["checks"]]
-    expect(len(keys16) == 12, f"报告里有 12 条判据（实际 {len(keys16)}）")
+    expect(len(keys16) == 14, f"报告里有 14 条判据（实际 {len(keys16)}）")
     expect("field-compare" not in keys16,
            "字段级比对不是独立判据（并入数据流一致）")
     expect("data-flow" in keys16, "数据流一致这条在")
     expect("oracle" in keys16, "oracle 独立性这条在（G004 加的）")
+    expect("test-strength" in keys16, "测试强度这条在（变异测试）")
+    expect("vector-schema" in keys16, "向量集合属性这条在")
+
+    # SKILL.md 的判据表必须与代码里的 Check 一一对应 ——
+    # 这仓库栽过一回："文档 12 条 vs 代码 11 个 Check"，谁都没发现。
+    skill = (HERE.parent / "SKILL.md").read_text(encoding="utf-8")
+    doc_names: list[str] = []
+    in_table = False
+    for ln in skill.splitlines():
+        if ln.startswith("| 判据 |"):
+            in_table = True
+            continue
+        if in_table:
+            if not ln.startswith("|"):
+                break
+            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            if cells and cells[0] and cells[0] != "---":
+                doc_names.append(cells[0])
+    code_names = [c["title"] for c in data16["checks"]]
+    expect(len(doc_names) == len(code_names),
+           f"SKILL.md 判据表 {len(doc_names)} 行 == 代码 {len(code_names)} 个 Check")
+    missing = [n for n in code_names
+               if not any(n.startswith(d) or d.startswith(n) for d in doc_names)]
+    expect(not missing, f"每条判据都在 SKILL.md 的表里（缺：{missing}）")
 
     # ---------------------------------------------------------- 子项 17
     print("\n子项 17：每条判据带证据类别")

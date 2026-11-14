@@ -19,13 +19,13 @@
 
 | 闸门 | 命令 | 结果 |
 | --- | --- | --- |
-| 回归套件 | `for t in scripts/test_*.py; do python3 "$t"; done` | 22/22 全绿 |
+| 回归套件 | `for t in scripts/test_*.py; do python3 "$t"; done` | 24/24 全绿 |
 | 黄金 fixture | `bash fixtures/run_fixtures.sh` | 5/5 命中，0 不符，0 未判定 |
 | 行为 eval | `python3 evals/run_evals.py` | 6/6 通过 |
-| 安全扫描 | `bash .github/check-skillspector.sh` | 44 条 HIGH/CRITICAL，未放行 **0** 条 |
+| 安全扫描 | `bash .github/check-skillspector.sh` | 47 条 HIGH/CRITICAL，未放行 **0** 条 |
 | 环境收口 | `python3 scripts/check_env_inheritance.py` | 生产代码没有整份继承 `os.environ` |
 | 反向验证 | `readiness.py src --repo fixtures/ts-colocated --self-check` | 结论：反向验证通过 |
-| 打包 | `python3 package.py` | 22 个文件，199 KB 的 `.skill` |
+| 打包 | `python3 package.py` | 23 个文件，214 KB 的 `.skill` |
 
 CI（`.github/workflows/ci.yml`）四个 job：字节码卫生 / 回归+fixture+eval+打包冒烟 /
 打包冒烟 / SkillSpector 扫描。package-smoke 已本地逐条模拟通过。
@@ -42,7 +42,7 @@ CI（`.github/workflows/ci.yml`）四个 job：字节码卫生 / 回归+fixture+
    插进 `it('...')` 能变成可执行代码。都封了（写盘面 + 读取面）。
    回归：`scripts/test_req_plan_scaffold_safety.py`（66 条）。
 3. **输出契约从裁决改成证据清单**。原来输出"结论：达到交付条件 / 不可交付"——那是
-   裁决措辞，而工具掌握的只是 12 条机械判据的实测状态。现在：证据分层（已实测 /
+   裁决措辞，而工具掌握的只是 14 条机械判据的实测状态。现在：证据分层（已实测 /
    静态信号 / 未实测）+ 三档结论（阻塞项 / 待人工确认 / 无信号）+ 固定的
    「本工具不判定」清单。
 
@@ -72,13 +72,15 @@ CI（`.github/workflows/ci.yml`）四个 job：字节码卫生 / 回归+fixture+
 
 数据与完整解读见 `evals/README.md`。
 
-## 已知遗留（6 条，都是有意留下或范围之外）
+## 已知遗留（7 条，都是有意留下或范围之外）
 
 见 `CHANGELOG.md`「已知遗留」。摘要：E2 扫描规则被显式放行（真收口在
 `check_env_inheritance.py`）· `--exec` 显式开关未采纳（默认执行 + 审计行 + `--dry-run`）
 · Windows 未端到端验证（运行时与安装已跨平台，仓库开发脚本要 bash）· 触发准确度的
 边界如上 · 自检副本默认不带依赖（`--self-check-deps` 是出口）· Python 没有真后端
-itest 车道的**全量**支持（Makefile/tox 兜底已接，但只覆盖脚本声明式的那部分）。
+itest 车道的**全量**支持（Makefile/tox 兜底已接，但只覆盖脚本声明式的那部分）·
+向量集合与**线上真实租户**是否一致不判（现在判的是代码侧自洽；要判线上得项目自己出
+一个「集合 schema 快照」脚本让工具去跑）。
 
 ## 发布前要做的三件事（不是代码）
 

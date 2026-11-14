@@ -107,6 +107,20 @@ class Check:
                 "untested": "○"}[self.status]
 
 
+# 本工具不判定的事 —— 固定清单，每份报告都列。
+# 为什么要有：工具只判机械判据（测试绿、覆盖率、跨存储对账、表结构…）。
+# 需求本身对不对、产品行为、性能、安全、可用性、运维就绪都不在射程里。
+# 列出来是让读报告的人知道边界在哪，而不是以为"全绿了就能交付"。
+NOT_JUDGED = (
+    "需求是否被正确理解",
+    "产品行为是否正确",
+    "性能",
+    "安全",
+    "可用性",
+    "运维就绪",
+)
+
+
 @dataclass
 class Module:
     root: Path
@@ -1154,7 +1168,10 @@ def run_reconciler(m: Module, ws: Path, name: str, cmd: str,
     except FileNotFoundError:
         return [], [], [], Path(out_dir), None
     text = r.stdout + r.stderr
-    drift = [ln.strip() for ln in text.splitlines() if drift_re.search(ln)]
+    # 表头行也要排除 —— 英文表头常含 drift 字样（"| tenant | drift | status |"），
+    # 不排除就会把表头当成一条漂移：计数虚高，租户归属还错乱。
+    drift = [ln.strip() for ln in text.splitlines()
+             if drift_re.search(ln) and not header_re.search(ln)]
     table_rows = [ln.strip() for ln in text.splitlines()
                   if ln.strip().startswith("|")]
     # 租户列的位置：从表头认（认不到就退回第一列）
@@ -2085,6 +2102,16 @@ def _check_py_exports(m: Module, root: Path) -> Check:
             test_text += p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             pass
+    # 模块目录内 colocated 的测试（src/pkg/test_mod.py）也要算 ——
+    # Python 的惯例就是把测试放在包旁边，之前只扫 test/ tests/ ⇒
+    # 这类仓库的所有公开 def/class 都被误判成"零引用"（与 TS 分支不一致）。
+    for p in m.tests + m.itests:
+        if p.suffix != ".py":
+            continue
+        try:
+            test_text += p.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            pass
     if not test_text:
         return Check("uncovered-exports", "导出的逻辑都有测试", "skipped",
                      "没找到 Python 测试文件（test/ 或 tests/ 下没有 test_*.py）",
@@ -2253,20 +2280,52 @@ def check_schema(m: Module, facts: dict) -> Check:
                  evidence_kind="executed")
 
 
-def check_reconcile(m: Module) -> Check:
-    """R4 数据流一致 —— 找仓库里的对账脚本。"""
-    cands = [p for p in m.root.rglob("*.ts")
-             if "reconcile" in p.name.lower()
-             and not re.search(r"\.(test|spec)\.", p.name)
-             and "node_modules" not in str(p)]
-    if not cands:
-        return Check("reconcile", "数据流一致（跨存储对账）", "fail",
-                     "没有跨存储对账脚本 —— PG 与向量库的数据可能已经漂了",
-                     fix="写一个：权威库 ↔ 派生库逐条对账 + 修复路径")
-    return Check("reconcile", "数据流一致（跨存储对账）", "warn",
-                 f"找到 {len(cands)} 个对账脚本，但没实跑（要真 PG + 派生库）",
-                 [str(p.relative_to(m.root)) for p in cands[:5]],
-                 "手动跑一次并确认输出为 0 差异")
+def _print_script_plan(gate_scripts, itest_scripts, reconcilers, baselines
+                        ) -> None:
+    """列出工具将要执行哪些仓库脚本（--dry-run 用）。"""
+    groups = (("覆盖率闸门", gate_scripts), ("真后端车道", itest_scripts),
+              ("跨存储对账", reconcilers), ("基线对拍", baselines))
+    any_script = False
+    for label, scripts in groups:
+        for ws, name, cmd in scripts:
+            any_script = True
+            print(f"  [{label}] {name}（工作目录 {ws}）")
+            print(f"      $ {cmd}")
+    if not any_script:
+        print("  （没有命中白名单的仓库脚本）")
+
+
+def _echo_script_plan(m: Module, gate_scripts, itest_scripts, reconcilers,
+                      baselines) -> None:
+    """正常模式下一行列出将执行的仓库脚本（审计入口）。"""
+    parts = []
+    for label, scripts in (("覆盖率闸门", gate_scripts),
+                           ("真后端车道", itest_scripts),
+                           ("跨存储对账", reconcilers),
+                           ("基线对拍", baselines)):
+        for ws, name, cmd in scripts:
+            parts.append(f"{label} {name}（$ {cmd}）")
+    if parts:
+        print("将执行的仓库脚本：" + "；".join(parts))
+
+
+def _pin_outside_repo(root: Path, fpath: str) -> str:
+    """钉指向仓库外 ⇒ 返回原因；没问题返回空串。
+
+    与 `req_plan.py` 的 `_pin_violation` 同一把尺子：钉只能是仓库内的相对路径。
+    越界的钉既不读也不写 —— 否则一份计划就能让工具去探测仓库外的文件。
+    """
+    p = Path(fpath)
+    if p.is_absolute():
+        return "是绝对路径"
+    try:
+        base = root.resolve()
+        target = (root / p).resolve()
+    except OSError:
+        return "路径无法解析"
+    if target != base and base not in target.parents:
+        return "含 `..`（会跳到仓库外）"
+    return ""
 
 
 def check_requirement(m: Module, plan_path: str | None) -> Check:
@@ -2286,6 +2345,7 @@ def check_requirement(m: Module, plan_path: str | None) -> Check:
         return Check("requirement", "需求覆盖到位", "fail",
                      "计划里没有不变式", fix="先填不变式清单")
     missing: list[str] = []
+    outside: list[str] = []
     for ident, desc, pin in plan.invariants:
         pins = parse_pins(pin)
         if not pins:
@@ -2293,6 +2353,11 @@ def check_requirement(m: Module, plan_path: str | None) -> Check:
             continue
         ok = False
         for fpath, case in pins:
+            why = _pin_outside_repo(m.root, fpath)
+            if why:
+                # 越界的钉不读那个文件，也不当成"覆盖到了"
+                outside.append(f"{ident}: 钉「{fpath}」{why}")
+                continue
             if not (m.root / fpath).exists():
                 continue
             if case is None:
@@ -2301,8 +2366,14 @@ def check_requirement(m: Module, plan_path: str | None) -> Check:
             if case_matches(case, test_case_names(m.root, fpath)):
                 ok = True
                 break
-        if not ok:
+        if not ok and not any(o.startswith(ident + ":") for o in outside):
             missing.append(f"{ident}: {desc[:30]}")
+    if outside:
+        return Check("requirement", "需求覆盖到位", "fail",
+                     f"{len(outside)} 条不变式的钉指向仓库外",
+                     outside[:8],
+                     "钉只能是仓库内的相对路径 —— 越界的钉不读也不写",
+                     evidence_kind="executed")
     if missing:
         return Check("requirement", "需求覆盖到位", "fail",
                      f"{len(missing)}/{len(plan.invariants)} 条不变式没落到真实用例",
@@ -2440,17 +2511,12 @@ def run_readiness(args) -> int:
         # 只列出会执行什么，不执行
         print(f"将要执行的仓库脚本 — {m.path}（--dry-run，不执行）")
         print(f"仓库：{root}")
-        groups = (("覆盖率闸门", gate_scripts), ("真后端车道", itest_scripts),
-                  ("跨存储对账", reconcilers), ("基线对拍", baselines))
-        any_script = False
-        for label, scripts in groups:
-            for ws, name, cmd in scripts:
-                any_script = True
-                print(f"  [{label}] {name}（工作目录 {ws}）")
-                print(f"      $ {cmd}")
-        if not any_script:
-            print("  （没有命中白名单的仓库脚本）")
+        _print_script_plan(gate_scripts, itest_scripts, reconcilers, baselines)
         return 0
+    # 正常模式也把"将执行哪些仓库脚本"说清楚 —— 工具会跑目标仓库自己的脚本，
+    # 这行字是审计入口：白名单命中的脚本 + 确切命令，一眼可核对。
+    _echo_script_plan(m, gate_scripts, itest_scripts if args.include_itest else [],
+                      reconcilers, baselines)
     lane_notes: list[str] = []
     if gate_scripts:
         cov, failed, lane_notes = run_gates(m, gate_scripts)
@@ -2504,52 +2570,82 @@ def run_readiness(args) -> int:
         check_open_source(m),
     ]
 
+    # ---- 结论：证据分层 + 三档，不用"达到交付条件"这种裁决措辞 ----
+    # 为什么不是裁决：工具掌握的是"11 条机械判据的实测状态"，不是"这个模块能不能
+    # 交付客户"。那两者之间隔着一整层未言明的推理（需求是否被正确理解、性能、安全、
+    # 运维就绪都不在判据内）。所以输出的是**证据清单**，决策留给有职责的人。
+    fails = [c for c in checks if c.status == "fail"]
+    warns = [c for c in checks if c.status == "warn"]
+    no_signal = [c for c in checks if c.status in ("skipped", "untested")]
+    passed = [c for c in checks if c.status == "pass"]
+    static_signals = [c for c in checks if c.evidence_kind == "static"]
+    # 关键判据（测试是否绿）没测到 ⇒ 不能说"测过了"。退出码据此非 0，
+    # 否则一个零测试的仓库会在 CI 里拿到绿灯。
+    key_untested = [c for c in checks if c.key == "tests-green"
+                    and c.status in ("skipped", "untested")]
+    # 静态信号永远不能单独支撑"通过"：没有一条实测判据通过时，不给肯定结论。
+    only_static = not passed and not fails
+
     if args.json:
         print(json.dumps({
             "module": m.path,
             "tables": m.tables,
             "checks": [c.__dict__ for c in checks],
+            "conclusion": {
+                "blocking": len(fails),
+                "needs_human": len(warns),
+                "no_signal": len(no_signal),
+                "measured_pass": len(passed),
+                "static_signals": len(static_signals),
+                "not_judged": list(NOT_JUDGED),
+                "exit_rule": "有阻塞项，或关键判据（测试是否绿）没测到 ⇒ 退出码 1",
+            },
         }, ensure_ascii=False, indent=2))
-        return 0 if all(c.status != "fail" for c in checks) else 1
+        return 1 if (fails or key_untested) else 0
 
     print(f"\n交付就绪度分析 — {m.path}")
     print(f"仓库：{root}")
-    if getattr(args, "exec", False):
-        print("执行模式：--exec（会运行仓库自己的脚本）")
     print(f"源码 {len(m.sources)} 文件（+{len(m.support)} 个测试支撑）"
           f" / 单测 {len(m.tests)} 个"
           f" / itest {len(m.itests)} 个"
           + (f" / 表 {', '.join(m.tables)}" if m.tables else ""))
     print()
-    for c in checks:
-        print(f"  {c.mark} {c.title} — {c.detail}")
-        for e in c.evidence[:6]:
-            print(f"      · {e}")
-        if c.status in ("fail", "warn") and c.fix:
-            print(f"      → {c.fix}")
-    fails = [c for c in checks if c.status == "fail"]
-    warns = [c for c in checks if c.status == "warn"]
-    # 核心判据**没实测**（零测试 / 环境没就绪）⇒ 不能说"达到交付条件"。
-    # 结论的整体措辞（三档：阻塞项 / 待人工确认 / 无信号）归 G004，
-    # 这里只保证"没实测 ⇒ 不给肯定结论"。
-    untested = [c for c in checks if c.key == "tests-green"
-                and c.status == "skipped" and c.evidence_kind == "untested"]
+
+    def _section(title: str, items: list[Check]) -> None:
+        if not items:
+            return
+        print(f"── {title} " + "─" * max(4, 46 - len(title)))
+        for c in items:
+            print(f"  {c.mark} {c.title} — {c.detail}")
+            for e in c.evidence[:6]:
+                print(f"      · {e}")
+            if c.status in ("fail", "warn") and c.fix:
+                print(f"      → {c.fix}")
+        print()
+
+    _section("已实测", [c for c in checks if c.evidence_kind == "executed"])
+    _section("静态信号（不能单独支撑「通过」）",
+             [c for c in checks if c.evidence_kind == "static"])
+    _section("未实测", [c for c in checks if c.evidence_kind == "untested"])
+
+    print("── 本工具不判定 " + "─" * 32)
+    print("  " + " · ".join(NOT_JUDGED))
+    print("  上面只是测试就绪度的实测结果；「能不能交付」仍要人判断。")
     print()
-    if fails:
-        print(f"结论：不可交付 —— {len(fails)} 项不通过"
-              + (f"，{len(warns)} 项待确认" if warns else ""))
-        for c in fails:
-            print(f"  ✗ {c.title}：{c.detail}")
-        return 1
-    if untested:
-        print(f"结论：证据不足（{len(untested)} 项未实测）—— "
-              f"不能判『达到交付条件』")
-        for c in untested:
-            print(f"  ○ {c.title}：{c.detail}")
-        return 1
-    print(f"结论：达到交付条件"
-          + (f"（{len(warns)} 项待人工确认）" if warns else ""))
-    return 0
+
+    print(f"结论：{len(fails)} 项阻塞 · {len(warns)} 项待人工确认 · "
+          f"{len(no_signal)} 项无信号"
+          + (f" · {len(passed)} 项实测通过" if passed else "")
+          + (f"（另有 {len(static_signals)} 条静态信号）"
+             if static_signals else ""))
+    for c in fails:
+        print(f"  ✗ {c.title}：{c.detail}")
+    for c in key_untested:
+        print(f"  ○ {c.title}：{c.detail}")
+    if only_static:
+        print("  （没有一条实测判据通过 —— 静态信号不足以支撑任何肯定结论）")
+    print("退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到")
+    return 1 if (fails or key_untested) else 0
 
 
 def _parse_csv_pairs(items: list[str]) -> list[tuple[str, str]]:
@@ -2602,9 +2698,6 @@ def main(argv: list[str]) -> int:
                     help="租户列名（CSV 里定位租户的那一列）")
     ap.add_argument("--dry-run", action="store_true",
                     help="只列出候选脚本与将执行的命令，然后退出（不执行）")
-    ap.add_argument("--exec", action="store_true",
-                    help="显式执行仓库自己的脚本（默认也执行；"
-                         "--dry-run 时只列不跑）")
     args = ap.parse_args(argv)
     for name, pat in (("--drift-pattern", args.drift_pattern),
                       ("--table-header-pattern", args.table_header_pattern)):

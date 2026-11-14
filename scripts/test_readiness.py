@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import json
+import re
 import os
 import shutil
 import subprocess
@@ -42,6 +43,28 @@ def run(*args: str) -> subprocess.CompletedProcess:
                           capture_output=True, text=True, encoding="utf-8",
                           env={**os.environ, "PYTHONUTF8": "1"})
 
+
+
+def _blocking(out: str) -> int:
+    """结论行里的阻塞项数。
+
+    结论措辞从「不可交付 / 达到交付条件」改成三档（阻塞项 / 待人工确认 / 无信号），
+    所以断言改成数阻塞项，而不是匹配旧措辞。
+    """
+    m = re.search(r"结论：(\d+) 项阻塞", out)
+    return int(m.group(1)) if m else -1
+
+
+def _block(out: str, title: str) -> str:
+    """取某条判据自己的那一段（到下一条判据或下一节为止）。
+
+    报告改成证据分节后，"标题后 200 字符"会跨节边界，把别的判据的内容算进来。
+    """
+    if title not in out:
+        return ""
+    rest = out.split(title, 1)[1]
+    m = re.search(r"\n\s{2}[✓✗·—○]|\n──", rest)
+    return rest[:m.start()] if m else rest
 
 def main() -> int:
     # C locale 下 stdout 默认 ascii，打中文会 UnicodeEncodeError
@@ -209,7 +232,7 @@ def main() -> int:
           "test('ok', () => { assert.equal(1, 1); });\n")
     r12 = run("src", "--repo", str(pg_only))
     expect("只碰了 PG 一个存储" in r12.stdout, "单存储模块判 skipped")
-    expect("不可交付" not in r12.stdout, "单存储模块不该被判不可交付")
+    expect(_blocking(r12.stdout) == 0, "单存储模块不该被判不可交付")
 
     print("\n有派生存储（向量库）却没有对账机制 ⇒ 报红")
     write(pg_only / "src" / "vec.ts",
@@ -255,7 +278,7 @@ def main() -> int:
     r15 = run("src", "--repo", str(py))
     expect("核心逻辑测试到位" in r15.stdout, "Python 有覆盖率判据")
     expect("never_tested" in r15.stdout, "Python 零引用的 def 被点名")
-    expect("used_by_tests" not in r15.stdout.split("导出的逻辑都有测试")[1][:200],
+    expect("used_by_tests" not in _block(r15.stdout, "导出的逻辑都有测试"),
            "有引用的 def 不被点名")
     expect("PureData" not in r15.stdout, "纯数据类不当成待测导出")
 

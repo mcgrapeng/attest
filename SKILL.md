@@ -497,6 +497,9 @@ python3 "$SKILL_DIR/scripts/req_plan.py check docs/<feature>-test-plan.md --repo
 这个工具的定位是"实测"，所以它**会执行目标仓库自己定义的脚本**。这不是副作用，
 是它的本职 —— 但你得知道边界在哪：
 
+- **默认就是执行**。不跑测试的交付判定没有意义，所以没有"必须显式开关才跑"这一层
+  （brief 里要求过，改了：每次调用多打一个开关，收益不大）。它的安全边界是下面这三件套：
+  **脚本白名单 + 执行前的审计行 + `--dry-run` 可预览**。
 - **只会执行白名单里的脚本**：`coverage` / `test:coverage` / `cov` / `check:coverage`、
   `itest` / `test:integration`、`reconcile` / `data:reconcile`、
   `baseline:check` / `eval:baseline:check` 这些名字（精确名或冒号分段前缀）。

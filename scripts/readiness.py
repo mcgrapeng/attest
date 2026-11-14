@@ -2570,15 +2570,19 @@ _VECTOR_CALL_RE = re.compile(
     r"\b(createCollection|create_collection|insert|upsert|search|query|delete|"
     r"hasCollection|has_collection|describeCollection|describe_collection|"
     r"getCollection|get_collection)\s*\(", re.I)
+# 集合名：字面量（双引号/单引号）或标识符（可能是常量引用）
 _VECTOR_COLL_RE = re.compile(
-    r"""(?:collection_?name|collectionName|collection)\s*[:=]\s*['"]?(\w+)['"]?""")
+    r"""(?:collection_?name|collectionName|collection)\s*[:=]\s*"""
+    r"""(?:"([^"]+)"|'([^']+)'|([A-Za-z_$][\w$]*))""")
 _VECTOR_DIM_RE = re.compile(
-    r"\b(?:dimension|dim|vector_dim|vectorDim)\s*[:=]\s*['\"]?(\w+)['\"]?")
+    r"\b(?:dimension|dim|vector_dim|vectorDim)\s*[:=]\s*"
+    r"(?:([\"'])([\w.-]+)\1|([\w.-]+))")
 _VECTOR_METRIC_RE = re.compile(
-    r"\b(?:metric_?type|metricType|metric)\s*[:=]\s*['\"]?([\w-]+)['\"]?")
+    r"\b(?:metric_?type|metricType|metric)\s*[:=]\s*"
+    r"(?:([\"'])([\w.-]+)\1|([\w.-]+))")
 _VECTOR_PART_RE = re.compile(
     r"\b(?:partition_?key(?:_?field)?|partitionKey(?:Field)?)\s*[:=]\s*"
-    r"['\"]?(\w+)['\"]?")
+    r"(?:([\"'])([\w.-]+)\1|([\w.-]+))")
 #: 模块里声明为向量类型的字段名
 _VECTOR_FIELD_RE = re.compile(
     r"""(\w+)\s*[:=]\s*['"](\w+)['"][^;{}\n]{0,140}?"""
@@ -2591,9 +2595,17 @@ _VECTOR_WRITE_OPS = {"createcollection", "create_collection", "insert", "upsert"
 _VECTOR_READ_OPS = {"search", "query"}
 
 
-def _call_args(text: str, open_idx: int) -> str:
-    """取调用点的参数文本（括号配平）。"""
+def _call_args(text: str, open_idx: int) -> tuple[str, bool]:
+    """取调用点的参数文本 ⇒ (参数文本, 是不是真调用)。
+
+    TypeScript 的**接口声明**不是调用点：
+        hasCollection(options: { collection_name: string }): Promise<unknown>;
+    上一版把这种声明也当调用点 ⇒ 把类型里的 ``string`` 当成了集合名。
+    判据：括号里第一个是 ``名字:``（带类型标注）⇒ 声明；
+    或右括号后面紧跟 ``:`` / ``{`` / ``=>`` ⇒ 声明。
+    """
     depth = 0
+    close = -1
     for i in range(open_idx, min(len(text), open_idx + 2000)):
         c = text[i]
         if c in "([{":
@@ -2601,12 +2613,46 @@ def _call_args(text: str, open_idx: int) -> str:
         elif c in ")]}":
             depth -= 1
             if depth == 0:
-                return text[open_idx:i + 1]
-    return text[open_idx:open_idx + 600]
+                close = i
+                break
+    if close < 0:
+        return text[open_idx:open_idx + 600], True
+    inside = text[open_idx + 1:close]
+    after = text[close + 1:close + 40].lstrip()
+    is_decl = bool(re.match(r"\s*[A-Za-z_$][\w$]*\s*:", inside))
+    if after[:1] in (":", "{") or after.startswith("=>"):
+        is_decl = True
+    return text[open_idx:close + 1], not is_decl
+
+
+def _pick_token(m: re.Match) -> str:
+    """从「引号字面量 | 标识符 | 数字」里取出**原始 token**（带引号）。
+
+    带引号很重要：分不清它是字面量还是常量引用。
+    """
+    if m.group(2) is not None:
+        return m.group(1) + m.group(2) + m.group(1)
+    return m.group(3)
+
+
+def _resolve_value(tok: str, consts: dict[str, str]) -> str:
+    """把维度/度量/分区键的值解析成可比较的字面量。
+
+    解析不了（是变量）⇒ 返回空 ⇒ **不参与比较** ——
+    拿变量名去跟字面量比会报假的不一致。
+    """
+    t = (tok or "").strip()
+    if not t:
+        return ""
+    if t.isdigit():
+        return t
+    if len(t) >= 2 and t[0] == t[-1] and t[0] in ("'", '"'):
+        return t[1:-1]
+    return consts.get(t, "")
 
 
 def check_vector_schema(m: Module) -> Check:
-    """向量集合属性自洽 —— PG 那侧有五条自有规则，集合这侧也得有。
+    """向量集合属性自洽 —— PG 侧有五条自有规则，集合侧也得有。
 
     判的是**调用点之间是否自相矛盾**，不猜项目的命名规范：
 
@@ -2616,10 +2662,16 @@ def check_vector_schema(m: Module) -> Check:
       3. 写入的集合与检索的集合不是同一个 ⇒ 提醒
          （若本意是同一份数据，这就是"写入 A、检索 B"的缺陷）
 
-    **不判**：集合命名规范、集合与线上真实租户是否一致 ——
-    前者要项目的约定，后者要连活的向量库（本工具不替项目保管向量库凭据）。
+    两件事不做：
+      - **不猜集合名**：集合名是字面量或常量就按值分组；是变量（如按租户动态
+        生成的 ``collectionName``）就按**表达式**分组 —— 同一个变量在各调用点的
+        维度/度量仍要一致。动态名会在证据里标出来。
+      - **不判线上一致性**：见「本工具不判定」。
+
+    只认**真调用点**：TypeScript 的接口声明（``hasCollection(options: {...})``）
+    不是调用点 —— 上一版把类型里的 ``string`` 当成了集合名。
     """
-    calls: list[tuple[str, str, str, str, str, str]] = []
+    calls: list[tuple[str, str, str, str, str, str, str]] = []
     vector_fields: set[str] = set()
     consts: dict[str, str] = {}
     for p in m.sources:
@@ -2637,23 +2689,28 @@ def check_vector_schema(m: Module) -> Check:
         for mm in _CONST_STR_RE.finditer(text):
             consts.setdefault(mm.group(1), mm.group(2))
         for mm in _VECTOR_CALL_RE.finditer(text):
-            args = _call_args(text, mm.end() - 1)
+            args, is_call = _call_args(text, mm.end() - 1)
+            if not is_call:
+                continue
             cm = _VECTOR_COLL_RE.search(args)
             if not cm:
                 continue
-            coll = cm.group(1)
-            if not coll.isidentifier():
+            literal = cm.group(1) or cm.group(2)
+            expr = literal or cm.group(3)
+            if not expr:
                 continue
-            coll = consts.get(coll, coll)
-            if not coll:
-                continue
+            # 分组键：字面量/常量 ⇒ 用它的值；变量 ⇒ 用表达式本身
+            resolved = consts.get(expr, "") if literal is None else literal
+            key = resolved or expr
+            dynamic = not resolved
             dim_m = _VECTOR_DIM_RE.search(args)
             met_m = _VECTOR_METRIC_RE.search(args)
             part_m = _VECTOR_PART_RE.search(args)
-            dim = consts.get(dim_m.group(1), dim_m.group(1)) if dim_m else ""
-            metric = consts.get(met_m.group(1), met_m.group(1)) if met_m else ""
-            part = consts.get(part_m.group(1), part_m.group(1)) if part_m else ""
-            calls.append((p.name, mm.group(1).lower(), coll, dim, metric, part))
+            dim = _resolve_value(_pick_token(dim_m), consts) if dim_m else ""
+            metric = _resolve_value(_pick_token(met_m), consts) if met_m else ""
+            part = _resolve_value(_pick_token(part_m), consts) if part_m else ""
+            calls.append((p.name, mm.group(1).lower(), key, dim, metric, part,
+                          "动态" if dynamic else ""))
     if not calls:
         return Check("vector-schema", "向量集合属性自洽", "skipped",
                      "这个模块没有向量集合调用点（判不了）",
@@ -2661,7 +2718,6 @@ def check_vector_schema(m: Module) -> Check:
 
     problems: list[str] = []
     ev: list[str] = []
-    # 1. 同一集合的属性在调用点之间是否一致
     by_coll: dict[str, list[tuple]] = {}
     for c in calls:
         by_coll.setdefault(c[2], []).append(c)
@@ -2671,15 +2727,18 @@ def check_vector_schema(m: Module) -> Check:
             if len(vals) > 1:
                 problems.append(
                     f"集合 {coll}：{label}在各调用点不一致（{', '.join(sorted(vals))}）")
-        ev.append(f"集合 {coll}：{len(cs)} 个调用点"
-                  + (f" / 维度 {sorted({c[3] for c in cs if c[3]})}" if any(c[3] for c in cs) else "")
-                  + (f" / 分区键 {sorted({c[5] for c in cs if c[5]})}" if any(c[5] for c in cs) else ""))
-    # 2. 分区键不能是向量字段
-    for _f, _op, coll, _d, _m, part in calls:
+        shown = coll + ("（动态名）" if cs[0][6] else "")
+        ev.append(f"集合 {shown}：{len(cs)} 个调用点"
+                  + (f" / 维度 {sorted({c[3] for c in cs if c[3]})}"
+                     if any(c[3] for c in cs) else "")
+                  + (f" / 分区键 {sorted({c[5] for c in cs if c[5]})}"
+                     if any(c[5] for c in cs) else ""))
+    # 分区键不能是向量字段
+    for _f, _op, coll, _d, _m, part, _dyn in calls:
         if part and part in vector_fields:
             problems.append(f"集合 {coll}：分区键 {part} 是向量字段"
                             f"（向量库不允许按向量字段分区）")
-    # 3. 写入的集合与检索的集合是不是同一个
+    # 写入的集合与检索的集合是不是同一个
     writes = {c[2] for c in calls if c[1] in _VECTOR_WRITE_OPS}
     reads = {c[2] for c in calls if c[1] in _VECTOR_READ_OPS}
     split_hint = ""

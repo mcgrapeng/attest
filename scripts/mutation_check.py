@@ -278,8 +278,10 @@ def run_mutation_check(repo: Path, ws_rel: str,
         return res
 
     candidates: list[tuple[str, Mutation]] = []
+    # source_rels 是相对**工作区**的 ⇒ 得按工作区找，不是按仓库根
+    base = repo if ws_rel in (".", "") else repo / ws_rel
     for rel in source_rels:
-        src = repo / rel
+        src = base / rel
         if not src.is_file():
             continue
         res["scanned"] += 1

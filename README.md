@@ -1,5 +1,7 @@
 # req-test-plan
 
+中文 | [English](README.en.md)
+
 需求级测试工具包：把一条需求拆成可核对的测试计划，并实测这个模块**能不能交付**。
 
 只依赖 Python 3.11+ 标准库，无第三方依赖。
@@ -25,6 +27,20 @@ ln -s ~/.agents/skills/req-test-plan ~/.config/opencode/skills/req-test-plan
 ```
 
 `~/.agents/skills/req-test-plan` 是稳定入口，`~/.agents/testkit/doctor.sh` 从这里跑回归套件。
+
+## 打包（.skill）
+
+```bash
+python3 package.py            # → dist/req-test-plan.skill
+python3 package.py --check    # 只看会打进包的内容，不写文件
+```
+
+`.skill` 是社区通行的分发格式（一个 zip，第一层是 skill 目录）。打包脚本**自包含**，
+不依赖别的工具。排除：`.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` /
+字节码，以及 `scripts/test_*.py`（回归套件是仓库的开发资产，不是 skill 的运行时）。
+
+**打进包前会检查有没有字节码** —— 有就中止：字节码既泄漏作者环境，又让用户拿到
+不可读的产物。
 
 ## 四条命令
 
@@ -57,9 +73,14 @@ python3 ~/.agents/skills/req-test-plan/scripts/readiness.py <模块路径> --rep
 | `--drift-pattern <正则>` | 对账输出里"漂移行"的样子（默认认 `漂移` / `❌` / `drift` / `mismatch`） |
 | `--table-header-pattern <正则>` | 对账输出里表头/分隔行的样子（默认认 `一致性` / `租户` / `tenant` / `---`） |
 | `--csv-pair a.csv=b.csv` | CSV 对照关系，可重复 —— 按声明配对，不做两两配对 |
+| `--tenant-col <列名>` | CSV 里租户列的名字（默认按 `tenant_id`/`tenant` 认） |
 | `--min-line-coverage` / `--min-branch-coverage` | 显式给覆盖率门槛。**默认不用通用阈值**（仓库没有闸门时判 skipped，不判 fail） |
 | `--self-check` | 反向验证：往**临时副本**里注入一个已知缺陷，证明判据会翻红。不改你的仓库 |
 | `--include-itest` | 把真后端 itest 车道也算进来（要连 PG + 向量库，慢） |
+| `--test-tenant <名字或前缀>` | 声明测试租户，可重复 —— 测试租户的漂移是夹具状态，报 warn 不阻塞 |
+| `--test-tenant-prefix <前缀>` | 追加测试租户前缀（默认认 `itest-` `memtest-` `mock-` `eval-` 等） |
+| `--database-url <连接串>` | PG 连接串（默认取环境里的 `POSTGRES_URL`） |
+| `--verbose` | 把测试命令的原始输出也打出来 |
 
 ## 输出契约
 
@@ -169,17 +190,23 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清"当前只实现了 
 | 反向验证（`--self-check`） | 往**临时副本**注入一个已知缺陷，证明判据会翻红；只作用于副本，不改用户仓库 |
 | oracle 独立性 | 扫测试文件，标出"期望值取自被测对象自身"的形态（断言两侧调同一模块、快照自比对…）—— 提醒级，不判红 |
 | 发布骨架缺失（无 LICENSE / README / CHANGELOG / evals / CI） | 本轮补齐，见 [CHANGELOG.md](CHANGELOG.md) |
+| `SKILL.md` 的范围声明与实现对不上 | 降级为"哪些已被实测证明、哪些还没被证明、哪些本工具判不了" —— `016abda` |
+| `~/.agents/skills/req-test-plan/scripts/...` 硬编码路径 | `SKILL.md` 改成解析本 skill 所在目录（`$SKILL_DIR`）—— `016abda` |
 
 ### 仍开放
 
+完整清单见 [CHANGELOG.md](CHANGELOG.md) 的「已知遗留」。发布时仍开放的是这七条：
+
 | 项 | 状态 |
 | --- | --- |
-| `SKILL.md` 的范围声明 | 与文档同源的那部分由集成方统一改（`SKILL.md` 不在本轮改动范围内） |
-| 缺一个显式的执行开关 | brief G001-13 要求：脚本选取白名单化之后，必须**显式**给出才执行（`--exec`）。当前实现是"默认执行 + 执行前打印审计行"，`--exec` 这个开关**不存在** —— 仍开放 |
-| SkillSpector 的 `E2`（Env Variable Harvesting）报 HIGH | 子进程必须透传环境变量（白名单实现）。逐条复核结论见 `docs/oss-release-review.md` 第六节；CI 用 `.github/skillspector-allowlist.yaml` 把**已复核的规则**显式放行，每条带理由，allowlist 之外的新 HIGH 仍然拦住 |
-| `~/.agents/skills/req-test-plan/scripts/...` 硬编码路径 | 装到别的目录就失效（SKILL.md 里 9 处），待 P2 改 |
-| 英文正文 | SKILL.md 与本 README 目前只有中文 |
-| Windows / 非 bash 环境 | 未验证 |
+| SkillSpector 的 `E2`（Env Variable Harvesting）仍报 HIGH | 子进程必须透传环境变量（白名单实现，见 `scripts/readiness.py` 的 `child_env`）。逐条复核结论在 `docs/oss-release-review.md` 第六节；CI 用 `.github/skillspector-allowlist.yaml` 把**已复核的规则**显式放行，每条带理由，allowlist 之外的新 HIGH 仍然拦住。放行是**规则级、不是逐条 finding**：逐条基线按位置指纹匹配，改了 `scripts/` 里那一行就失效 ⇒ 对开源贡献者是持续的假红；规则级不依赖位置，改代码不会误红，而**新规则**仍然会被拦。代价（同一个已放行规则再出现不会被拦）写在 allowlist 文件头，不藏着。本地复现：`bash .github/check-skillspector.sh` |
+| `--exec` 显式执行开关没有采纳 | brief 要求"默认不跑、显式开关才跑"，实现改成**默认执行 + 执行前打印审计行**（报告头部一行「将执行的仓库脚本」，加 `--dry-run` 可只看不做）。理由：工具的定位就是实测（不跑测试的交付判定没有意义），而执行面已经收敛到脚本白名单 + 环境变量白名单；再叠一个必填开关，每次调用都要多打一个参数，实际收益不大。想看执行清单用 `--dry-run` |
+| Python 没有真后端（itest）车道 | TS 侧有 `--include-itest`，Python 侧没有对应机制。属 P1，未修 |
+| Windows / 非 bash 环境未验证 | — |
+| 触发准确度未实测 | `skill-creator` 的 `run_loop` 需要 `claude` CLI |
+| 自检副本不带 `node_modules` | 多数仓库在副本里跑不动测试，`--self-check` 证明的是"静态判据抓得住东西"，不是"整套判据（含实测项）抓得住东西"。报告里明说了这件事（`copy_runnable: false`） |
+
+另有一条不在 CHANGELOG「已知遗留」里的：`SKILL.md` 正文仍是中文（README 已有英文版 `README.en.md`）。
 
 ## 回归套件
 

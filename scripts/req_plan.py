@@ -6,7 +6,9 @@
     req-plan check <计划文件> --repo <目录>                        # 校验计划 vs 代码实况
 
 设计约束:
-  - 只读代码，不改任何东西。
+  - 默认只读：只读代码，不动仓库里的任何东西。
+    **例外是 `scaffold`** —— 它会按计划往磁盘写文件（测试骨架），
+    写入范围被限制在 `--out-dir` 与仓库根之内（越界的钉一律拒绝，不写盘）。
   - 判据是"仓库里真实存在什么"，不是"计划里写了什么"——
     计划自称覆盖了但文件不存在 ⇒ 报红。
   - 车道从项目自己的 package.json scripts 读，不硬编码。
@@ -802,18 +804,94 @@ _FRAMEWORK_MARKERS = (
     ("node:test", r"from 'node:test'"),
     ("vitest", r"from 'vitest'"),
     ("jest", r"from '@jest|from 'jest"),
+    ("mocha", r"from 'mocha'|require\('mocha'\)"),
 )
 _ASSERT_MARKERS = (
     ("node:assert", r"node:assert"),
     ("expect", r"\bexpect\("),
 )
 
+# package.json 里认出测试框架（仓库还没有测试文件时的兜底）。
+# 优先级：① 依赖里的框架包 ② scripts 里测试车道的命令里提到的框架。
+_JS_FRAMEWORK_DEPS = (
+    ("vitest", ("vitest",)),
+    ("jest", ("jest", "@types/jest")),
+)
+_JS_FRAMEWORK_SCRIPTS = ("vitest", "jest", "mocha")
+# 各框架的断言风格
+_JS_FRAMEWORK_ASSERTION = {
+    "node:test": "node:assert",
+    "vitest": "expect",
+    "jest": "expect",
+    "mocha": "node:assert",
+}
+
+
+def _infer_js_framework(root: Path) -> tuple[str, str]:
+    """仓库里没有测试文件 ⇒ 从 package.json 推断用哪套 JS 测试框架。
+
+    优先级：① devDependencies/dependencies 里的框架包（vitest → jest）
+             ② scripts.test（再退到其它测试车道脚本）命令里提到的框架
+    推断不出来返回 ("", "") —— 调用方必须**拒绝生成**，
+    不得静默默认 node:test：node:test 的用例 vitest/jest 的 runner 根本不收，
+    会变成"看着正常、永远不跑"的文件（比报错更糟）。
+    """
+    dep_hits: list[str] = []
+    test_hits: list[str] = []
+    other_hits: list[str] = []
+    for pj in _walk(root, {".json"}):
+        if pj.name != "package.json":
+            continue
+        try:
+            pkg = json.loads(pj.read_text(encoding="utf-8", errors="replace"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(pkg, dict):
+            continue
+        deps: set[str] = set()
+        for key in ("dependencies", "devDependencies", "peerDependencies"):
+            block = pkg.get(key)
+            if isinstance(block, dict):
+                deps.update(str(k) for k in block)
+        for fw, names in _JS_FRAMEWORK_DEPS:
+            if fw not in dep_hits and any(d in names for d in deps):
+                dep_hits.append(fw)
+        scripts = pkg.get("scripts")
+        if not isinstance(scripts, dict):
+            continue
+        for name, cmd in scripts.items():
+            if not isinstance(cmd, str) or not _is_lane(str(name)):
+                continue
+            for fw in _JS_FRAMEWORK_SCRIPTS:
+                # 词边界收紧：别把 "jest-lint"、"vitest.config" 当成框架
+                if not re.search(rf"(?<![\w-]){fw}(?![\w-])", cmd):
+                    continue
+                bucket = test_hits if name == "test" else other_hits
+                if fw not in bucket:
+                    bucket.append(fw)
+            # node:test 是内置的，不在依赖里，只在命令里露头。
+            # 少了这一条，node:test 仓库（还没有测试文件）会走进死胡同：
+            # 推断不出框架 ⇒ 拒绝生成，而工具又没有"指定框架"的口子。
+            if re.search(r"node\s+--test", cmd):
+                bucket = test_hits if name == "test" else other_hits
+                if "node:test" not in bucket:
+                    bucket.append("node:test")
+    for fw in dep_hits + test_hits + other_hits:
+        return fw, _JS_FRAMEWORK_ASSERTION[fw]
+    return "", ""
+
 
 @dataclass
 class Conventions:
     """项目的测试约定。"""
-    framework: str = "node:test"
-    assertion: str = "node:assert"
+    framework: str = "node:test"       # 主导语言的框架
+    assertion: str = "node:assert"      # 主导语言的断言风格
+    language: str = "js"                # 主导语言：js / python / rust / go
+    js_framework: str = "node:test"     # JS 生态的框架（仓库混语言时也用它）
+    js_assertion: str = "node:assert"
+    js_files: int = 0                   # 仓库里的 JS/TS 文件数（代码 + 测试）
+    js_tests: int = 0                   # 仓库里的 JS/TS 测试文件数
+    js_framework_known: bool = False    # 框架是认出来的（不是默认值）
     unit_dir: str = ""          # 单元测试放哪（相对仓库根，通常与源码同目录）
     e2e_dir: str = ""           # e2e 放哪
     helper_dir: str = ""        # 夹具/助手层放哪
@@ -834,11 +912,35 @@ def detect_conventions(root: Path, near: str = "") -> Conventions:
     e2e_dirs: dict[str, int] = {}
     helper_dirs: dict[str, int] = {}
     fixtures: list[str] = []
+    js_tests = 0
+    py_tests = 0
+    rs_tests = 0
+    go_tests = 0
 
-    for p in _walk(root, {".ts", ".tsx", ".js", ".mjs"}):
+    for p in _walk(root, {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+                          ".py", ".rs", ".go"}):
         rel = str(p.relative_to(root))
         if "/node_modules/" in f"/{rel}":
             continue
+        suffix = p.suffix.lower()
+        if suffix in (".py", ".rs", ".go"):
+            # Python / Rust / Go 的测试文件 —— 仓库主语言不是 JS 时，约定从这儿认
+            name = p.name
+            if suffix == ".py":
+                if name.startswith("test_") or name.endswith("_test.py"):
+                    py_tests += 1
+            elif suffix == ".go":
+                if name.endswith("_test.go"):
+                    go_tests += 1
+            else:
+                try:
+                    text = p.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if "#[test]" in text or "#[cfg(test)]" in text:
+                    rs_tests += 1
+            continue
+        conv.js_files += 1
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -862,6 +964,7 @@ def detect_conventions(root: Path, near: str = "") -> Conventions:
             continue
         if not re.search(r"\.(test|spec)\.(ts|tsx|js|jsx|mjs)$", rel):
             continue
+        js_tests += 1
         if "e2e" in parts:
             idx = parts.index("e2e")
             key = "/".join(parts[:idx + 1])
@@ -870,6 +973,8 @@ def detect_conventions(root: Path, near: str = "") -> Conventions:
             # 单测通常与源码同目录（colocated）—— 记下它，好生成同位置的测试
             key = "/".join(parts[:-1])
             unit_dirs[key] = unit_dirs.get(key, 0) + 1
+
+    # Python / Rust / Go 的测试文件在上面的同一次遍历里数过了
 
     def _nearest(candidates: dict[str, int]) -> str:
         if not candidates:
@@ -885,9 +990,39 @@ def detect_conventions(root: Path, near: str = "") -> Conventions:
         return max(candidates, key=lambda k: (_shared(k), candidates[k]))
 
     if fw:
-        conv.framework = max(fw, key=lambda k: fw[k])
-    if asrt:
-        conv.assertion = max(asrt, key=lambda k: asrt[k])
+        # 测试文件里写了框架 import ⇒ 直接认
+        conv.js_framework = max(fw, key=lambda k: fw[k])
+        conv.js_framework_known = True
+        if asrt:
+            conv.js_assertion = max(asrt, key=lambda k: asrt[k])
+        else:
+            conv.js_assertion = _JS_FRAMEWORK_ASSERTION.get(
+                conv.js_framework, conv.js_assertion)
+    else:
+        # 没有测试文件（或测试文件没写 import）⇒ 从 package.json 推断；
+        # 推断不出来就**不知道该用哪套约定** —— 标记成"未知"，
+        # 生成时必须拒绝（静默默认 node:test 会生成 runner 不收的文件）。
+        fw2, asrt2 = _infer_js_framework(root)
+        if fw2:
+            conv.js_framework = fw2
+            conv.js_assertion = asrt2
+            conv.js_framework_known = True
+    conv.js_tests = js_tests
+    # 主导语言 = 测试文件最多的那种语言；生成骨架按**落点的扩展名**走，
+    # 这里只是"这个仓库长什么样"的画像（打印给人看）。
+    lang_counts = {"js": js_tests, "python": py_tests, "rust": rs_tests, "go": go_tests}
+    dominant = max(lang_counts, key=lambda k: lang_counts[k])
+    if lang_counts[dominant] == 0:
+        dominant = "js"
+    conv.language = dominant
+    if dominant == "python":
+        conv.framework, conv.assertion = "pytest", "assert"
+    elif dominant == "rust":
+        conv.framework, conv.assertion = "cargo test", "assert_eq!"
+    elif dominant == "go":
+        conv.framework, conv.assertion = "go test", "t.Fatalf"
+    else:
+        conv.framework, conv.assertion = conv.js_framework, conv.js_assertion
     if unit_dirs:
         conv.unit_dir = _nearest(unit_dirs)
     if e2e_dirs:
@@ -909,6 +1044,13 @@ _ASSERT_CALLS = (
                r"rejects|match|doesNotMatch|doesNotThrow|fail)\s*\("),
     re.compile(r"\bexpect\s*\("),
     re.compile(r"\bshould\s*\("),
+    # Python：assert 语句（行首）+ unittest 风格
+    re.compile(r"(?m)^[ \t]*assert[ \t]"),
+    re.compile(r"\bself\.assert\w*\s*\("),
+    # Rust：assert! / assert_eq! / assert_ne!
+    re.compile(r"\bassert(?:_eq|_ne)?!\s*\("),
+    # Go：t.Fatalf / t.Errorf / t.Fatal / t.Error
+    re.compile(r"\bt\.(?:Fatalf|Fatal|Errorf|Error)\s*\("),
 )
 
 
@@ -970,9 +1112,64 @@ def _middleware_used(text: str) -> list[str]:
     return out
 
 
+def _plan_pins(plan: Plan) -> list[tuple[str, str]]:
+    """计划里所有钉到的文件路径（哪一节 + 哪个路径）。
+
+    不变式 / 覆盖矩阵 / 核心逻辑细节 / 数据一致性 / 约束节 / 复用表 /
+    新建能力 —— 各节都要过同一道越界闸。
+    """
+    out: list[tuple[str, str]] = []
+
+    def add(section: str, fpath: str) -> None:
+        out.append((section, fpath))
+
+    for _ident, _desc, pin in plan.invariants:
+        for fpath, _case in parse_pins(pin):
+            add("不变式清单", fpath)
+    for row in plan.matrix_rows:
+        for cell in row[1:]:
+            for fpath, _case in parse_pins(cell):
+                add("覆盖矩阵", fpath)
+    for row in plan.detail_rows:
+        if len(row) < 2:
+            continue
+        for p in _PIN_RE.findall(row[1]):
+            add("核心逻辑细节", p.split(":")[0])
+    for row in plan.consistency_rows:
+        if len(row) < 4:
+            continue
+        for p in _PIN_RE.findall(row[3]):
+            add("数据一致性", p.split(":")[0])
+    for p in _PIN_RE.findall(plan.constraint_text):
+        add("约束：不引入中间件", p.split(":")[0])
+    for row in plan.reuse_rows:
+        for p in _PIN_RE.findall(" ".join(row)):
+            add("复用表", p.split(":")[0])
+    for row in plan.newcap_rows:
+        for p in _PIN_RE.findall(" ".join(row)):
+            add("新建能力", p.split(":")[0])
+    return out
+
+
 def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
     """计划 vs 代码实况。"""
     fs: list[Finding] = []
+
+    # 0. 钉越界 ⇒ 报红，而且**不去读仓库外的文件**。
+    #    读取面与写入面同一把尺子（_pin_violation）：钉只能是仓库内的相对路径。
+    bad_pins: dict[str, str] = {}
+    for _section, fpath in _plan_pins(plan):
+        if fpath in bad_pins:
+            continue
+        reason = _pin_violation(repo.root, fpath)
+        if reason:
+            bad_pins[fpath] = reason
+    for fpath, reason in sorted(bad_pins.items()):
+        fs.append(Finding(
+            "error", "钉越界",
+            f"钉指向仓库外的文件: {fpath}（{reason}）",
+            "钉只能是仓库内的相对路径 —— 越界的钉不读也不写。",
+        ))
 
     weak_inv: set[str] = set()
     pinned_cases: dict[str, set[str]] = {}
@@ -1002,6 +1199,8 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
             ))
             continue
         for fpath, case in pins:
+            if fpath in bad_pins:
+                continue          # 越界的钉已经在上面报红了，别去读它
             if not (repo.root / fpath).exists():
                 fs.append(Finding(
                     "error", f"不变式 {inv_id}",
@@ -1074,7 +1273,7 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
     for row in plan.matrix_rows:
         for cell in row[1:]:
             for fpath, case in parse_pins(cell):
-                if case is not None:
+                if case is not None and fpath not in bad_pins:
                     scope.add(fpath)
     unpinned: list[str] = []
     for fpath in sorted(scope):
@@ -1107,6 +1306,8 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
             ))
             continue
         for fpath, case in pins:
+            if fpath in bad_pins:
+                continue          # 越界的钉已经在上面报红了，别去读它
             if case is not None and (repo.root / fpath).exists():
                 # 用例校验不依赖 known_tests —— 与不变式那条路径保持一致
                 names = test_case_names(repo.root, fpath)
@@ -1199,6 +1400,8 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
                 continue
             for p in pins:
                 fpath = p.split(":")[0]
+                if fpath in bad_pins:
+                    continue      # 越界的钉已经在上面报红了，别去读它
                 if not (repo.root / fpath).exists():
                     fs.append(Finding(
                         "error", "核心逻辑细节",
@@ -1312,6 +1515,8 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
         else:
             for p in pins:
                 fpath = p.split(":")[0]
+                if fpath in bad_pins:
+                    continue      # 越界的钉已经在上面报红了，别去读它
                 if not (repo.root / fpath).exists():
                     fs.append(Finding(
                         "error", "数据一致性",
@@ -1371,6 +1576,8 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
         else:
             for p in reconcile_pins:
                 fpath = p.split(":")[0]
+                if fpath in bad_pins:
+                    continue      # 越界的钉已经在上面报红了，别去读它
                 if not (repo.root / fpath).exists():
                     fs.append(Finding(
                         "error", "约束：不引入中间件",
@@ -1410,6 +1617,8 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
             continue
         for p in pins:
             fpath = p.split(":")[0]
+            if fpath in bad_pins:
+                continue          # 越界的钉已经在上面报红了，别去读它
             if not (repo.root / fpath).exists():
                 fs.append(Finding(
                     "error", "复用表",
@@ -1510,33 +1719,163 @@ def _case_label(case: str) -> str:
     return case.strip().strip("`").strip()
 
 
-def scaffold_test_file(
-    path: Path,
-    conv: Conventions,
-    title: str,
-    invariants: list[tuple[str, str]],
-    cases: list[tuple[str, str]],
-    is_e2e: bool,
-) -> None:
-    """写一个测试文件骨架。
+# 目标文件的扩展名 → 语言。**语言由落点决定，不由仓库默认值决定** ——
+# 否则 Python 仓库里钉 .py 会被写成 TypeScript
+# （见 docs/oss-release-review.md 第五节）。
+_LANG_BY_EXT = {
+    ".ts": "js", ".tsx": "js", ".js": "js", ".jsx": "js",
+    ".mjs": "js", ".cjs": "js",
+    ".py": "python",
+    ".rs": "rust",
+    ".go": "go",
+}
 
-    文件头写清"钉了哪几条不变量" —— 这是逻辑性的载体，也是后来人
-    读这个文件时知道它为什么存在的唯一线索。
+# 各语言生成骨架时的默认约定（仓库自己的约定认不出来时用这些）
+_LANG_DEFAULTS = {
+    "python": ("pytest", "assert"),
+    "rust": ("cargo test", "assert_eq!"),
+    "go": ("go test", "t.Fatalf"),
+}
+
+
+def _conv_for(lang: str, conv: Conventions) -> tuple[str, str]:
+    """某个语言生成时用哪套约定（仓库主语言用自己的，其余用默认）。"""
+    if lang == conv.language:
+        return conv.framework, conv.assertion
+    return _LANG_DEFAULTS.get(lang, (conv.js_framework, conv.js_assertion))
+
+
+def _js_str(value: str) -> str:
+    """把文本安全地嵌进 JS 单引号字符串（单引号/反斜杠/换行都要转义）。"""
+    v = value.replace("\\", "\\\\").replace("'", "\\'")
+    return v.replace("\r", "\\r").replace("\n", "\\n")
+
+
+def _comment_safe(value: str) -> str:
+    """块注释里不能出现 `*/` —— 否则后面的内容会被当成代码。"""
+    return value.replace("*/", "* /")
+
+
+def _one_line(value: str) -> str:
+    """压成一行 —— 注释里的换行会破坏结构。"""
+    return re.sub(r"\s+", " ", value).strip()
+
+
+def _slug(value: str) -> str:
+    """用例名 → 标识符片段（Python/Rust/Go 的函数名用）。"""
+    s = re.sub(r"[^A-Za-z0-9]+", "_", value).strip("_").lower()
+    return re.sub(r"_+", "_", s)
+
+
+def _test_name(case: str) -> str:
+    """用例名 → 测试函数名（Python/Rust）。用例名自带 test_ 前缀就不重复加。"""
+    s = _slug(case)
+    if not s:
+        return "test_case"
+    return s if s.startswith("test_") else f"test_{s}"
+
+
+def _unique_name(base: str, used: set[str]) -> str:
+    """同一个文件里函数名不能重复。"""
+    name = base
+    i = 2
+    while name in used:
+        name = f"{base}_{i}"
+        i += 1
+    used.add(name)
+    return name
+
+
+def _go_name(case: str) -> str:
+    """用例名 → Go 测试函数名（Test + 驼峰）。用例名自带 Test 就不重复加。"""
+    raw = re.sub(r"[^A-Za-z0-9]", "", case)
+    if raw.startswith("Test"):
+        return raw
+    parts = [p for p in _slug(case).split("_") if p]
+    if not parts:
+        return "TestCase"
+    pascal = "".join(p[:1].upper() + p[1:] for p in parts)
+    return pascal if pascal.startswith("Test") else f"Test{pascal}"
+
+
+def _go_pkg(dirname: str) -> str:
+    """目录名 → Go 包名（拿不准就让人在 TODO 里改）。"""
+    s = re.sub(r"[^A-Za-z0-9_]", "", dirname).lower()
+    if not s or s[0].isdigit():
+        s = "pkg" + s
+    return s
+
+
+def _go_pkg_for(target: Path) -> str:
+    """Go 包名：跟同目录已有的 .go 文件一致，否则取目录名。"""
+    try:
+        candidates = sorted(target.parent.glob("*.go"))
+    except OSError:
+        candidates = []
+    for g in candidates:
+        try:
+            text = g.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        m = re.search(r"(?m)^package\s+([A-Za-z_]\w*)", text)
+        if m:
+            return m.group(1)
+    return _go_pkg(target.parent.name)
+
+
+def _pin_violation(repo_root: Path, fpath: str) -> str:
+    """钉里的路径是不是越界 —— 读取面（check）与写入面（scaffold）同一把尺子。
+
+    返回空串表示没问题；否则返回越界理由。
     """
-    if conv.framework == "vitest":
+    root = repo_root.resolve()
+    raw = Path(fpath)
+    if raw.is_absolute():
+        return "是绝对路径（只接受仓库内的相对路径）"
+    if ".." in raw.parts:
+        return "含 `..`（会跳到边界之外）"
+    resolved = (root / raw).resolve()
+    if not resolved.is_relative_to(root):
+        return f"规范化后落在仓库根之外（{resolved}）"
+    return ""
+
+
+def _safe_target(out_dir: Path, repo_root: Path, fpath: str) -> tuple[Path | None, str]:
+    """把钉里的文件路径规范化，校验它不会写到边界之外。
+
+    返回 (目标路径, 拒绝理由)；目标路径是 None 时理由非空。
+    边界有两条：--out-dir 与仓库根 —— 任一越界都不写。
+    """
+    reason = _pin_violation(repo_root, fpath)
+    if reason:
+        return None, reason
+    target = (out_dir / Path(fpath)).resolve()
+    if not target.is_relative_to(out_dir):
+        return None, f"规范化后落在 --out-dir 之外（{target}）"
+    return target, ""
+
+
+def _js_lines(conv: Conventions, title: str,
+              invariants: list[tuple[str, str]],
+              cases: list[tuple[str, str]]) -> list[str]:
+    """JS/TS 风格的骨架。"""
+    if conv.js_framework == "vitest":
         imp = "import { describe, it } from 'vitest';"
-        if conv.assertion == "expect":
+        if conv.js_assertion == "expect":
             imp += "\nimport { expect } from 'vitest';"
-    elif conv.framework == "jest":
+    elif conv.js_framework == "jest":
         imp = "import { describe, it } from '@jest/globals';"
+    elif conv.js_framework == "mocha":
+        imp = "import assert from 'node:assert';\nimport { describe, it } from 'mocha';"
     else:
         imp = "import assert from 'node:assert';\nimport { describe, it } from 'node:test';"
 
-    lines = ["/**", f" * {title}", " *"]
+    lines = ["/**", f" * {_comment_safe(_one_line(title))}", " *"]
     if invariants:
         lines.append(" * 这里钉的不变量：")
         for ident, desc in invariants:
-            lines.append(f" *   - {ident}: {desc}")
+            lines.append(f" *   - {_comment_safe(_one_line(ident))}: "
+                         f"{_comment_safe(_one_line(desc))}")
     else:
         lines.append(" * （待填：这里钉哪几条不变量）")
     lines += [
@@ -1551,14 +1890,137 @@ def scaffold_test_file(
     for group, case in cases:
         groups.setdefault(group, []).append(case)
     for group, items in groups.items():
-        lines.append(f"describe('{group}', () => {{")
+        lines.append(f"describe('{_js_str(group)}', () => {{")
         for case in items:
-            lines.append(f"  it('{case}', () => {{")
+            lines.append(f"  it('{_js_str(case)}', () => {{")
             lines.append("    // TODO: 断言要钉住的东西（期望值 ≠ 输入值）")
             lines.append("  });")
             lines.append("")
         lines.append("});")
         lines.append("")
+    return lines
+
+
+def _py_lines(title: str, invariants: list[tuple[str, str]],
+              cases: list[tuple[str, str]]) -> list[str]:
+    """Python（pytest）风格的骨架。"""
+    lines = [f"# {_one_line(title)}", "#"]
+    if invariants:
+        lines.append("# 这里钉的不变量：")
+        for ident, desc in invariants:
+            lines.append(f"#   - {_one_line(ident)}: {_one_line(desc)}")
+    else:
+        lines.append("# （待填：这里钉哪几条不变量）")
+    lines += [
+        "#",
+        "# 为什么单独一个文件：（待填：这个维度为什么独立于其他维度）",
+        "",
+    ]
+    used: set[str] = set()
+    for _group, case in cases:
+        name = _unique_name(_test_name(case), used)
+        lines.append(f"def {name}():")
+        lines.append(f"    {case!r}")
+        lines.append("    # TODO: 断言要钉住的东西（期望值 ≠ 输入值）")
+        lines.append("    actual = ...        # TODO: 调被测代码，拿到实际值")
+        lines.append("    expected = ...      # TODO: 写期望值")
+        lines.append('    assert actual == expected, "TODO: 期望值 ≠ 输入值"')
+        lines.append("")
+    return lines
+
+
+def _rs_lines(title: str, invariants: list[tuple[str, str]],
+              cases: list[tuple[str, str]]) -> list[str]:
+    """Rust（cargo test）风格的骨架。"""
+    lines = [f"// {_one_line(title)}", "//"]
+    if invariants:
+        lines.append("// 这里钉的不变量：")
+        for ident, desc in invariants:
+            lines.append(f"//   - {_one_line(ident)}: {_one_line(desc)}")
+    else:
+        lines.append("// （待填：这里钉哪几条不变量）")
+    lines += [
+        "//",
+        "// 为什么单独一个文件：（待填：这个维度为什么独立于其他维度）",
+        "",
+    ]
+    used: set[str] = set()
+    for _group, case in cases:
+        name = _unique_name(_test_name(case), used)
+        lines.append("#[test]")
+        lines.append(f"fn {name}() {{")
+        lines.append(f"    // 用例：{_one_line(case)}")
+        lines.append("    // TODO: 断言要钉住的东西（期望值 ≠ 输入值）")
+        lines.append("    let actual = 0;    // TODO: 调被测代码，拿到实际值")
+        lines.append("    let expected = 0;  // TODO: 写期望值")
+        lines.append('    assert_eq!(actual, expected, "TODO: 期望值 ≠ 输入值");')
+        lines.append("}")
+        lines.append("")
+    return lines
+
+
+def _go_lines(title: str, invariants: list[tuple[str, str]],
+              cases: list[tuple[str, str]], pkg: str) -> list[str]:
+    """Go（go test）风格的骨架。"""
+    lines = [f"// {_one_line(title)}", "//"]
+    if invariants:
+        lines.append("// 这里钉的不变量：")
+        for ident, desc in invariants:
+            lines.append(f"//   - {_one_line(ident)}: {_one_line(desc)}")
+    else:
+        lines.append("// （待填：这里钉哪几条不变量）")
+    lines += [
+        "//",
+        "// 为什么单独一个文件：（待填：这个维度为什么独立于其他维度）",
+        "// TODO: 确认包名（默认取目录名）",
+        "",
+        f"package {pkg}",
+        "",
+        'import "testing"',
+        "",
+    ]
+    used: set[str] = set()
+    for _group, case in cases:
+        name = _unique_name(_go_name(case), used)
+        lines.append(f"func {name}(t *testing.T) {{")
+        lines.append(f"\t// 用例：{_one_line(case)}")
+        lines.append("\t// TODO: 断言要钉住的东西（期望值 ≠ 输入值）")
+        lines.append("\tactual := 0   // TODO: 调被测代码，拿到实际值")
+        lines.append("\texpected := 0 // TODO: 写期望值")
+        lines.append("\tif actual != expected {")
+        lines.append('\t\tt.Fatalf("TODO: 期望值 ≠ 输入值 '
+                     '(actual=%v expected=%v)", actual, expected)')
+        lines.append("\t}")
+        lines.append("}")
+        lines.append("")
+    return lines
+
+
+def scaffold_test_file(
+    path: Path,
+    conv: Conventions,
+    title: str,
+    invariants: list[tuple[str, str]],
+    cases: list[tuple[str, str]],
+    is_e2e: bool,
+) -> None:
+    """写一个测试文件骨架。
+
+    文件头写清"钉了哪几条不变量" —— 这是逻辑性的载体，也是后来人
+    读这个文件时知道它为什么存在的唯一线索。
+
+    风格按**落点的扩展名**选（.py → pytest、.rs → cargo test、.go → go test），
+    不按仓库默认值 —— 否则会把 TypeScript 写进 .py 路径。
+    """
+    lang = _LANG_BY_EXT.get(path.suffix.lower(), "js")
+    if lang == "python":
+        lines = _py_lines(title, invariants, cases)
+    elif lang == "rust":
+        lines = _rs_lines(title, invariants, cases)
+    elif lang == "go":
+        lines = _go_lines(title, invariants, cases, _go_pkg_for(path))
+    else:
+        lines = _js_lines(conv, title, invariants, cases)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("\n".join(lines), encoding="utf-8")
 
@@ -1567,17 +2029,17 @@ def check_test_toolkit(plan: Plan, repo: Repo) -> list[Finding]:
     """测试包的四性检查：严谨 / 逻辑 / 复用 / 扩展。"""
     fs: list[Finding] = []
 
-    # 计划里所有被钉到的测试文件
+    # 计划里所有被钉到的测试文件（越界的钉不列 —— 不去读仓库外的文件）
     tool_files: set[str] = set()
     for row in plan.matrix_rows:
         if len(row) < 2:
             continue
         for fpath, case in parse_pins(row[1]):
-            if case:
+            if case and not _pin_violation(repo.root, fpath):
                 tool_files.add(fpath)
     for _ident, _desc, pin in plan.invariants:
         for fpath, case in parse_pins(pin):
-            if case:
+            if case and not _pin_violation(repo.root, fpath):
                 tool_files.add(fpath)
 
     # 严谨性：没有断言的测试文件 = 覆盖率剧场
@@ -1677,6 +2139,12 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
             plan_path = alt
     plan = parse_plan(plan_path.resolve())
     conv = detect_conventions(root, near=plan.modules[0] if plan.modules else "")
+    if getattr(args, "framework", None):
+        # 显式指定优先于认出来的 —— 认不出时这也是唯一的出口
+        conv.js_framework = args.framework
+        conv.js_assertion = _JS_FRAMEWORK_ASSERTION.get(
+            args.framework, conv.js_assertion)
+        conv.js_framework_known = True
     out_dir = Path(args.out_dir).resolve() if args.out_dir else root
 
     # 从覆盖矩阵取每个流程的落点（文件::用例）
@@ -1711,8 +2179,66 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
     written: list[str] = []
     into_existing: list[tuple[str, list[str]]] = []
 
-    for fpath, cases in sorted(by_file.items()):
-        target = out_dir / fpath
+    # 写入前的两道闸：路径越界、语言不支持 —— 有一个不合格就一个都不写。
+    blocked: list[Finding] = []
+    planned: list[tuple[str, Path, str]] = []   # (钉里的路径, 目标路径, 语言)
+    for fpath in sorted(by_file):
+        target, reason = _safe_target(out_dir, root, fpath)
+        if target is None:
+            blocked.append(Finding(
+                "error", "写入安全",
+                f"钉「{fpath}」{reason}",
+                "钉只能是仓库内的相对路径 —— 越界的钉不写盘。",
+            ))
+            continue
+        lang = _LANG_BY_EXT.get(Path(fpath).suffix.lower())
+        if lang is None:
+            blocked.append(Finding(
+                "error", "语言不支持",
+                f"钉「{fpath}」的文件类型没有对应的生成风格",
+                "支持：" + "、".join(sorted(_LANG_BY_EXT)) + "。",
+            ))
+            continue
+        if lang == "js":
+            if not conv.js_files:
+                blocked.append(Finding(
+                    "error", "语言不确定",
+                    f"钉「{fpath}」是 JS/TS，但仓库里没有 JS/TS 代码或测试文件",
+                    "认不出该用哪套约定（node:test / vitest / jest）—— "
+                    "先把落点改成仓库主语言的文件。",
+                ))
+                continue
+            if not conv.js_framework_known:
+                if conv.js_tests:
+                    why = ("仓库里的测试文件没写框架 import，"
+                           "且从 package.json 推断不出用哪套测试框架"
+                           "（node:test / vitest / jest / mocha）")
+                else:
+                    why = ("仓库里有 JS/TS 代码但没有任何测试文件，"
+                           "且从 package.json 推断不出用哪套测试框架"
+                           "（node:test / vitest / jest）")
+                blocked.append(Finding(
+                    "error", "框架推断不出",
+                    f"钉「{fpath}」是 JS/TS，但{why}",
+                    "先把落点改成仓库主语言的文件，或先确认框架 —— "
+                    "猜错框架会生成 runner 根本不收的测试文件"
+                    "（看着正常、永远不跑）。",
+                ))
+                continue
+        planned.append((fpath, target, lang))
+
+    if blocked:
+        print(f"\n需求测试计划校验 — {plan.path}")
+        print(f"仓库：{root}")
+        print(f"落点：{len(by_file)} 个\n")
+        for f in blocked:
+            print(f.render())
+        print(f"\n{len(blocked)} 项：{len(blocked)} 个错误 / 0 个提醒")
+        print("一个文件都没写 —— 有问题的钉先改掉。")
+        return 1
+
+    for fpath, target, _lang in planned:
+        cases = by_file[fpath]
         live = repo.root / fpath
         if live.exists():
             # 已有文件：不碰，只列出这次要加的用例
@@ -1734,7 +2260,12 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
         )
         written.append(fpath)
 
-    print(f"约定：{conv.framework} / {conv.assertion}")
+    langs = sorted({lang for _f, _t, lang in planned})
+    conv_text = "；".join(
+        f"{lang}：{fw} / {asrt}"
+        for lang, (fw, asrt) in ((lg, _conv_for(lg, conv)) for lg in langs)
+    ) or "（没有落点）"
+    print(f"约定：{conv_text}")
     print(f"夹具层：{conv.helper_dir or '（没扫到）'}")
     if written:
         print(f"\n已生成 {len(written)} 个新测试文件：")
@@ -1745,7 +2276,7 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
         for f, todos in into_existing:
             print(f"  ~ {f}")
             for t in todos:
-                print(f"      + it('{t}', ...)")
+                print(f"      + it('{_js_str(t)}', ...)")
     if not written and not into_existing:
         if by_file:
             print("\n计划里的用例在既有测试文件里都已经有了 —— 没有要新增的。")
@@ -1897,6 +2428,9 @@ def main(argv: list[str]) -> int:
     p_sc.add_argument("plan", help="计划文件")
     p_sc.add_argument("--repo", default=".", help="仓库根")
     p_sc.add_argument("--out-dir", default=None, help="生成根目录（默认仓库根）")
+    p_sc.add_argument("--framework", default=None,
+                      choices=["node:test", "vitest", "jest", "mocha"],
+                      help="显式指定 JS 测试框架（默认从仓库认；认不出时用它）")
     p_sc.add_argument("--force", action="store_true", help="覆盖已存在的测试文件")
     p_sc.set_defaults(func=cmd_scaffold)
 

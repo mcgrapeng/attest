@@ -11,10 +11,31 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).parent
-AUDIT = Path("/Users/zhangpeng/.agents/skills/ai-testing-system/scripts/"
-             "testkit_audit.py")
-FIX = Path("/Users/zhangpeng/.agents/skills/ai-testing-system/scripts/"
-           "testkit_fix.py")
+
+
+def _find_audit_scripts() -> Path | None:
+    """找 ai-testing-system 的 scripts 目录。
+
+    路径**从本文件推导**（先找仓库/工作区自带的，再退到机器级安装位置
+    ~/.agents/skills/ai-testing-system）—— 不写死某台机器的家目录。
+    找不到返回 None，由调用方跳过相关断言并打印提示。
+    """
+    here = Path(__file__).resolve()
+    candidates = [p / ".agents" / "skills" / "ai-testing-system" / "scripts"
+                  for p in here.parents]
+    candidates.append(
+        Path.home() / ".agents" / "skills" / "ai-testing-system" / "scripts")
+    for d in candidates:
+        if (d / "testkit_audit.py").is_file():
+            return d
+    return None
+
+
+AUDIT_SCRIPTS = _find_audit_scripts()
+AUDIT = AUDIT_SCRIPTS / "testkit_audit.py" if AUDIT_SCRIPTS else None
+FIX = AUDIT_SCRIPTS / "testkit_fix.py" if AUDIT_SCRIPTS else None
+SKIP_WHY = ("找不到 ai-testing-system 的 testkit_audit.py"
+            "（也没在 ~/.agents/skills 下找到）")
 
 FAILURES: list[str] = []
 TMPDIRS: list[Path] = []
@@ -50,42 +71,45 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     except AttributeError:
         pass
-    print("缺陷 1：不可读目录让审计直接崩")
-    d = mkdtemp()
-    write(d / "package.json", json.dumps({"scripts": {"test": "vitest"}}))
-    write(d / "src" / "a.ts", "export const a = 1\n")
-    write(d / "src" / "a.test.ts", "test('x', () => {})\n")
-    locked = d / "locked"
-    locked.mkdir()
-    os.chmod(locked, 0o000)
-    r = run([sys.executable, str(AUDIT), str(d)])
-    expect("Traceback" not in r.stderr, "不可读目录不崩")
-    os.chmod(locked, 0o755)
+    if AUDIT is None:
+        print(f"  skip 缺陷 1/2/3：{SKIP_WHY}")
+    else:
+        print("缺陷 1：不可读目录让审计直接崩")
+        d = mkdtemp()
+        write(d / "package.json", json.dumps({"scripts": {"test": "vitest"}}))
+        write(d / "src" / "a.ts", "export const a = 1\n")
+        write(d / "src" / "a.test.ts", "test('x', () => {})\n")
+        locked = d / "locked"
+        locked.mkdir()
+        os.chmod(locked, 0o000)
+        r = run([sys.executable, str(AUDIT), str(d)])
+        expect("Traceback" not in r.stderr, "不可读目录不崩")
+        os.chmod(locked, 0o755)
 
-    print("\n缺陷 2：worktrees/ 里的 manifest 被当成主仓配置")
-    d2 = mkdtemp()
-    write(d2 / "package.json", json.dumps({"scripts": {"test": "vitest"}}))
-    write(d2 / "src" / "a.ts", "export const a = 1\n")
-    write(d2 / "src" / "a.test.ts", "test('x', () => {})\n")
-    # 代理工作树副本里有 @axe-core/playwright —— 主仓没有
-    write(d2 / "worktrees" / "feat-x" / "package.json",
-          json.dumps({"devDependencies": {"@axe-core/playwright": "^4"}}))
-    r2 = run([sys.executable, str(AUDIT), str(d2)])
-    expect("a11y" in r2.stdout, "a11y 项被检查了")
-    expect("a11y 回归          ✓" not in r2.stdout
-           and "✓ a11y 回归" not in r2.stdout,
-           "worktrees/ 里的 axe 依赖没被算成主仓的（a11y 仍是缺口）")
+        print("\n缺陷 2：worktrees/ 里的 manifest 被当成主仓配置")
+        d2 = mkdtemp()
+        write(d2 / "package.json", json.dumps({"scripts": {"test": "vitest"}}))
+        write(d2 / "src" / "a.ts", "export const a = 1\n")
+        write(d2 / "src" / "a.test.ts", "test('x', () => {})\n")
+        # 代理工作树副本里有 @axe-core/playwright —— 主仓没有
+        write(d2 / "worktrees" / "feat-x" / "package.json",
+              json.dumps({"devDependencies": {"@axe-core/playwright": "^4"}}))
+        r2 = run([sys.executable, str(AUDIT), str(d2)])
+        expect("a11y" in r2.stdout, "a11y 项被检查了")
+        expect("a11y 回归          ✓" not in r2.stdout
+               and "✓ a11y 回归" not in r2.stdout,
+               "worktrees/ 里的 axe 依赖没被算成主仓的（a11y 仍是缺口）")
 
-    print("\n缺陷 3：target-repro-c/ 里的 manifest 被当成主仓配置")
-    d3 = mkdtemp()
-    write(d3 / "package.json", json.dumps({"scripts": {"test": "vitest"}}))
-    write(d3 / "src" / "a.ts", "export const a = 1\n")
-    write(d3 / "src" / "a.test.ts", "test('x', () => {})\n")
-    write(d3 / "target-repro-c" / "vendored" / "package.json",
-          json.dumps({"devDependencies": {"@axe-core/playwright": "^4"}}))
-    r3 = run([sys.executable, str(AUDIT), str(d3)])
-    expect("✓ a11y 回归" not in r3.stdout,
-           "target-repro-c/ 里的 axe 依赖没被算成主仓的")
+        print("\n缺陷 3：target-repro-c/ 里的 manifest 被当成主仓配置")
+        d3 = mkdtemp()
+        write(d3 / "package.json", json.dumps({"scripts": {"test": "vitest"}}))
+        write(d3 / "src" / "a.ts", "export const a = 1\n")
+        write(d3 / "src" / "a.test.ts", "test('x', () => {})\n")
+        write(d3 / "target-repro-c" / "vendored" / "package.json",
+              json.dumps({"devDependencies": {"@axe-core/playwright": "^4"}}))
+        r3 = run([sys.executable, str(AUDIT), str(d3)])
+        expect("✓ a11y 回归" not in r3.stdout,
+               "target-repro-c/ 里的 axe 依赖没被算成主仓的")
 
     print("\n缺陷 4：两列的不变式行 —— 钉在第 2 列被误报「没有钉」")
     sys.path.insert(0, str(HERE))
@@ -149,37 +173,40 @@ def main() -> int:
     names = " ".join(module_helpers(d7, ["src"]).get("src", []))
     expect("{ b" not in names, "嵌套解构没产生垃圾符号名")
 
-    print("\n缺陷 8：testkit-fix 对双语言仓重复生成同一条命令")
-    d8 = mkdtemp()
-    write(d8 / "package.json", json.dumps({
-        "scripts": {"test": "vitest"},
-        "dependencies": {"fastapi": "^0.111"},
-    }))
-    write(d8 / "src" / "a.ts", "export const a = 1\n")
-    write(d8 / "src" / "a.test.ts", "test('x', () => {})\n")
-    write(d8 / "pyproject.toml", "[project]\nname='x'\n")
-    r8 = run([sys.executable, str(FIX), "--project", str(d8)])
-    # 只数真正的命令行（脚本里每条命令前面还有一行 echo '> …'）
-    cmds8 = [l.strip() for l in r8.stdout.splitlines()
-             if l.strip().startswith(("eval-gate", "npm", "npx", "cargo",
-                                      "gotestsum"))]
-    scaffold = [c for c in cmds8 if c.startswith("eval-gate")]
-    expect(len(scaffold) == 1,
-           f"eval-gate scaffold 只生成一条命令（实际 {len(scaffold)} 条）")
-    expect(any(c.startswith("npm i -D @axe-core/playwright") for c in cmds8),
-           "TS 侧的补齐命令没被 py 段的同 item 吞掉")
+    if FIX is None or not FIX.is_file():
+        print(f"  skip 缺陷 8/9：{SKIP_WHY}")
+    else:
+        print("\n缺陷 8：testkit-fix 对双语言仓重复生成同一条命令")
+        d8 = mkdtemp()
+        write(d8 / "package.json", json.dumps({
+            "scripts": {"test": "vitest"},
+            "dependencies": {"fastapi": "^0.111"},
+        }))
+        write(d8 / "src" / "a.ts", "export const a = 1\n")
+        write(d8 / "src" / "a.test.ts", "test('x', () => {})\n")
+        write(d8 / "pyproject.toml", "[project]\nname='x'\n")
+        r8 = run([sys.executable, str(FIX), "--project", str(d8)])
+        # 只数真正的命令行（脚本里每条命令前面还有一行 echo '> …'）
+        cmds8 = [l.strip() for l in r8.stdout.splitlines()
+                 if l.strip().startswith(("eval-gate", "npm", "npx", "cargo",
+                                          "gotestsum"))]
+        scaffold = [c for c in cmds8 if c.startswith("eval-gate")]
+        expect(len(scaffold) == 1,
+               f"eval-gate scaffold 只生成一条命令（实际 {len(scaffold)} 条）")
+        expect(any(c.startswith("npm i -D @axe-core/playwright") for c in cmds8),
+               "TS 侧的补齐命令没被 py 段的同 item 吞掉")
 
-    print("\n缺陷 9：Rust 仓的补齐命令不能被别语言的同 item 吞掉")
-    d9 = mkdtemp()
-    write(d9 / "Cargo.toml", '[package]\nname="c"\n')
-    write(d9 / "src.rs", "#[test]\nfn t(){}\n")
-    r9 = run([sys.executable, str(FIX), "--project", str(d9)])
-    cmds9 = [l.strip() for l in r9.stdout.splitlines()
-             if l.strip().startswith("cargo")]
-    expect(any(c.startswith("cargo mutants") for c in cmds9),
-           "cargo mutants 在补齐脚本里")
-    expect(any(c.startswith("cargo deny") for c in cmds9),
-           "cargo deny 在补齐脚本里")
+        print("\n缺陷 9：Rust 仓的补齐命令不能被别语言的同 item 吞掉")
+        d9 = mkdtemp()
+        write(d9 / "Cargo.toml", '[package]\nname="c"\n')
+        write(d9 / "src.rs", "#[test]\nfn t(){}\n")
+        r9 = run([sys.executable, str(FIX), "--project", str(d9)])
+        cmds9 = [l.strip() for l in r9.stdout.splitlines()
+                 if l.strip().startswith("cargo")]
+        expect(any(c.startswith("cargo mutants") for c in cmds9),
+               "cargo mutants 在补齐脚本里")
+        expect(any(c.startswith("cargo deny") for c in cmds9),
+               "cargo deny 在补齐脚本里")
 
     print()
     for d in TMPDIRS:

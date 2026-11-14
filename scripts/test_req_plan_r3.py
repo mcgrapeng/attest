@@ -17,6 +17,33 @@ FAILURES: list[str] = []
 TMPDIRS: list[Path] = []
 
 
+def _load_testkit_audit():
+    """导入 ai-testing-system 的 testkit_audit。
+
+    路径**从本文件推导**（先找仓库/工作区自带的，再退到机器级安装位置
+    ~/.agents/skills/ai-testing-system）—— 不写死某台机器的家目录。
+    找不到就返回 (None, None, 原因)，由调用方跳过相关断言并打印提示
+    （静默跳过最糟：会让人以为那些断言通过）。
+    """
+    here = Path(__file__).resolve()
+    candidates = [p / ".agents" / "skills" / "ai-testing-system" / "scripts"
+                  for p in here.parents]
+    candidates.append(
+        Path.home() / ".agents" / "skills" / "ai-testing-system" / "scripts")
+    for d in candidates:
+        script = d / "testkit_audit.py"
+        if not script.is_file():
+            continue
+        sys.path.insert(0, str(d))
+        try:
+            import testkit_audit  # noqa: E402
+        except Exception as e:  # noqa: BLE001 —— 缺依赖也算"没有"
+            return None, script, f"testkit_audit 导入失败（{e}）"
+        return testkit_audit, script, ""
+    return None, None, ("找不到 ai-testing-system 的 testkit_audit.py"
+                        "（也没在 ~/.agents/skills 下找到）")
+
+
 def expect(cond: bool, label: str) -> None:
     print(f"  {'ok  ' if cond else 'FAIL'} {label}")
     if not cond:
@@ -119,64 +146,63 @@ def main() -> int:
     expect(" 1  (" not in names, "默认值 1 没被当成符号名")
 
     print("\n缺陷 E：Python 库 + 同仓 Node 服务 ⇒ 纯 Python 库被要求写 e2e")
-    sys.path.insert(0, str(Path("/Users/zhangpeng/.agents/skills/"
-                                "ai-testing-system/scripts")))
-    from testkit_audit import has_http_service  # noqa: E402
-    d3 = mkdtemp()
-    write(d3 / "package.json",
-          '{"scripts":{"test":"vitest"},"dependencies":{"fastify":"^5"}}')
-    write(d3 / "src" / "a.ts", "export const a = 1;\n")
-    write(d3 / "pyproject.toml", "[project]\nname='x'\n")
-    write(d3 / "pkg" / "__init__.py", "")
-    expect(has_http_service(d3, "ts"), "TS 侧看成服务型（fastify）")
-    expect(not has_http_service(d3, "py"),
-           "Python 侧不因同仓的 Node 服务而变成服务型")
+    audit, audit_script, why = _load_testkit_audit()
+    if audit is None:
+        print(f"  skip 缺陷 E/F/G：{why}")
+    else:
+        d3 = mkdtemp()
+        write(d3 / "package.json",
+              '{"scripts":{"test":"vitest"},"dependencies":{"fastify":"^5"}}')
+        write(d3 / "src" / "a.ts", "export const a = 1;\n")
+        write(d3 / "pyproject.toml", "[project]\nname='x'\n")
+        write(d3 / "pkg" / "__init__.py", "")
+        expect(audit.has_http_service(d3, "ts"), "TS 侧看成服务型（fastify）")
+        expect(not audit.has_http_service(d3, "py"),
+               "Python 侧不因同仓的 Node 服务而变成服务型")
 
-    print("\n缺陷 F：子项目式 Rust monorepo 的清单只读根 ⇒ 假全红")
-    d4 = mkdtemp()
-    write(d4 / "crate" / "Cargo.toml", '[package]\nname="c"\n')
-    write(d4 / "crate" / "mutants.toml", "{}")
-    write(d4 / "crate" / "src" / "lib.rs", "#[test]\nfn t(){}\n")
-    r = subprocess.run(
-        [sys.executable,
-         str(Path("/Users/zhangpeng/.agents/skills/ai-testing-system/scripts/"
-                  "testkit_audit.py")), str(d4)],
-        capture_output=True, text=True, encoding="utf-8",
-        env={**os.environ, "PYTHONUTF8": "1"},
-    )
-    out = r.stdout + r.stderr
-    expect("── Rust" in out, "Rust 段跑出来了")
-    expect("变异审计 (rust)" not in out,
-           "crate/mutants.toml 被认出来（不再假全红）")
-
-    print("\n缺陷 G：子目录同时有 package.json 和 Cargo.toml ⇒ Rust 被漏")
-    d5 = mkdtemp()
-    write(d5 / "pkg" / "package.json", '{"scripts":{"test":"vitest"}}')
-    write(d5 / "pkg" / "Cargo.toml", '[package]\nname="c"\n')
-    write(d5 / "pkg" / "src" / "lib.rs", "#[test]\nfn t(){}\n")
-    from testkit_audit import detect_langs  # noqa: E402
-    langs = detect_langs(d5)
-    expect("rust" in langs and "ts" in langs,
-           "同一子目录的 TS 与 Rust 都被认出来")
-
-    print("\n缺陷 H：畸形 manifest 的嵌套类型写错会崩")
-    for bad, label in (
-        ('{"dependencies": ["react"]}', "dependencies 是数组"),
-        ('{"dependencies": "react"}', "dependencies 是字符串"),
-        ('{"scripts": ["test"]}', "scripts 是数组"),
-    ):
-        d6 = mkdtemp()
-        write(d6 / "package.json", bad)
-        write(d6 / "src" / "a.ts", "export const a = 1;\n")
+        print("\n缺陷 F：子项目式 Rust monorepo 的清单只读根 ⇒ 假全红")
+        d4 = mkdtemp()
+        write(d4 / "crate" / "Cargo.toml", '[package]\nname="c"\n')
+        write(d4 / "crate" / "mutants.toml", "{}")
+        write(d4 / "crate" / "src" / "lib.rs", "#[test]\nfn t(){}\n")
         r = subprocess.run(
-            [sys.executable,
-             str(Path("/Users/zhangpeng/.agents/skills/ai-testing-system/scripts/"
-                      "testkit_audit.py")), str(d6)],
+            [sys.executable, str(audit_script), str(d4)],
             capture_output=True, text=True, encoding="utf-8",
             env={**os.environ, "PYTHONUTF8": "1"},
         )
-        # 审计器有**关键缺口**时退出码是 1 —— 这里只要求"不崩"
-        expect("Traceback" not in r.stderr, f"嵌套畸形（{label}）不崩")
+        out = r.stdout + r.stderr
+        expect("── Rust" in out, "Rust 段跑出来了")
+        expect("变异审计 (rust)" not in out,
+               "crate/mutants.toml 被认出来（不再假全红）")
+
+        print("\n缺陷 G：子目录同时有 package.json 和 Cargo.toml ⇒ Rust 被漏")
+        d5 = mkdtemp()
+        write(d5 / "pkg" / "package.json", '{"scripts":{"test":"vitest"}}')
+        write(d5 / "pkg" / "Cargo.toml", '[package]\nname="c"\n')
+        write(d5 / "pkg" / "src" / "lib.rs", "#[test]\nfn t(){}\n")
+        langs = audit.detect_langs(d5)
+        expect("rust" in langs and "ts" in langs,
+               "同一子目录的 TS 与 Rust 都被认出来")
+
+    print("\n缺陷 H：畸形 manifest 的嵌套类型写错会崩")
+    if audit is None:
+        print(f"  skip 缺陷 H：{why}")
+    else:
+        for bad, label in (
+            ('{"dependencies": ["react"]}', "dependencies 是数组"),
+            ('{"dependencies": "react"}', "dependencies 是字符串"),
+            ('{"scripts": ["test"]}', "scripts 是数组"),
+        ):
+            d6 = mkdtemp()
+            write(d6 / "package.json", bad)
+            write(d6 / "src" / "a.ts", "export const a = 1;\n")
+            r = subprocess.run(
+                [sys.executable, str(audit_script), str(d6)],
+                capture_output=True, text=True, encoding="utf-8",
+                env={**os.environ, "PYTHONUTF8": "1"},
+            )
+            # 审计器有**关键缺口**时退出码是 1 —— 这里只要求"不崩"
+            expect("Traceback" not in r.stderr, f"嵌套畸形（{label}）不崩")
 
     print()
     for d in TMPDIRS:

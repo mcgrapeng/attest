@@ -86,7 +86,8 @@ Common switches of `readiness.py`:
 | `--plan <file>` | Requirement test plan to check the module against (drives the 需求覆盖到位 criterion) |
 | `--json` | Machine-readable output (checks + the verdict counters) |
 | `--dry-run` | **Only lists** the repo scripts and commands that would be executed, then exits (executes nothing). Look before you run |
-| `--self-check` | Reverse verification: inject a known defect into a **temporary copy** to prove the criteria turn red. Your repo is not touched. The copy has no `node_modules`, so what this proves is that the **static** criteria catch the defect — not that the measured ones do |
+| `--self-check` | Reverse verification: inject a known defect into a **temporary copy** to prove the criteria turn red. Your repo is not touched. The copy has no `node_modules` by default, so what this proves is that the **static** criteria catch the defect — not that the measured ones do |
+| `--self-check-deps` | With `--self-check`: **symlink** `node_modules` / `.venv` into the copy (no copying), so the copy can really run the tests and the measured criteria get verified too |
 | `--include-itest` | Count the real-backend itest lane too (needs PostgreSQL + a vector store; slow) |
 | `--test-tenant <name>` | Declare a test tenant (repeatable; exact name or prefix) — drift in a test tenant is fixture state, so it does not block |
 | `--test-tenant-prefix <prefix>` | Add a test-tenant prefix (defaults recognise `itest-` `memtest-` `mock-` `eval-` …) |
@@ -289,7 +290,7 @@ The full list is in [CHANGELOG.md](CHANGELOG.md) under "已知遗留（发布时
 | Python has no real-backend (itest) lane | The TS side has `--include-itest`; Python has no equivalent mechanism. P1, not fixed |
 | Windows / non-bash environments | Unverified |
 | Trigger accuracy | Not measured (`skill-creator`'s `run_loop` needs the `claude` CLI) |
-| The self-check copy does not include `node_modules` | Most repos therefore cannot run their tests in the copy, so `--self-check` proves that "the static criteria catch things", not that "the whole criterion set (including the measured ones) catches things". The report says so explicitly (`copy_runnable: false`) |
+| The self-check copy does not include `node_modules` by default | Most repos therefore cannot run their tests in the copy, so `--self-check` proves that "the static criteria catch things", not that "the whole criterion set (including the measured ones) catches things". The report says so explicitly (`copy_runnable: false`). Add `--self-check-deps` to symlink the dependencies into the copy (no copying) and the measured criteria get verified too |
 
 One more item that is not in the CHANGELOG's "known leftovers" list: the body of
 `SKILL.md` is still Chinese only. This README has an English version

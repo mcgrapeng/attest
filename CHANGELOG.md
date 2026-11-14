@@ -170,6 +170,8 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
     每次调用都要多打一个参数，实际收益不大。想看执行清单用 `--dry-run`。
   - Windows / 非 bash 环境未验证。
   - 触发准确度未实测（`skill-creator` 的 `run_loop` 需要 `claude` CLI）。
-  - **自检副本不带 `node_modules`** ⇒ 多数仓库在副本里跑不动测试，`--self-check`
-    证明的是"静态判据抓得住东西"，不是"整套判据（含实测项）抓得住东西"。
+  - **自检副本默认不带 `node_modules`** ⇒ 多数仓库在副本里跑不动测试，`--self-check`
+    默认证明的是"静态判据抓得住东西"，不是"整套判据（含实测项）抓得住东西"。
     报告里明说了这件事（`copy_runnable: false`）。
+    加 `--self-check-deps` 会把依赖**软链**进副本（不复制体积），那时能验到实测类判据；
+    默认不开，因为软链让副本里的测试连到真实依赖。

@@ -205,7 +205,7 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清"当前只实现了 
 | Python 没有真后端（itest）车道 | TS 侧有 `--include-itest`，Python 侧没有对应机制。属 P1，未修 |
 | Windows / 非 bash 环境未验证 | — |
 | 触发准确度未实测 | `skill-creator` 的 `run_loop` 需要 `claude` CLI |
-| 自检副本不带 `node_modules` | 多数仓库在副本里跑不动测试，`--self-check` 证明的是"静态判据抓得住东西"，不是"整套判据（含实测项）抓得住东西"。报告里明说了这件事（`copy_runnable: false`） |
+| 自检副本默认不带 `node_modules` | 多数仓库在副本里跑不动测试，`--self-check` 默认证明的是"静态判据抓得住东西"，不是"整套判据（含实测项）抓得住东西"。报告里明说了这件事（`copy_runnable: false`）。加 `--self-check-deps` 会把依赖**软链**进副本（不复制体积），那时能验到实测类判据 |
 
 另有一条不在 CHANGELOG「已知遗留」里的：`SKILL.md` 正文仍是中文（README 已有英文版 `README.en.md`）。
 

@@ -1,0 +1,58 @@
+# SkillSpector 的 HIGH/CRITICAL allowlist —— 逐条人工复核过、明确接受的规则。
+#
+# 为什么是**规则级**而不是逐条 finding：
+#   逐条基线（scanner 的 baseline 子命令）用**位置指纹**匹配 ⇒ 改了代码里那一行，
+#   基线就失效、CI 变红。对开源项目这是持续的假红：贡献者每次改代码都要先
+#   "重新生成基线"，久而久之就没人看红灯了。
+#   规则级 allowlist 不依赖位置 ⇒ 改代码不会让闸门误红；而**新规则**仍然会被拦。
+#
+# 代价（说清楚，不藏着）：同一个规则在一个已放行的文件里**再出现**不会被拦。
+# 规则本身太粗 —— E2 匹配所有环境变量枚举。真正的收口在代码里
+# （scripts/readiness.py 的 child_env、scripts/selfcheck.py 的 _child_env
+# 都只透传白名单），不靠这个闸门。
+#
+# **抑制项在 CI 日志里照常打印**，不藏。
+#
+# 加新条目之前先问：这是真风险还是规则的误报？
+# 是真风险 ⇒ 改代码，别加条目。
+version: 1
+
+rules:
+  # E2「Env Variable Harvesting」：扫描器看到 {**os.environ, ...} 就报。
+  # 这里是**必要且已收口**的：子进程要拿到 PATH/HOME 才能跑目标仓库的测试命令；
+  # 真正传给目标脚本的环境是白名单（readiness.py 的 child_env）。
+  # 复核记录：docs/oss-release-review.md 第六节。
+  - id: E2
+    reason: >-
+      子进程只透传白名单环境变量（child_env / _child_env）—— 逐处复核过，
+      见 docs/oss-release-review.md 第六节。扫描器按 {**os.environ} 模式匹配，
+      看不到白名单那一层。
+
+  # AE1「Artifact Evidence」：文档（SKILL.md / README）引用 scripts/*.py 时
+  # 只引了片段 —— 那是文档里的引用，不是缺失的产物。
+  - id: AE1
+    reason: >-
+      文档引用仓库内的脚本时只引片段（"见 scripts/readiness.py"），
+      不是缺失的产物。误报。
+
+  # PE3「Credential Access」：源码里**点名** .npmrc（说明不复制它），
+  # 扫描器按"出现了凭据文件路径"判。凭据本身没有读、没有复制。
+  - id: PE3
+    reason: >-
+      注释里点名 .npmrc，是为了说明**不**复制它（凭据不该进临时副本）；
+      复制清单里已经去掉了它。误报。
+
+  # SC9「Concealed Executable Artifact」：.github/ 下随仓库发布的维护脚本
+  # （shell），扫描器把它们当成"藏起来的可执行产物"。它们是仓库的一部分，
+  # 在 CI 里被显式调用。
+  - id: SC9
+    reason: >-
+      .github/ 下的维护脚本（shell）随仓库发布、在 CI 里被显式调用 ——
+      是仓库的一部分，不是藏起来的可执行产物。误报。
+
+  # AST9「反射调用」：getattr(args, 'exec') 这类被当成执行 sink。
+  # 实际只是读 argparse 的属性。已改写为直接属性访问，规则仍可能命中别的写法。
+  - id: AST9
+    reason: >-
+      反射调用误报（读 argparse 属性不是执行 sink）。已改写为直接属性访问，
+      规则本身仍可能命中别的写法。

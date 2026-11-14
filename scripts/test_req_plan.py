@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import shutil
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -164,6 +165,49 @@ def main() -> int:
 """, encoding="utf-8")
     bp = parse_plan(bullet)
     expect(bp.lanes == ["test", "test:e2e"], "bullet 形态的车道被解析出来")
+
+
+    print("\n跨存储才生成「数据一致性」+「约束」两节")
+    # 单存储模块：不该有那两节（之前不管有没有跨存储都生成 ⇒ 新计划一出生就带两条红）
+    single = tmp / "single"
+    (single / "src").mkdir(parents=True)
+    (single / "package.json").write_text(
+        json.dumps({"scripts": {"test": "node --test"}}), encoding="utf-8")
+    (single / "src" / "a.ts").write_text("export const a = 1;\n", encoding="utf-8")
+    rc = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "req_plan.py"), "new",
+         "single-plan", "--repo", str(single), "--module", "src"],
+        capture_output=True, text=True, encoding="utf-8")
+    expect(rc.returncode == 0, "单存储模块的计划生成成功")
+    sp = (single / "docs" / "single-plan-test-plan.md").read_text(encoding="utf-8")
+    expect("## 数据一致性" not in sp, "单存储模块不生成「数据一致性」节")
+    expect("## 约束：不引入中间件" not in sp, "单存储模块不生成「约束」节")
+    expect("## 本需求明确不做的事" in sp, "「不做的事」那节还在（内容与标题对上了）")
+    expect(sp.count("## 数据一致性") == 0,
+           "模板里没有第二个重复的「数据一致性」标题")
+
+    # 双存储模块（PG + 向量库）：两节都要在
+    multi = tmp / "multi"
+    (multi / "src").mkdir(parents=True)
+    (multi / "package.json").write_text(
+        json.dumps({"scripts": {"test": "node --test"}}), encoding="utf-8")
+    (multi / "src" / "pg.ts").write_text(
+        "import { pgTable } from 'drizzle-orm/pg-core';\n"
+        "export const widgets = pgTable('widgets', {});\n", encoding="utf-8")
+    (multi / "src" / "vec.ts").write_text(
+        "import { MilvusClient } from '@zilliz/milvus2-sdk-node';\n"
+        "export async function up(id: string) {\n"
+        "  const c = new MilvusClient({ address: 'localhost:19530' });\n"
+        "  return c.upsert({ collection_name: 'mem', data: [{ id }] });\n"
+        "}\n", encoding="utf-8")
+    rc2 = subprocess.run(
+        [sys.executable, str(Path(__file__).parent / "req_plan.py"), "new",
+         "multi-plan", "--repo", str(multi), "--module", "src"],
+        capture_output=True, text=True, encoding="utf-8")
+    expect(rc2.returncode == 0, "双存储模块的计划生成成功")
+    mp = (multi / "docs" / "multi-plan-test-plan.md").read_text(encoding="utf-8")
+    expect("## 数据一致性" in mp, "双存储模块有「数据一致性」节")
+    expect("## 约束：不引入中间件" in mp, "双存储模块有「约束」节")
 
     shutil.rmtree(tmp, ignore_errors=True)
     print()

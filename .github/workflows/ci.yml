@@ -104,18 +104,24 @@ jobs:
           python3 -c "import json; d=json.load(open('$TMP/report.json')); assert d.get('checks'), 'JSON 里没有 checks'; print('readiness --json OK，', len(d['checks']), '条判据')"
 
   # ------------------------------------------------------------------
-  # SkillSpector 扫描：基线之外不得有 HIGH / CRITICAL。
+  # SkillSpector 扫描：allowlist 之外不得有 HIGH / CRITICAL。
   #
-  # 基线（.github/skillspector-baseline.yaml）里是**逐条人工复核过**的 finding：
+  # allowlist（.github/skillspector-allowlist.yaml）里是**逐条人工复核过、
+  # 明确接受**的规则，每条带理由：
   #   · E2「Env Variable Harvesting」—— 子进程只透传白名单环境变量，
   #     评审逐处核对过（docs/oss-release-review.md 第六节）。
-  # 基线的指纹含位置 ⇒ 改一行代码就会让它失效。这是刻意的：
-  # 改了那一行就要重新复核一次。重新生成：
-  #   skillspector baseline . --no-llm --output .github/skillspector-baseline.yaml
-  # 若确有新风险 —— 别加基线，改代码。
+  #   · AE1 / PE3 / SC9 / AST9 —— 误报，逐条写了理由。
+  #
+  # 为什么是**规则级**而不是逐条 finding 基线：逐条基线按**位置指纹**匹配，
+  # 改一行代码就失效 ⇒ 对开源贡献者是持续的假红（每次改代码都要先"重新生成
+  # 基线"，久而久之就没人看红灯了）。规则级不依赖位置：改代码不会误红，
+  # **新规则**仍然会被拦。代价（同一个已放行规则再出现不会被拦）写在
+  # allowlist 文件头，不藏着。
+  #
+  # 抑制项在日志里照常打印，不藏。确有新风险 ⇒ 改代码，别加条目。
   # ------------------------------------------------------------------
   skillspector:
-    name: SkillSpector 扫描（无 HIGH finding）
+    name: SkillSpector 扫描（无未放行的 HIGH finding）
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -126,32 +132,48 @@ jobs:
         # PyPI 上取不到时不阻塞发布（下面的扫描步骤会自己跳过并告警）。
         continue-on-error: true
         run: python -m pip install --disable-pip-version-check skillspector
-      - name: 扫描（基线之外不得有 HIGH / CRITICAL）
+      - name: 扫描（allowlist 之外不得有 HIGH / CRITICAL）
         run: |
           if ! command -v skillspector >/dev/null 2>&1; then
             echo "::warning::SkillSpector 装不上（PyPI 取不到）—— 跳过扫描。本地补：pip install skillspector"
             exit 0
           fi
-          skillspector scan . --no-llm --baseline .github/skillspector-baseline.yaml \
-            --format json --output scan.json
+          skillspector scan . --no-llm --format json --output scan.json || true
           python3 - <<'PY'
           import json
+          import re
           import sys
 
+          # allowlist 是 YAML，但只用正则解析 `  - id: XXX` 就够 ——
+          # 不想在 CI 里多一个 PyYAML 依赖。
+          allow_text = open(".github/skillspector-allowlist.yaml",
+                            encoding="utf-8").read()
+          allowed = set(re.findall(r"^\s*-\s+id:\s*(\w+)", allow_text, re.M))
+          reasons = dict(re.findall(r"^\s*-\s+id:\s*(\w+)\s*\n\s*reason:\s*>-\s*\n((?:\s{6,}.*\n?)+)",
+                                  allow_text, re.M))
+
           report = json.load(open("scan.json", encoding="utf-8"))
-          bad = [i for i in (report.get("issues") or [])
-                 if i.get("severity") in ("HIGH", "CRITICAL")]
+          issues = report.get("issues") or []
+          high = [i for i in issues
+                  if i.get("severity") in ("HIGH", "CRITICAL")]
+          bad = [i for i in high if i.get("id") not in allowed]
+          for i in high:
+              loc = i.get("location") or {}
+              tag = "已放行" if i.get("id") in allowed else "未放行"
+              print(f"{tag} {i.get('id')} {i.get('severity')} "
+                    f"{loc.get('file')}:{loc.get('start_line')} "
+                    f"{i.get('finding')}")
+          for rid in sorted(allowed):
+              why = " ".join(reasons.get(rid, "").split())
+              print(f"allowlist {rid}：{why[:160]}")
           if bad:
               for i in bad:
                   loc = i.get("location") or {}
                   print(f"::error::{i.get('id')} {i.get('severity')} "
                         f"{loc.get('file')}:{loc.get('start_line')} {i.get('finding')}")
-              print("::error::基线之外还有 HIGH/CRITICAL。")
-              print("::error::若代码刚改过（指纹含位置，改一行就失效），重新生成基线：")
-              print("::error::  skillspector baseline . --no-llm "
-                    "--output .github/skillspector-baseline.yaml")
-              print("::error::若确有新风险 —— 别加基线，改代码。")
+              print("::error::allowlist 之外还有 HIGH/CRITICAL。")
+              print("::error::若确有新风险 —— 别加 allowlist 条目，改代码。")
               sys.exit(1)
-          print(f"OK：HIGH/CRITICAL 0 条（基线抑制 "
-                f"{report.get('suppressed_count')} 条已复核项）")
+          print(f"OK：HIGH/CRITICAL {len(high)} 条全部落在 allowlist 内；"
+                f"另有 {len(issues) - len(high)} 条 MEDIUM/LOW 照常报出")
           PY

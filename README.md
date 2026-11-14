@@ -174,7 +174,7 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清"当前只实现了 
 | --- | --- |
 | `SKILL.md` 的范围声明 | 与文档同源的那部分由集成方统一改（`SKILL.md` 不在本轮改动范围内） |
 | 缺一个显式的执行开关 | brief G001-13 要求：脚本选取白名单化之后，必须**显式**给出才执行（`--exec`）。当前实现是"默认执行 + 执行前打印审计行"，`--exec` 这个开关**不存在** —— 仍开放 |
-| SkillSpector 的 `E2`（Env Variable Harvesting）报 HIGH | 子进程必须透传环境变量（白名单实现）。逐条复核结论见 `docs/oss-release-review.md` 第六节；CI 用 `.github/skillspector-baseline.yaml` 把**已复核**的 finding 显式记下来，基线之外的新 HIGH 仍然拦住 |
+| SkillSpector 的 `E2`（Env Variable Harvesting）报 HIGH | 子进程必须透传环境变量（白名单实现）。逐条复核结论见 `docs/oss-release-review.md` 第六节；CI 用 `.github/skillspector-allowlist.yaml` 把**已复核的规则**显式放行，每条带理由，allowlist 之外的新 HIGH 仍然拦住 |
 | `~/.agents/skills/req-test-plan/scripts/...` 硬编码路径 | 装到别的目录就失效（SKILL.md 里 9 处），待 P2 改 |
 | 英文正文 | SKILL.md 与本 README 目前只有中文 |
 | Windows / 非 bash 环境 | 未验证 |

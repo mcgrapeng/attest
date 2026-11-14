@@ -91,6 +91,9 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
 - [x] `psql` 不用 argv 传连接串（解析成 `PG*` 环境变量，解析失败安全降级）。
       —— `7969bf8`。
 - [x] 表设计判据改名并给租户列/唯一约束加豁免条件。 —— `7969bf8`。
+- [x] `req_plan.py new` 在无存储时不生成「数据一致性」节（跨存储才生成），
+      模板里重复的第二个「## 数据一致性」标题一并去掉（它的内容其实是
+      「这个需求明确不做的事」，标题与内容对不上）。 —— 集成方。
 - [x] 判据数对齐（文档 12 条 == 代码 12 个 Check）。 —— `016abda`。
 - [x] Python 的 colocated `test_*.py` 计入导出引用（之前整类仓库被误判成零引用）。
       —— `e4bc632`。
@@ -122,19 +125,19 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
   - SkillSpector 的 `E2`（Env Variable Harvesting）仍会报 HIGH ——
     子进程必须透传环境变量（白名单实现，见 `scripts/readiness.py` 的 `child_env`）。
     逐条复核结论在 `docs/oss-release-review.md` 第六节；CI 用
-    `.github/skillspector-baseline.yaml` 把**已复核**的 finding 显式记录下来，
-    基线之外的新 HIGH 仍然拦住。
-    **基线的指纹含位置**：改了 `scripts/` 里对应的那几行就要重新复核并重跑
-    `bash .github/regenerate-skillspector-baseline.sh`。这是刻意的 ——
-    改了那一行就要重新看一眼。
+    `.github/skillspector-allowlist.yaml` 把**已复核的规则**显式放行（每条带理由），
+    allowlist 之外的新 HIGH 仍然拦住。
+    **放行是规则级、不是逐条 finding**：原来的做法用扫描器的 baseline（按位置指纹
+    匹配），改了 `scripts/` 里那一行就失效 ⇒ 对开源贡献者是持续的假红（每次改代码
+    都要先"重新生成基线"，久而久之就没人看红灯了）。规则级不依赖位置，改代码不会
+    误红，而**新规则**仍然会被拦。代价（同一个已放行规则再出现不会被拦）写在
+    allowlist 文件头，不藏着。
+    本地复现：`bash .github/check-skillspector.sh`。
   - **`--exec` 显式执行开关没有采纳**：brief 要求"默认不跑、显式开关才跑"，
     实现改成**默认执行 + 执行前打印审计行**（报告头部一行「将执行的仓库脚本」，
     加 `--dry-run` 可只看不做）。理由：工具的定位就是实测（不跑测试的交付判定没有
     意义），而执行面已经收敛到脚本白名单 + 环境变量白名单；再叠一个必填开关，
     每次调用都要多打一个参数，实际收益不大。想看执行清单用 `--dry-run`。
-  - **`req_plan.py new` 在未检测到存储时仍生成「数据一致性」占位节**，
-    紧接着 `check` 会把它判红并要求删掉 —— 工具自己生成的节自己要求删。
-    属 P1，未修。
   - **Python 没有真后端（itest）车道**：TS 侧有 `--include-itest`，Python 侧没有对应
     机制。属 P1，未修。
   - **打包元数据**（产出可安装的 `.skill`）未做。

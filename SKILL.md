@@ -1,6 +1,14 @@
 ---
 name: req-test-plan
-description: Generate and verify a requirement-level test plan covering every test type, every key flow detail, data-consistency checks, and reuse of existing helpers instead of reinventing them. Use when starting a new feature, when a requirement needs a test toolset, when writing the plan for a feature, or when checking whether a feature's test coverage claims are real.
+description: >-
+  Generate and verify a requirement-level test plan whose invariants are pinned to
+  real test cases, and run a one-command delivery-readiness check that actually
+  executes the project's own tests, coverage gates, cross-store reconciliation and
+  baseline scripts. Use when starting a new feature, when a requirement needs a
+  test toolset, when writing or reviewing a feature's test plan, when someone
+  claims a feature's test coverage is real, or when asked whether a module is
+  ready to ship, deliver or hand to a customer. Triggers include 写测试计划、
+  核一遍测试覆盖、这个模块能不能交付、能不能上线、测试就绪度、跨存储数据有没有漂。
 license: MIT
 metadata:
   author: zhangpeng
@@ -15,29 +23,36 @@ metadata:
 ## 一条命令：交付就绪度判定
 
 ```bash
-python3 ~/.agents/skills/req-test-plan/scripts/readiness.py <模块路径> --repo <根> \
-  [--plan <需求测试计划>] [--json]
+python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> \
+  [--plan <需求测试计划>] [--include-itest] [--test-tenant <名字或前缀>] [--json]
 ```
 
-回答"这个模块**能不能直接交付给客户**"。每条判据要么有实测证据，要么明说
-「未实测（缺什么条件）」—— 不拿静态推断冒充实测：
+`$SKILL_DIR` = 本 skill 所在目录（装在 `~/.agents/skills/req-test-plan` 时就是那个路径）。
 
-| 判据 | 怎么测 |
-| --- | --- |
-| 测试全绿 | 用**项目自己的** test 命令跑模块测试，列出失败用例（**只认断言失败**；setup 报错=环境没就绪 ⇒ skipped） |
-| 核心逻辑测试到位 | **驱动仓库自己的覆盖率闸门**（没闸门才用逐文件并集）；真后端车道并进来 |
-| 导出的逻辑都有测试 | 导出的函数/类在测试里零引用 ⇒ 点名（TS 导出 / Python 的公开 def·class） |
-| 表设计符合主流 | 查 PG catalog：主键/唯一约束/租户列/RLS+FORCE/时间戳带时区 |
-| 数据流一致（跨存储对账） | **实跑**模块自己的对账脚本，解析漂移；**按租户口径**判 |
-| 字段级跨存储比对 | 同一个 id 的**同一个字段**值对不上 ⇒ 点名 id 与字段 |
-| 数据准确（基线对拍） | **实跑**项目的基线对拍脚本，解析指标差异 |
-| 测试卫生 | 固定等待（flaky 源）与不清理的写库测试（残留源）⇒ 报 |
-| 需求覆盖到位 | 计划里每条不变式 → 真实用例（`--plan`） |
-| 具备扩展性 | 导出符号全仓几乎没有调用点（规则之三） |
-| 没有重复造轮子 | 全仓同名实现（跨域同名降为提醒） |
-| 使用主流开源库 | 模块真实依赖清单（排除路径别名） |
+回答的是：**这个模块的交付前提里，哪些已被实测证明、哪些还没被证明、哪些本工具判不了。**
 
-任何一项「不通过」⇒ 结论是**不可交付**，退出码 1。
+它**不是**「能不能交付给客户」的裁决 —— 需求是否被正确理解、产品行为、性能、安全、
+可用性、运维就绪都不在判据范围内，报告里有一节固定列出这些（见「输出契约」）。
+交付决策仍归人。
+
+每条判据要么有实测证据，要么明说「未实测（缺什么条件）」—— 不拿静态推断冒充实测：
+
+| 判据 | 证据类别 | 怎么测 |
+| --- | --- | --- |
+| 测试全绿 | 实测 | 用**项目自己的** test 命令跑模块测试，列出失败用例（**只认断言失败**；setup 报错=环境没就绪 ⇒ 未实测） |
+| 核心逻辑测试到位 | 实测 | **驱动仓库自己的覆盖率闸门**（没闸门才用 `--min-line-coverage` 显式指定；默认不阻塞） |
+| 导出的逻辑都有测试 | 实测 | 导出的函数/类在测试里零引用 ⇒ 点名（TS 导出 / Python 的公开 def·class / Rust `pub fn`） |
+| 表结构基本合规 | 实测 | 查 PG catalog：主键/唯一约束/租户列/RLS+FORCE/时间戳带时区（单租户、配置表、追加表有豁免） |
+| 数据流一致（跨存储对账） | 实测 | **实跑**模块自己的对账脚本，解析漂移；**按租户口径**判；字段级比对并入这条 |
+| 数据准确（基线对拍） | 实测 | **实跑**项目的基线对拍脚本，解析指标差异 |
+| 测试卫生 | 静态 | 固定等待（flaky 源）与不清理的写库测试（残留源）⇒ 报 |
+| 需求覆盖到位 | 实测 | 计划里每条不变式 → 真实用例（`--plan`） |
+| 不过度抽象 | 静态 | 导出符号全仓几乎没有调用点（规则之三） |
+| 没有重复造轮子 | 静态 | 全仓同名实现（跨域同名降为提醒） |
+| 使用主流开源库 | 静态 | 模块真实依赖清单（排除路径别名与标准库） |
+| 断言的期望值独立 | 静态 | 期望值取自被测对象自身的断言（恒真的同义反复单独点出）⇒ 提醒 |
+
+任何一项「不通过」⇒ 结论里算**阻塞项**，退出码 1。
 
 **实测的前提**：用项目自己声明的 test 命令（lumen 用 tsx，路径别名要它才解析）。
 裸 `node --test` 会让一堆测试假挂 —— 那测的是假象。
@@ -47,40 +62,53 @@ python3 ~/.agents/skills/req-test-plan/scripts/readiness.py <模块路径> --rep
 模块碰了 PG 之外的存储（向量库、对象存储、消息队列），交付判定要覆盖**数据本身**，
 不只是"代码跑通了"。工具的做法是**驱动领域里已有的专家实现**，不另造一套：
 
-- **数据流一致**：找出模块自己的对账脚本（`package.json` 里含 `reconcile` 的脚本，
-  且脚本文件提到该模块的表），**实跑**，解析漂移行。领域已有的对账脚本知道那些
-  关键取舍（例：正文不一致要人判断、不能自动修 —— 自动修会掩盖写路径缺陷）。
-  自动化跑的时候把脚本的报告输出目录指到临时目录，别覆盖人工当天那份。
-  一致与漂移的租户都要列出来 —— 只列漂移的会让人以为生产租户也漂了。
-- **字段级跨存储比对**：同一个 id 在 PG 和向量库里的**同一个字段**值对不上，
-  是比"两边行数不一样"更隐蔽的缺陷（读到和写下的不是同一份数据）。仓库自己的
-  对账脚本通常只比 id 集合与正文，但它往往把两边**导成 CSV** —— 在导出上按
-  id 键做逐字段比对即可，不用另写一套向量库查询。只在一侧出现的行不算字段
-  不一致（那是缺向量/孤儿向量，对账脚本自己报）。
+- **数据流一致**：找出模块自己的对账脚本（脚本名在白名单里、且脚本文件提到该模块的
+  表），**实跑**，解析漂移行。领域已有的对账脚本知道那些关键取舍（例：正文不一致要人
+  判断、不能自动修 —— 自动修会掩盖写路径缺陷）。自动化跑的时候把脚本的报告输出目录
+  指到临时目录（`REQ_PLAN_RECONCILE_OUT_DIR`），别覆盖人工当天那份。一致与漂移的租户
+  都要列出来 —— 只列漂移的会让人以为生产租户也漂了。
+  **漂移的识别方式可配**（`--drift-pattern`）：原来写死「中文『漂移』+ ❌」两个特征，
+  英文输出的对账脚本一律假绿。现在默认认 `❌ / 漂移 / drift / mismatch`，租户列从
+  表头认（不是写死第一列），测试租户前缀可配（`--test-tenant-prefix`）。
+- **字段级跨存储比对**（并进「数据流一致」这条）：同一个 id 在 PG 和向量库里的
+  **同一个字段**值对不上，是比"两边行数不一样"更隐蔽的缺陷（读到和写下的不是同一份
+  数据）。仓库自己的对账脚本通常只比 id 集合与正文，但它往往把两边**导成 CSV** ——
+  在导出上按 id 键做逐字段比对即可，不用另写一套向量库查询。只在一侧出现的行不算字段
+  不一致（那是缺向量/孤儿向量，对账脚本自己报）。CSV 按声明的对照关系配对
+  （`--csv-pair a.csv=b.csv`），不是两两配对；**时间戳类字段排除**，正文类字段单独
+  归类并报「需人工判断」，**不自动判 fail**；找不到成对的 CSV ⇒ 报「无法比对」，
+  不报「0 对无差异」。
 - **数据准确**：实跑基线对拍脚本（`eval:baseline:check` 之类），解析指标差异。
 
 **「跑不起来」和「不达标」必须分开**。脚本因为**没有产物**而失败（"先跑 eval 套件
-再对拍"）是环境没准备好，不是数据回归 —— 判成 skipped 并说清缺什么；
+再对拍"）是环境没准备好，不是数据回归 —— 判成「未实测」并说清缺什么；
 只有真的解析出指标差异才报红。这条最容易出假阳性。
 
 **按存储类型定判据**，别一律报红：
 
 | 模块碰到的存储 | 判定 |
 | --- | --- |
-| 只有一个 PG | skipped —— 没有派生层可跨存储校对 |
+| 只有一个 PG | 未实测 —— 没有派生层可跨存储校对 |
 | PG + **派生存储**（向量库 / 对象存储） | fail（除非有对账机制）—— 权威与派生会漂 |
 | PG + **旁路存储**（Redis / 队列） | warn —— 确认它不是权威数据 |
 
 **别对不懂的东西给结论**：识别不出源码文件 ⇒ 退出码 2 + 说清原因（不要输出一堆
-关于"空"的 ✓）；语言不是 JS/TS/Python ⇒ 覆盖率与导出引用判据判 skipped 并说清
-"当前只实现了 TS/JS/Python 的"。一个满屏 ✓ 但其实什么都没测的报告，比报错更糟。
+关于"空"的 ✓）。Rust / Go 模块目前识别不出来 ⇒ 同样退出码 2 + 说清"当前只实现了
+TS/JS/Python"。一个满屏 ✓ 但其实什么都没测的报告，比报错更糟。
 
-**Python 工程**（pytest 系）现在也判：覆盖率用 `pytest --cov=<包>
---cov-report=json`（coverage.py 的合并是确定的 ⇒ 一次就够）；导出 = 模块级公开
-`def`/`class`。**别把接口与生成码当逻辑**：`Protocol`/`ABC`/`Generic` 是接口
-（对应 TS 的 `interface`/`type`）、`.pyi` 与 protobuf/grpc 生成码不是人写的、
-类体里没有任何 `def` 的纯数据类（DTO/响应模型）只是数据形状 —— 这三类都不算
-"待测导出"，否则噪声盖住真缺口。
+**Python 工程**（pytest 系）也判：
+
+- 覆盖率用 `pytest --cov=<包> --cov-report=json`（coverage.py 的合并是确定的 ⇒ 一次就够）。
+- **仓库自己的闸门优先**：读 `pyproject.toml` 的 `[tool.coverage.report] fail_under`、
+  `Makefile` 的覆盖率目标、`tox.ini` 的环境，闸门的退出码即结论 —— 门槛归仓库所有，
+  不用通用阈值。
+- 导出 = 模块级公开 `def`/`class`。**别把接口与生成码当逻辑**：`Protocol`/`ABC`/`Generic`
+  是接口（对应 TS 的 `interface`/`type`）、`.pyi` 与 protobuf/grpc 生成码不是人写的、
+  类体里没有任何 `def` 的纯数据类（DTO/响应模型）只是数据形状 —— 这三类都不算
+  "待测导出"，否则噪声盖住真缺口。
+- **测试文件三种位置都算**：模块目录内 colocated 的 `test_*.py`（Python 的惯例就是把
+  测试放在包旁边）、仓库级 `test/` `tests/` `spec/` 下的 `test_*.py` / `*_test.py`。
+  漏掉 colocated 那一种会把整类仓库的公开 def/class 全判成"零引用"。
 
 覆盖率同理：单元测试车道和真后端 itest 车道是两条道。只跑单元车道时报
 "service.ts 7%"会被误读成"那文件没人测" —— 实际它的覆盖来自 itest 车道。
@@ -96,22 +124,25 @@ node 的 `--experimental-test-coverage` 在**用了 `mock.module()` 的项目**�
 
 **优先级：仓库自己的闸门 > 通用并集**。
 
-- 仓库有覆盖率闸门（脚本名含 coverage、提到该模块）⇒ **驱动它**，判定看它的
+- 仓库有覆盖率闸门（脚本名在白名单里、命令含 cov、提到该模块）⇒ **驱动它**，判定看它的
   退出码 —— **门槛归仓库所有**。通用阈值在这里是错的：lumen 的 service 闸阈值是
   行 49，通用阈值（行 80）会把仓库明确允许的文件判红。
   仓库拆闸的原因也写进了它的 AGENTS.md：每闸只测自己那批、只在该批里加载，
   数字才可复现 —— **别拿通用阈值去覆盖仓库的口径**。
-- 仓库没有闸门 ⇒ 逐个测试文件单独跑（各自独立进程 ⇒ 没有合并 ⇒ 确定），
+- 仓库**没有**闸门 ⇒ 判「未实测：仓库没有覆盖率闸门，缺少判据」，**默认不阻塞**。
+  真要一个通用门槛，用 `--min-line-coverage` / `--min-branch-coverage` 显式指定
+  （数字由你定，工具不替你猜）。
+- 仓库没有闸门但仍要覆盖率数字 ⇒ 逐个测试文件单独跑（各自独立进程 ⇒ 没有合并 ⇒ 确定），
   再取覆盖**并集**（未覆盖行取交集）。并集回答的正是"这行代码有没有被任何
   测试执行过"。分支/函数覆盖率没有区间数据可并 ⇒ 取各次最大值（偏保守）。
 
-**真后端（itest）车道并进来**：驱动仓库自己的 itest 脚本（原样跑，它自带
-`MEMORY_ITEST=1`、`--test-force-exit`、钉死清单），只在 runner 参数后、文件
-参数前插覆盖率参数 ⇒ 一次跑出「用例全绿」+「真后端覆盖率」。两条车道分开报，
-别混成一个数。
+**真后端（itest）车道默认不跑**，要 `--include-itest` 才跑：驱动仓库自己的 itest 脚本
+（原样跑，它自带 `MEMORY_ITEST=1`、`--test-force-exit`、钉死清单），只在 runner 参数后、
+文件参数前插覆盖率参数 ⇒ 一次跑出「用例全绿」+「真后端覆盖率」。两条车道分开报，
+别混成一个数。默认不跑是因为它要连 PG + 向量库、慢，而且环境没就绪时会刷一片报错。
 
 **真后端车道也要分「环境没就绪」与「用例真失败」**：换台机器（CI、同事电脑）
-没有 Milvus/PG 时，车道会连不上 —— 那是环境问题，不是产品缺陷 ⇒ 判 skipped，
+没有 Milvus/PG 时，车道会连不上 —— 那是环境问题，不是产品缺陷 ⇒ 判「未实测」，
 不进阻塞项。判据看失败块的 `error:` 详情（用例名里没有报错文本）：
 `ECONNREFUSED` / `InvalidPassword` / `UNAVAILABLE` / `connection refused` 等。
 注意用例名可能带 `# SKIP set MEMORY_ITEST=1 with local Milvus+PG running`
@@ -142,9 +173,25 @@ node 的 `--experimental-test-coverage` 在**用了 `mock.module()` 的项目**�
 pytest 的 `ERROR`（fixture/环境没就绪，例：连不上 PG）与 `FAILED`（断言没过）
 同理：**只有 FAILED 才是"测试没绿"**。这条最容易出假阳性。
 
-覆盖率同理：单元测试车道和真后端 itest 车道是两条道。只跑单元车道时报
-"service.ts 7%"会被误读成"那文件没人测" —— 实际它的覆盖来自 itest 车道。
-默认报覆盖率时要把「另有 N 个 itest 用例未计入」说出来，`--include-itest` 才合并算。
+## 输出契约：证据清单，不是裁决
+
+报告按**证据类别**分节，不是一张平铺的 ✓/✗ 表：
+
+| 节 | 里面是什么 |
+| --- | --- |
+| 已实测 | 真跑出来的（测试、覆盖率闸门、对账脚本、基线对拍） |
+| 静态信号 | 源码扫描与词频分析得出的（测试卫生、不过度抽象、重复造轮子、依赖清单、oracle 独立性）—— **永远不能单独支撑「通过」** |
+| 未实测 | 没测到、判不了的（○） |
+| 本工具不判定 | 需求是否被正确理解 · 产品行为 · 性能 · 安全 · 可用性 · 运维就绪 |
+
+结论是三档：**N 项阻塞 · M 项待人工确认 · K 项无信号**。
+
+**为什么不是「能不能交付」**：工具掌握的是 12 条机械判据的实测状态，不是这个模块的
+交付裁决 —— 中间那层推理（需求对不对、性能、运维）没有写在任何地方。输出证据清单，
+决策留给有职责的人。
+
+**退出码**：有阻塞项，或关键判据（测试是否绿）没测到 ⇒ 1；否则 0。
+零测试的仓库在 CI 里必须拿到红灯 —— 那正是"没有测试就别说能交付"。
 
 ## 测试要自己收场
 
@@ -191,11 +238,11 @@ drop）⇒ 报出来。**只在 `before` 钩子清理**只能保证"不跨轮累
 
 ```bash
 # 1. 生成计划骨架（扫目标模块的已有 helper + 项目自己的测试车道）
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py new <feature> \
+python3 "$SKILL_DIR/scripts/req_plan.py new <feature> \
   --repo <项目根> --module <子路径> [--module <子路径>...]
 
 # 2. 填完不变式与矩阵后，核对计划 vs 代码实况
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py check <计划文件> --repo <项目根>
+python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <项目根>
 ```
 
 计划落到 `docs/<feature>-test-plan.md`（入库、可评审）。`check` 有错误时退出码 1。
@@ -371,7 +418,7 @@ python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py check <计划文件> 
 ### 8. 生成测试工具包（`scaffold`）
 
 ```bash
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py scaffold \
+python3 "$SKILL_DIR/scripts/req_plan.py scaffold \
   <计划文件> --repo <项目根> [--out-dir <生成根>]
 ```
 
@@ -387,7 +434,7 @@ python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py scaffold \
 ### 9. 跑 `check`
 
 ```bash
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py check docs/<feature>-test-plan.md --repo <根>
+python3 "$SKILL_DIR/scripts/req_plan.py check docs/<feature>-test-plan.md --repo <根>
 ```
 
 报红类（这些退出码 1）：
@@ -437,23 +484,87 @@ python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py check docs/<feature>-
 | 复用 | 测试里的助手与仓库已有导出重名 | 提醒 |
 | 扩展 | 同一文件里多个用例结构雷同（该参数化） | 提醒 |
 
+## 安全须知（`readiness.py` 会做什么）
+
+这个工具的定位是"实测"，所以它**会执行目标仓库自己定义的脚本**。这不是副作用，
+是它的本职 —— 但你得知道边界在哪：
+
+- **只会执行白名单里的脚本**：`coverage` / `test:coverage` / `cov` / `check:coverage`、
+  `itest` / `test:integration`、`reconcile` / `data:reconcile`、
+  `baseline:check` / `eval:baseline:check` 这些名字（精确名或冒号分段前缀）。
+  `reconcile:reset`、`coverage:whatever` 这种名字里带关键词的**不会**被自动执行。
+- **执行前可以先看**：`--dry-run` 只列出将要执行的脚本与确切命令，然后退出。
+  正常模式也会在报告头部回显一行「将执行的仓库脚本」。
+- **子进程只拿到白名单环境变量**（PATH、HOME、LANG、TMPDIR、NODE_*、PYTHON*、
+  POSTGRES_URL 等）。你 shell 里的其它变量（云厂商密钥、npm token 等）不会传下去。
+- **PG 连接串不进命令行参数**：解析成 `PGHOST` / `PGPASSWORD` 等环境变量传给 `psql`，
+  不出现在进程表里。注意 `POSTGRES_URL` 本身会透传给仓库自己的脚本（仓库的集成车道
+  要连库）—— 不想要就把它从白名单里去掉，或改用 `.pgpass`。
+- **只读为主**：`readiness.py` 不改用户仓库的任何文件。`req_plan.py scaffold` 会写测试
+  文件，但写入范围被限制在 `--out-dir` 与仓库根之内；钉里带 `..` 或绝对路径 ⇒ 拒绝并
+  报红，不写盘。
+- **钉只能指向仓库内的文件**：越界的钉不读也不写（计划里的路径不能用来探测仓库外的
+  文件）。
+
+## 反向验证：证明这套判据抓得住东西
+
+一个只输出绿色的判定工具，用户只能相信它的绿。`--self-check` 让工具**证明自己能失败**：
+
+```bash
+python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> --self-check
+```
+
+它把仓库复制到临时副本，往副本里注入一个**已知缺陷**，再跑一遍判据，看它是否翻红：
+
+| 注入 | 期望翻红的判据 |
+| --- | --- |
+| `drop-test` —— 清空一个引用了模块导出的测试文件 | 导出的逻辑都有测试（pass → fail） |
+| `inject-sleep` —— 往测试里插一个固定等待 | 测试卫生（pass → warn） |
+
+结论三种：**反向验证通过** / **反向验证未通过**（注入前就不绿，或注了也没翻红）
+/ **没有可注入的故障目标**（模块没有测试文件 —— 那是"没法证明"，不是"证明没问题"）。
+后两种退出码 1 —— 这是**工具自检**的结果，与模块本身的判定无关。
+
+副本**不带 `node_modules`**，所以大部分仓库在副本里跑不动测试：这时翻红的是静态判据，
+报告会明说「副本里跑不动测试」。要连实测项一起证明，得把依赖带过去（体积代价）。
+
 ## 常用命令
 
 ```bash
 # 1. 生成需求测试计划骨架
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py new <feature> \
+python3 "$SKILL_DIR/scripts/req_plan.py new <feature> \
   --repo <根> --module <子路径>
 
 # 2. 从计划生成测试工具包骨架（按仓库约定）
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py scaffold \
-  <计划文件> --repo <根>
+python3 "$SKILL_DIR/scripts/req_plan.py scaffold \
+  <计划文件> --repo <根> [--out-dir <生成根>]
 
 # 3. 核对计划 vs 代码实况
-python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py check <计划文件> --repo <根>
+python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <根>
 
 # 4. 模块交付就绪度判定（一条命令，实测）
-python3 ~/.agents/skills/req-test-plan/scripts/readiness.py <模块路径> --repo <根>
+python3 "$SKILL_DIR/scripts/readiness.py <模块路径> --repo <根> \
+  [--plan <计划文件>] [--include-itest] [--test-tenant <名字或前缀>] [--json]
+
+# 5. 先看会执行哪些仓库脚本（不执行）
+python3 "$SKILL_DIR/scripts/readiness.py <模块路径> --repo <根> --dry-run
 ```
+
+`readiness.py` 的常用参数：
+
+| 参数 | 作用 |
+| --- | --- |
+| `--plan <文件>` | 把需求测试计划一起核（需求覆盖到位那条） |
+| `--json` | 机器可读输出（checks + conclusion 段） |
+| `--dry-run` | 只列将要执行的仓库脚本，不执行 |
+| `--self-check` | 反向验证：往**副本**里注入一个已知缺陷，证明判据会翻红（不改你的仓库） |
+| `--include-itest` | 把真后端（itest）车道并进来（要连 PG + 向量库，慢） |
+| `--test-tenant <名/前缀>` | 声明测试租户（可重复）—— 测试租户的漂移是夹具状态，不阻塞 |
+| `--test-dir <目录>` | 额外指定测试目录（默认找仓库级 `test/` `tests/` `spec/` 与模块内 colocated） |
+| `--min-line-coverage` / `--min-branch-coverage` | 显式指定通用阈值（默认不阻塞，仓库自己的闸门优先） |
+| `--drift-pattern` / `--table-header-pattern` | 对账输出的漂移/表头识别方式（对账脚本输出英文时用） |
+| `--csv-pair a.csv=b.csv` | 声明 CSV 的对照关系（默认按共同列最多的互为最佳配对） |
+| `--tenant-col <列名>` | CSV 里租户列的名字（默认按 `tenant_id`/`tenant` 认） |
 
 ## 常见错法
 
@@ -462,3 +573,5 @@ python3 ~/.agents/skills/req-test-plan/scripts/readiness.py <模块路径> --rep
 - **钉写成散文** —— `service.ts:427` 能 grep 到；"在 service 里" 核不了。
 - **自己造车道** —— 车道从项目 `package.json` 读，编出来的跑不了。
 - **矩阵引用还没写的测试文件** —— `check` 会报红；先写测试再填矩阵。
+- **把判据当裁决** —— 报告给的是"哪些前提已被证明、哪些没有、哪些本工具判不了"；
+  "能不能交付"是人的判断。别拿退出码当"质量已达标"的证明。

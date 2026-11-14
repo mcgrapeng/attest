@@ -2670,6 +2670,10 @@ def run_readiness(args) -> int:
              [c for c in checks if c.evidence_kind == "static"])
     _section("未实测", [c for c in checks if c.evidence_kind == "untested"])
 
+    selfcheck_failed = False
+    if getattr(args, "self_check", False):
+        selfcheck_failed = _selfcheck_section(m.path, root)
+
     print("── 本工具不判定 " + "─" * 32)
     print("  " + " · ".join(NOT_JUDGED))
     print("  上面只是测试就绪度的实测结果；「能不能交付」仍要人判断。")
@@ -2686,8 +2690,48 @@ def run_readiness(args) -> int:
         print(f"  ○ {c.title}：{c.detail}")
     if only_static:
         print("  （没有一条实测判据通过 —— 静态信号不足以支撑任何肯定结论）")
+    if selfcheck_failed:
+        print("反向验证未通过 —— 这是**工具自检**失败（判据抓不住注入的缺陷），"
+              "与模块判定无关。")
     print("退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到")
+    if selfcheck_failed:
+        return 1
     return 1 if (fails or key_untested) else 0
+
+
+def _selfcheck_section(module: str, root: Path) -> bool:
+    """反向验证：注入一个已知缺陷，证明判据会翻红。
+
+    一个只输出绿色的判定工具，用户只能相信它的绿 —— 这里让工具证明自己会失败。
+    失败返回 True（当作退出码 1 的理由）。
+    """
+    print("── 反向验证 " + "─" * 34)
+    try:
+        import selfcheck
+    except ImportError:
+        print("  selfcheck 模块不可用（没跟 scripts/ 放在一起）")
+        return True
+    try:
+        res = selfcheck.run_selfcheck(module, str(root))
+    except Exception as e:                       # 自检失败不该把整份报告带崩
+        print(f"  自检跑不起来：{e}")
+        return True
+    for f in res.get("faults") or []:
+        mark = "✔" if f.get("flipped") else "✗"
+        print(f"  {mark} [{f.get('kind')}] {f.get('target')}")
+        b, a = f.get("before") or {}, f.get("after") or {}
+        if b.get("id") or b.get("key"):
+            bid = b.get("id") or b.get("key")
+            print(f"      {bid}：{b.get('status')} → {a.get('status')}")
+        for label, side in (("前", b), ("后", a)):
+            if side.get("detail"):
+                print(f"      {label}：{side['detail']}")
+        if f.get("note"):
+            print(f"      说明：{f['note']}")
+    print(f"  结论：{res.get('verdict')}")
+    if res.get("reason"):
+        print(f"  依据：{res['reason']}")
+    return res.get("verdict") != "反向验证通过"
 
 
 def _parse_csv_pairs(items: list[str]) -> list[tuple[str, str]]:
@@ -2740,6 +2784,9 @@ def main(argv: list[str]) -> int:
                     help="租户列名（CSV 里定位租户的那一列）")
     ap.add_argument("--dry-run", action="store_true",
                     help="只列出候选脚本与将执行的命令，然后退出（不执行）")
+    ap.add_argument("--self-check", action="store_true",
+                    help="反向验证：往副本里注入一个已知缺陷，证明判据会翻红"
+                         "（只作用于临时副本，不改你的仓库）")
     args = ap.parse_args(argv)
     for name, pat in (("--drift-pattern", args.drift_pattern),
                       ("--table-header-pattern", args.table_header_pattern)):

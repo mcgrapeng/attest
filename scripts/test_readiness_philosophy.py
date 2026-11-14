@@ -183,6 +183,21 @@ def test_oracle_criterion_wired() -> None:
     expect(_blocking(r.stdout) == 0, "oracle 只是提醒，不算阻塞项")
 
 
+def test_selfcheck_wired() -> None:
+    print("\nR2：--self-check 接线 —— 注入已知缺陷，判据要翻红")
+    d = ts_repo()
+    r = run("src", "--repo", str(d), "--self-check")
+    expect("── 反向验证 " in r.stdout, "报告里有反向验证一节")
+    expect("反向验证通过" in r.stdout, "结论是「反向验证通过」")
+    expect("pass → fail" in r.stdout or "pass → warn" in r.stdout,
+           "打出了翻红前后的对照")
+    expect("uncovered-exports" in r.stdout, "翻红的是 uncovered-exports 判据")
+    expect("hygiene" in r.stdout, "inject-sleep 翻红的是 hygiene 判据")
+    # 仓库没被改
+    expect((d / "src" / "calc.test.ts").read_text(encoding="utf-8")
+           .count("add(1, 2)") == 1, "用户仓库的测试文件没被注入改动")
+
+
 # ------------------------------------------------- 缺陷 1：漂移表头被算成漂移
 
 def test_defect_drift_header_not_counted() -> None:
@@ -302,6 +317,7 @@ def main() -> int:
     test_r1_exit_codes()
     test_r4_evidence_kinds()
     test_oracle_criterion_wired()
+    test_selfcheck_wired()
     test_defect_drift_header_not_counted()
     test_defect_out_of_bounds_pin_not_read()
     test_defect_python_colocated_tests_counted()

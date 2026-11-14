@@ -1,0 +1,12 @@
+[project]
+name = "fixture-python-repo"
+version = "0.0.0"
+description = "fixture：pytest 系的 Python 仓"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+# 仓库自己声明覆盖率口径 —— 阈值归仓库所有，工具读这个。
+[tool.coverage.report]
+fail_under = 80

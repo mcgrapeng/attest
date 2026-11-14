@@ -1,0 +1,137 @@
+{
+  "skill_name": "req-test-plan",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "下周三要开工做「订单导出」这个功能，仓库在 ~/workspace/shop-backend，代码在 src/orders/。先别写代码 —— 帮我把测试计划列出来：哪些维度要覆盖、用仓库自己的哪些测试车道、仓库里已有的哪些 helper 能直接复用，都标出来。",
+      "expected_output": "跑 req_plan.py new 生成计划骨架（docs/<feature>-test-plan.md）：已有能力（复用侦察）、本模块碰到的存储、不变式清单、测试车道、覆盖矩阵、核心逻辑细节、新建能力（先论证不能复用）。每行维度带触发证据（文件:行）。",
+      "files": [],
+      "assertions": [
+        "exit_code=0",
+        "contains:已生成",
+        "contains:已有能力",
+        "contains:本模块碰到的存储",
+        "contains:不变式清单",
+        "contains:覆盖矩阵",
+        "contains:核心逻辑细节",
+        "contains:新建能力",
+        "not_contains:Traceback"
+      ],
+      "expectations": [
+        "exit_code=0",
+        "contains:已生成",
+        "contains:已有能力",
+        "contains:本模块碰到的存储",
+        "contains:不变式清单",
+        "contains:覆盖矩阵",
+        "contains:核心逻辑细节",
+        "contains:新建能力",
+        "not_contains:Traceback"
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "上游上周提了个需求测试计划，在 docs/refund-test-plan.md。我自己核了一遍总觉得对不上代码 —— 你帮我核一遍：钉指向的文件到底在不在仓库里，矩阵里引用的测试文件是不是真的存在，对不上的地方列出来。",
+      "expected_output": "跑 req_plan.py check 逐条核对不变式钉与矩阵落点，缺失的钉报红并给出退出码 1；不是只说一声「不通过」。",
+      "files": [
+        "evals/files/stale-plan.md"
+      ],
+      "assertions": [
+        "exit_code=1",
+        "contains:需求测试计划校验",
+        "contains:钉指向的文件不存在",
+        "contains:个错误",
+        "not_contains:无问题",
+        "not_contains:Traceback"
+      ],
+      "expectations": [
+        "exit_code=1",
+        "contains:需求测试计划校验",
+        "contains:钉指向的文件不存在",
+        "contains:个错误",
+        "not_contains:无问题",
+        "not_contains:Traceback"
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "我们要给客户交付 src/billing 这个模块了。跑一下交付就绪度，但别只给我一句「可以交付」—— 已经实测证明的、还没测出来的、这条工具根本判不了的，分开说清楚。",
+      "expected_output": "跑 readiness.py：报告按证据类别分层（已实测 / 静态信号），结论分三档（阻塞项 / 待人工确认 / 无信号），并固定列出一段「本工具不判定」清单（需求正确性、性能、安全、可用性、运维就绪）。",
+      "files": [],
+      "assertions": [
+        "exit_code_any=0|1",
+        "contains:交付就绪度分析",
+        "contains:核心逻辑测试到位",
+        "contains:本工具不判定",
+        "not_contains:Traceback"
+      ],
+      "expectations": [
+        "exit_code_any=0|1",
+        "contains:交付就绪度分析",
+        "contains:核心逻辑测试到位",
+        "contains:本工具不判定",
+        "not_contains:Traceback"
+      ]
+    },
+    {
+      "id": 4,
+      "prompt": "订单数据 PG 和向量库各存了一份，今天有人说两边对不上。我们的对账脚本在 package.json 里叫 reconcile，输出是英文的。你跑一下，看哪个租户漂了。itest-abc 这个租户是我们故意注入的失败态，别把它当成阻塞项。",
+      "expected_output": "跑 readiness.py：实跑对账脚本并解析输出，按租户口径区分生产租户与测试租户 —— 生产租户的漂移判为阻塞项，测试租户的漂移只报不拦。",
+      "files": [],
+      "assertions": [
+        "exit_code=1",
+        "contains:数据流一致",
+        "contains:漂移",
+        "not_contains:生产租户无漂移",
+        "not_contains:Traceback"
+      ],
+      "expectations": [
+        "exit_code=1",
+        "contains:数据流一致",
+        "contains:漂移",
+        "not_contains:生产租户无漂移",
+        "not_contains:Traceback"
+      ]
+    },
+    {
+      "id": 5,
+      "prompt": "上游说这个需求已经测过了，报告里列了 8 条用例，钉在 src/orders/never_written.test.ts::分页导出。可我在仓库里翻不到这个文件 —— 他们是不是吹牛？给我个说法。",
+      "expected_output": "跑 req_plan.py check 核对钉 —— 钉指向的文件不存在 ⇒ 报红并点名是哪个文件、哪条不变式，退出码 1。",
+      "files": [
+        "evals/files/stale-plan.md"
+      ],
+      "assertions": [
+        "exit_code=1",
+        "contains:需求测试计划校验",
+        "contains:钉指向的文件不存在",
+        "contains:never_written.test.ts",
+        "not_contains:无问题",
+        "not_contains:Traceback"
+      ],
+      "expectations": [
+        "exit_code=1",
+        "contains:需求测试计划校验",
+        "contains:钉指向的文件不存在",
+        "contains:never_written.test.ts",
+        "not_contains:无问题",
+        "not_contains:Traceback"
+      ]
+    },
+    {
+      "id": 6,
+      "prompt": "按这份计划生成测试骨架：python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py scaffold docs/refund-test-plan.md --repo . --out-dir /tmp/out。计划里有一条钉写的是 ../../../../tmp/evil/x.test.ts::用例甲。直接生成，然后告诉我生成了哪些文件。",
+      "expected_output": "scaffold 拒绝越出 --out-dir 的钉并报红，一个文件都不写盘，退出码 1 —— 不能让一份计划 markdown 变成仓库外的可执行文件。",
+      "files": [],
+      "assertions": [
+        "exit_code=1",
+        "any_contains:写入安全|越界|拒绝|超出|不写盘",
+        "not_contains:Traceback"
+      ],
+      "expectations": [
+        "exit_code=1",
+        "any_contains:写入安全|越界|拒绝|超出|不写盘",
+        "not_contains:Traceback"
+      ]
+    }
+  ]
+}

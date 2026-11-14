@@ -1293,12 +1293,21 @@ def run_reconciler(m: Module, ws: Path, name: str, cmd: str,
     except FileNotFoundError:
         return [], [], [], Path(out_dir), None
     text = r.stdout + r.stderr
-    # 表头行也要排除 —— 英文表头常含 drift 字样（"| tenant | drift | status |"），
-    # 不排除就会把表头当成一条漂移：计数虚高，租户归属还错乱。
-    drift = [ln.strip() for ln in text.splitlines()
-             if drift_re.search(ln) and not header_re.search(ln)]
     table_rows = [ln.strip() for ln in text.splitlines()
                   if ln.strip().startswith("|")]
+    # 表头行也要排除 —— 英文表头常含 drift 字样（"| tenant | drift | status |"），
+    # 不排除就会把表头当成一条漂移：计数虚高，租户归属还错乱。
+    if table_rows:
+        # 报告是**表格形态** ⇒ 漂移只从表里的行认。散文里的「漂移」是说明文字
+        # （例："### 多余向量（2 条：PG 行还在但已非 active ⇒ 真漂移）"），
+        # 当成漂移行有两个后果：把一致的租户误报成漂移；一次真漂移被数成两个
+        # （表里一行 ❌ + 散文一行「漂移」）。
+        drift = [r for r in table_rows
+                 if drift_re.search(r) and not header_re.search(r)]
+    else:
+        # 没有表格的纯文本报告：只能按行匹配（保持旧行为，别让别人的报告认不出）
+        drift = [ln.strip() for ln in text.splitlines()
+                 if drift_re.search(ln) and not header_re.search(ln)]
     # 租户列的位置：从表头认（认不到就退回第一列）
     tenant_idx: int | None = None
     for rrow in table_rows:
@@ -1617,6 +1626,10 @@ def check_data_flow(m: Module, root: Path,
                   if is_test_tenant(_tenant_of_row(r, tenant_idx),
                                     declared_test_tenants,
                                     tenant_prefixes)]
+    # 「几个租户漂移」数的是**去重后的租户**，不是行数 —— 同一个租户有多行
+    # 命中（表里一行 + 散文一行）时，行数会把一次漂移报成两个。
+    prod_tenants = {_tenant_of_row(r, tenant_idx) for r in prod_drift}
+    test_tenants = {_tenant_of_row(r, tenant_idx) for r in test_drift}
     prod_fields = [d for d in field_diffs
                    if not is_test_tenant(d.get("tenant", ""),
                                          declared_test_tenants,
@@ -1646,9 +1659,9 @@ def check_data_flow(m: Module, root: Path,
                      evidence_kind="executed")
     if prod_drift:
         return Check("data-flow", "数据流一致（跨存储对账）", "fail",
-                     f"{len(prod_drift)} 个**生产租户**的数据流漂移"
-                     + (f"（另有 {len(test_drift)} 个测试租户漂移，不阻塞交付）"
-                        if test_drift else "")
+                     f"{len(prod_tenants)} 个**生产租户**的数据流漂移"
+                     + (f"（另有 {len(test_tenants)} 个测试租户漂移，不阻塞交付）"
+                        if test_tenants else "")
                      + f"；{pair_note}"
                      + (f"，{len(prod_body)} 处正文类字段不一致（需人工判断）"
                         if prod_body else ""),

@@ -147,7 +147,7 @@ def run_query(query: str, timeout: int, max_turns: int
                                   text=True, encoding="utf-8",
                                   timeout=timeout)
         except subprocess.TimeoutExpired:
-            return False, "超时（模型没在时限内决定）", 0.0, []
+            return False, "超时（模型没在时限内决定）", 0.0, [], False
         hit, names = triggered_in_stream(proc.stdout)
         considered = considered_in_thinking(proc.stdout)
         # 模型实际加载了哪些别的 skill —— 用来区分"我们没被选中"和
@@ -187,7 +187,7 @@ def run_query(query: str, timeout: int, max_turns: int
                 continue
             if ev.get("type") == "result":
                 cost = float(ev.get("total_cost_usd") or 0.0)
-        return hit, note, cost, others
+        return hit, note, cost, others, considered
     finally:
         shutil.rmtree(work, ignore_errors=True)
 
@@ -206,8 +206,8 @@ def main() -> int:
         queries = [queries[args.only]]
     results = []
     for i, q in enumerate(queries, 1):
-        hit, note, cost, others = run_query(q["query"], args.timeout,
-                                           args.max_turns)
+        hit, note, cost, others, considered = run_query(
+            q["query"], args.timeout, args.max_turns)
         want = bool(q["should_trigger"])
         ok = hit == want
         results.append({"i": i, "query": q["query"], "should_trigger": want,

@@ -303,6 +303,26 @@ def _copy_file(src: Path, dst: Path) -> None:
     shutil.copy2(src, dst)
 
 
+def _link_deps(repo: Path, dst: Path) -> list[str]:
+    """把依赖目录**软链**进副本（不复制体积）。
+
+    不带依赖 ⇒ 副本里跑不动测试 ⇒ 反向验证只能证明静态判据抓得住东西。
+    软链（不是复制）既能跑真测试，又不花时间与磁盘。
+    """
+    linked: list[str] = []
+    for name in ("node_modules", ".venv", "venv", "target"):
+        src = repo / name
+        dst_link = dst / name
+        if not src.is_dir() or dst_link.exists() or dst_link.is_symlink():
+            continue
+        try:
+            dst_link.symlink_to(src, target_is_directory=True)
+            linked.append(name)
+        except OSError:
+            pass
+    return linked
+
+
 def _copy_subset(repo: Path, dst: Path, module_rel: str) -> None:
     """只把判定需要的部分复制到 dst。
 
@@ -543,7 +563,8 @@ def _fault_result(kind: str, target: str | None, flipped: bool,
 
 
 def _run_one_fault(kind: str, readiness_py: Path, repo: Path,
-                   module_rel: str, timeout: int) -> dict:
+                   module_rel: str, timeout: int,
+                   with_deps: bool = False) -> dict:
     """在**独立副本**上注入一种故障，比对前后判据。"""
     copy_runnable: bool | None = None
     run_note = ""
@@ -562,6 +583,10 @@ def _run_one_fault(kind: str, readiness_py: Path, repo: Path,
     with tempfile.TemporaryDirectory(prefix="req-plan-selfcheck.") as tmp:
         copy_root = Path(tmp) / "repo"
         _copy_subset(repo, copy_root, module_rel)
+        if with_deps:
+            # 软链依赖目录 ⇒ 副本里能真跑测试 ⇒ 反向验证能覆盖**实测类**判据
+            # （默认不带：软链让副本里的测试连到真实依赖，代价与风险都更高）
+            _link_deps(repo, copy_root)
 
         base_checks, base_out = _run_readiness(readiness_py, copy_root,
                                                module_rel, timeout)
@@ -668,7 +693,8 @@ def _no_target(module: str, repo: str, reason: str) -> dict:
 def run_selfcheck(module: str, repo: str | os.PathLike,
                   faults: tuple[str, ...] | list[str] = FAULT_KINDS,
                   skill_root: str | os.PathLike | None = None,
-                  timeout: int = 600) -> dict:
+                  timeout: int = 600,
+                  with_deps: bool = False) -> dict:
     """反向验证：注入已知缺陷，看判据会不会翻红。
 
     返回一个 dict（同时也是 --json 的输出结构）：
@@ -725,7 +751,7 @@ def run_selfcheck(module: str, repo: str | os.PathLike,
     results: list[dict] = []
     for kind in faults:
         results.append(_run_one_fault(kind, readiness_py, repo_path,
-                                       module_rel, timeout))
+                                       module_rel, timeout, with_deps))
 
     flipped = [r for r in results if r["flipped"]]
     attempted = [r for r in results if r["target"]]
@@ -808,12 +834,16 @@ def main(argv: list[str]) -> int:
                     help="skill 根目录（默认取本文件的上级）")
     ap.add_argument("--timeout", type=int, default=600,
                     help="每次跑判据的超时秒数（默认 600）")
+    ap.add_argument("--with-deps", action="store_true",
+                    help="把 node_modules / .venv 软链进副本 —— 副本里就能真跑测试，"
+                         "反向验证因此能覆盖**实测类**判据（默认不带）")
     ap.add_argument("--json", action="store_true", help="机器可读输出")
     args = ap.parse_args(argv)
 
     kinds = FAULT_KINDS if args.fault == "all" else (args.fault,)
     res = run_selfcheck(args.module, args.repo, faults=kinds,
-                        skill_root=args.skill_root, timeout=args.timeout)
+                        skill_root=args.skill_root, timeout=args.timeout,
+                        with_deps=args.with_deps)
     if args.json:
         print(json.dumps(res, ensure_ascii=False, indent=2))
     else:

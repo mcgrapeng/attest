@@ -76,6 +76,7 @@ python3 ~/.agents/skills/req-test-plan/scripts/readiness.py <模块路径> --rep
 | `--tenant-col <列名>` | CSV 里租户列的名字（默认按 `tenant_id`/`tenant` 认） |
 | `--min-line-coverage` / `--min-branch-coverage` | 显式给覆盖率门槛。**默认不用通用阈值**（仓库没有闸门时判 skipped，不判 fail） |
 | `--self-check` | 反向验证：往**临时副本**里注入一个已知缺陷，证明判据会翻红。不改你的仓库 |
+| `--self-check-deps` | 配合 `--self-check`：把 `node_modules` / `.venv` 软链进副本，让副本能真跑测试（这样才验得到**实测类**判据，不只是静态判据） |
 | `--include-itest` | 把真后端 itest 车道也算进来（要连 PG + 向量库，慢） |
 | `--test-tenant <名字或前缀>` | 声明测试租户，可重复 —— 测试租户的漂移是夹具状态，报 warn 不阻塞 |
 | `--test-tenant-prefix <前缀>` | 追加测试租户前缀（默认认 `itest-` `memtest-` `mock-` `eval-` 等） |

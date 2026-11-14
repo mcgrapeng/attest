@@ -2810,7 +2810,8 @@ def run_readiness(args) -> int:
 
     selfcheck_failed = False
     if getattr(args, "self_check", False):
-        selfcheck_failed = _selfcheck_section(m.path, root)
+        selfcheck_failed = _selfcheck_section(
+            m.path, root, with_deps=getattr(args, "self_check_deps", False))
 
     print("── 本工具不判定 " + "─" * 32)
     print("  " + " · ".join(NOT_JUDGED))
@@ -2837,7 +2838,8 @@ def run_readiness(args) -> int:
     return 1 if (fails or key_untested) else 0
 
 
-def _selfcheck_section(module: str, root: Path) -> bool:
+def _selfcheck_section(module: str, root: Path,
+                       with_deps: bool = False) -> bool:
     """反向验证：注入一个已知缺陷，证明判据会翻红。
 
     一个只输出绿色的判定工具，用户只能相信它的绿 —— 这里让工具证明自己会失败。
@@ -2850,7 +2852,7 @@ def _selfcheck_section(module: str, root: Path) -> bool:
         print("  selfcheck 模块不可用（没跟 scripts/ 放在一起）")
         return True
     try:
-        res = selfcheck.run_selfcheck(module, str(root))
+        res = selfcheck.run_selfcheck(module, str(root), with_deps=with_deps)
     except Exception as e:                       # 自检失败不该把整份报告带崩
         print(f"  自检跑不起来：{e}")
         return True
@@ -2925,6 +2927,9 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--self-check", action="store_true",
                     help="反向验证：往副本里注入一个已知缺陷，证明判据会翻红"
                          "（只作用于临时副本，不改你的仓库）")
+    ap.add_argument("--self-check-deps", action="store_true",
+                    help="配合 --self-check：把 node_modules / .venv 软链进副本，"
+                         "让副本能真跑测试（这样才验得到实测类判据）")
     args = ap.parse_args(argv)
     for name, pat in (("--drift-pattern", args.drift_pattern),
                       ("--table-header-pattern", args.table_header_pattern)):

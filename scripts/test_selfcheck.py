@@ -136,11 +136,39 @@ def make_test_dir_repo(root: Path) -> None:
 # ---------------------------------------------------------------- 用例
 
 
+def test_with_deps_links_dependencies() -> None:
+    print("\n--with-deps：把依赖目录软链进副本（不复制体积）")
+    sys.path.insert(0, str(HERE))
+    import selfcheck as sc  # noqa: E402
+
+    repo = mkdtemp()
+    (repo / "node_modules" / "left-pad").mkdir(parents=True)
+    (repo / "node_modules" / "left-pad" / "index.js").write_text(
+        "module.exports = 1;\n", encoding="utf-8")
+    dst = mkdtemp()
+    linked = sc._link_deps(repo, dst)
+    expect("node_modules" in linked, "node_modules 被软链进副本")
+    link = dst / "node_modules"
+    expect(link.is_symlink(), "是软链（不复制体积）")
+    expect(link.resolve() == (repo / "node_modules").resolve(),
+           "指向原仓库的依赖目录")
+    expect((link / "left-pad" / "index.js").is_file(),
+           "软链过去的依赖内容可读")
+    # 不带依赖时不该有软链
+    repo2 = mkdtemp()
+    (repo2 / "src").mkdir(parents=True)
+    dst2 = mkdtemp()
+    linked2 = sc._link_deps(repo2, dst2)
+    expect(not linked2, "原仓库没有依赖目录时不软链")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
     except AttributeError:
         pass
+
+    test_with_deps_links_dependencies()
 
     # ---------------------------------------------------------- 黑盒
     print("黑盒：selfcheck 不 import readiness 的内部函数")

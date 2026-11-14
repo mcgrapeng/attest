@@ -9,13 +9,18 @@
 ## 装
 
 ```bash
-bash install.sh
+python3 install.py              # 跨平台（纯标准库，没有 bash 依赖）
+# 或者：bash install.sh         # 同一份实现的薄壳
 ```
 
 它把本仓库软链到 `~/.agents/skills/req-test-plan`，再软链到
 `~/.claude/skills/`、`~/.codex/skills/`、`~/.config/opencode/skills/`。
 已存在的同名软链会被覆盖（会打印提示）；目标位置若是**真实目录**则跳过，
-不删用户数据。卸载：`bash uninstall.sh`（只删软链）。
+不删用户数据。装完会自检一次（`readiness.py --help` 能跑通）。
+卸载：`python3 install.py --uninstall`（或 `bash uninstall.sh`），只删软链。
+
+Windows 上 `os.symlink` 可能需要管理员或开发者模式 —— 失败时会打印等价的手工命令，
+不删用户数据。
 
 手工装等价于：
 
@@ -203,7 +208,7 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清"当前只实现了 
 | SkillSpector 的 `E2`（Env Variable Harvesting）仍报 HIGH | 子进程必须透传环境变量（白名单实现，见 `scripts/readiness.py` 的 `child_env`）。逐条复核结论在 `docs/oss-release-review.md` 第六节；CI 用 `.github/skillspector-allowlist.yaml` 把**已复核的规则**显式放行，每条带理由，allowlist 之外的新 HIGH 仍然拦住。放行是**规则级、不是逐条 finding**：逐条基线按位置指纹匹配，改了 `scripts/` 里那一行就失效 ⇒ 对开源贡献者是持续的假红；规则级不依赖位置，改代码不会误红，而**新规则**仍然会被拦。代价（同一个已放行规则再出现不会被拦）写在 allowlist 文件头，不藏着。本地复现：`bash .github/check-skillspector.sh` |
 | `--exec` 显式执行开关没有采纳 | brief 要求"默认不跑、显式开关才跑"，实现改成**默认执行 + 执行前打印审计行**（报告头部一行「将执行的仓库脚本」，加 `--dry-run` 可只看不做）。理由：工具的定位就是实测（不跑测试的交付判定没有意义），而执行面已经收敛到脚本白名单 + 环境变量白名单；再叠一个必填开关，每次调用都要多打一个参数，实际收益不大。想看执行清单用 `--dry-run` |
 | Python 没有真后端（itest）车道 | TS 侧有 `--include-itest`，Python 侧没有对应机制。属 P1，未修 |
-| Windows / 非 bash 环境未验证 | — |
+| Windows 未端到端验证 | skill **运行时**是纯 Python、**安装**走 `install.py`（跨平台）——这两块与平台无关。但仓库自己的开发脚本（`fixtures/run_fixtures.sh`、`.github/*.sh`）依赖 bash，在 Windows 上要 WSL 或 Git Bash |
 | 触发准确度未实测 | `skill-creator` 的 `run_loop` 需要 `claude` CLI |
 | 自检副本默认不带 `node_modules` | 多数仓库在副本里跑不动测试，`--self-check` 默认证明的是"静态判据抓得住东西"，不是"整套判据（含实测项）抓得住东西"。报告里明说了这件事（`copy_runnable: false`）。加 `--self-check-deps` 会把依赖**软链**进副本（不复制体积），那时能验到实测类判据 |
 

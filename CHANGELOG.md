@@ -141,6 +141,8 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
 - **README 说 `DATABASE_URL` 不会透传**，代码里它在白名单里 ⇒ 文档改成"会透传"并说明取舍。
 - **`.omx/` 不再入库**（OMX 运行态与目标账本不进发布包），brief 移到
   `docs/development-brief.md`。
+- **安装入口跨平台**：新增 `install.py`（纯标准库，没有 bash 依赖），`install.sh` /
+  `uninstall.sh` 改成它的薄壳 —— 之前只有 bash 脚本，Windows 用户装不了。
 - **打包元数据**（产出可安装的 `.skill`）已做：新增自包含的 `package.py`
   （不依赖外部 skill 的打包脚本；排除字节码/`.git`/`fixtures/`/回归测试；
   打进包前检查有没有字节码）。实测产出 20 个文件、191 KB。
@@ -168,7 +170,9 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
     加 `--dry-run` 可只看不做）。理由：工具的定位就是实测（不跑测试的交付判定没有
     意义），而执行面已经收敛到脚本白名单 + 环境变量白名单；再叠一个必填开关，
     每次调用都要多打一个参数，实际收益不大。想看执行清单用 `--dry-run`。
-  - Windows / 非 bash 环境未验证。
+  - **Windows 未端到端验证**：skill 的**运行时**是纯 Python、**安装**走 `install.py`
+    （跨平台，纯标准库）—— 这两块与平台无关。仍需 bash 的是仓库自己的开发脚本
+    （`fixtures/run_fixtures.sh`、`.github/*.sh`），在 Windows 上要 WSL 或 Git Bash。
   - 触发准确度未实测（`skill-creator` 的 `run_loop` 需要 `claude` CLI）。
   - **自检副本默认不带 `node_modules`** ⇒ 多数仓库在副本里跑不动测试，`--self-check`
     默认证明的是"静态判据抓得住东西"，不是"整套判据（含实测项）抓得住东西"。

@@ -11,7 +11,8 @@ Python 3.11+ standard library only — there is nothing to install.
 ## Install
 
 ```bash
-bash install.sh
+python3 install.py              # cross-platform (stdlib only, no bash needed)
+# or: bash install.sh           # a thin shell wrapper around the same code
 ```
 
 It symlinks this repository to `~/.agents/skills/req-test-plan`, then symlinks
@@ -288,7 +289,7 @@ The full list is in [CHANGELOG.md](CHANGELOG.md) under "已知遗留（发布时
 | SkillSpector's `E2` (Env Variable Harvesting) still reports HIGH | Child processes must inherit environment variables (the allowlist implementation, see `child_env` in `scripts/readiness.py`). The per-rule review is in section 6 of `docs/oss-release-review.md`; CI uses `.github/skillspector-allowlist.yaml` to allowlist the **reviewed rules** explicitly, each with a reason, and a new HIGH outside the allowlist still fails the build. The allowlist is **rule-level, not finding-level**: the old baseline matched by source location, so changing one line of `scripts/` invalidated it — a permanent false red for open-source contributors. Rule-level allowlisting does not depend on location, so editing code does not cause a false red, while a **new rule** is still blocked. The cost (the same already-allowed rule appearing again is not blocked) is written in the allowlist header rather than hidden. Reproduce locally: `bash .github/check-skillspector.sh` |
 | The `--exec` explicit execution switch was not adopted | The brief asked for "do not run by default, run only when an explicit switch is given". The implementation is **execute by default, print an audit line before executing** (a "repository scripts that will be executed" line at the top of the report, plus `--dry-run` to look without doing). Reason: the tool's purpose is measurement (a delivery verdict that does not run the tests is meaningless), and the execution surface is already narrowed to a script allowlist plus an environment-variable allowlist; adding a mandatory switch means one more argument on every call for little gain. Use `--dry-run` to see the execution list |
 | Python has no real-backend (itest) lane | The TS side has `--include-itest`; Python has no equivalent mechanism. P1, not fixed |
-| Windows / non-bash environments | Unverified |
+| Windows not verified end to end | The skill's **runtime** is pure Python and its **install** goes through `install.py` (cross-platform), so neither depends on the platform. But the repo's own dev scripts (`fixtures/run_fixtures.sh`, `.github/*.sh`) need bash — on Windows that means WSL or Git Bash |
 | Trigger accuracy | Not measured (`skill-creator`'s `run_loop` needs the `claude` CLI) |
 | The self-check copy does not include `node_modules` by default | Most repos therefore cannot run their tests in the copy, so `--self-check` proves that "the static criteria catch things", not that "the whole criterion set (including the measured ones) catches things". The report says so explicitly (`copy_runnable: false`). Add `--self-check-deps` to symlink the dependencies into the copy (no copying) and the measured criteria get verified too |
 

@@ -8,8 +8,17 @@
 #   1  有未放行的 HIGH/CRITICAL（改代码，别加 allowlist 条目）
 #   2  skillspector 没装 / 扫描失败
 #
-# 扫的是**去掉字节码的干净副本** —— 仓库里的 .pyc 既不该进包，也不该被扫
-# （扫出来是"分发卫生"问题，不是行为风险；那是 CI 的 hygiene job 管的）。
+# 两个要点：
+#
+# 1. **扫的是发布物**（干净副本），不是工作树。工作树里有 .git/、.claude/（agent 的
+#    机器本地设置）、__pycache__/、.omx/ 这些**不进包**的东西 —— 扫它们得到的是
+#    "分发卫生"问题，不是行为风险，而分发卫生由 CI 的 hygiene job 管。
+#
+# 2. **放行是规则级的**（按 rule id），不是逐条 finding 的位置指纹。位置指纹会让
+#    改了代码就失效 —— 对开源贡献者是持续的假红（每次改代码都要先"重新生成基线"，
+#    久而久之就没人看红灯了）。规则级不依赖位置：改代码不会误红，而**新规则**仍然
+#    会被拦。真正的不变量由另一条精确检查守着：
+#    `python3 scripts/check_env_inheritance.py`（生产代码不得整份继承 os.environ）。
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -23,9 +32,11 @@ fi
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
-# 副本放在扫描目录之外 —— 写在里面会被下一次扫描扫到（自己扫自己）。
+# 干净副本 = 会发布出去的那份（不含 .git / .claude / 字节码 / 本地运行态）
 (cd "$REPO_ROOT" && tar --exclude='__pycache__' --exclude='*.pyc' \
-    --exclude='.git' --exclude='.omx' -cf - .) | (cd "$WORK" && tar -xf -)
+    --exclude='.git' --exclude='.omx' --exclude='.claude' \
+    --exclude='.github/state' --exclude='dist' -cf - .) \
+  | (cd "$WORK" && tar -xf -)
 
 OUT_DIR="$(mktemp -d)"
 # 扫到 HIGH 时 scanner 的退出码是非 0 —— 那正是我们要看的东西。

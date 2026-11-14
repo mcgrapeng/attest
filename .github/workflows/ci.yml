@@ -143,48 +143,16 @@ jobs:
         # 子进程环境必须走白名单（readiness.py 的 child_env /
         # selfcheck.py 的 _child_env）。这条不依赖位置 ⇒ 改代码不会误红。
         run: python3 scripts/check_env_inheritance.py
-      - name: 扫描（allowlist 之外不得有 HIGH / CRITICAL）
+      - name: 扫描发布物（allowlist 之外不得有 HIGH / CRITICAL）
+        # 扫的是**发布物**（干净副本），不是工作树 —— 工作树里有 .git/、.claude/
+        # （agent 的机器本地设置）、__pycache__/ 这些不进包的东西，扫它们得到的是
+        # "分发卫生"问题而不是行为风险（分发卫生由 hygiene job 管）。
+        # 放行是**规则级**的（.github/skillspector-allowlist.yaml，每条带理由），
+        # 不依赖位置 ⇒ 改代码不会让这个 job 变红；新规则仍然会被拦。
+        # 真正的收口是上面那条精确检查（生产代码不得整份继承 os.environ）。
         run: |
           if ! command -v skillspector >/dev/null 2>&1; then
             echo "::warning::SkillSpector 装不上（PyPI 取不到）—— 跳过扫描。本地补：pip install skillspector"
             exit 0
           fi
-          skillspector scan . --no-llm --format json --output scan.json || true
-          python3 - <<'PY'
-          import json
-          import re
-          import sys
-
-          # allowlist 是 YAML，但只用正则解析 `  - id: XXX` 就够 ——
-          # 不想在 CI 里多一个 PyYAML 依赖。
-          allow_text = open(".github/skillspector-allowlist.yaml",
-                            encoding="utf-8").read()
-          allowed = set(re.findall(r"^\s*-\s+id:\s*(\w+)", allow_text, re.M))
-          reasons = dict(re.findall(r"^\s*-\s+id:\s*(\w+)\s*\n\s*reason:\s*>-\s*\n((?:\s{6,}.*\n?)+)",
-                                  allow_text, re.M))
-
-          report = json.load(open("scan.json", encoding="utf-8"))
-          issues = report.get("issues") or []
-          high = [i for i in issues
-                  if i.get("severity") in ("HIGH", "CRITICAL")]
-          bad = [i for i in high if i.get("id") not in allowed]
-          for i in high:
-              loc = i.get("location") or {}
-              tag = "已放行" if i.get("id") in allowed else "未放行"
-              print(f"{tag} {i.get('id')} {i.get('severity')} "
-                    f"{loc.get('file')}:{loc.get('start_line')} "
-                    f"{i.get('finding')}")
-          for rid in sorted(allowed):
-              why = " ".join(reasons.get(rid, "").split())
-              print(f"allowlist {rid}：{why[:160]}")
-          if bad:
-              for i in bad:
-                  loc = i.get("location") or {}
-                  print(f"::error::{i.get('id')} {i.get('severity')} "
-                        f"{loc.get('file')}:{loc.get('start_line')} {i.get('finding')}")
-              print("::error::allowlist 之外还有 HIGH/CRITICAL。")
-              print("::error::若确有新风险 —— 别加 allowlist 条目，改代码。")
-              sys.exit(1)
-          print(f"OK：HIGH/CRITICAL {len(high)} 条全部落在 allowlist 内；"
-                f"另有 {len(issues) - len(high)} 条 MEDIUM/LOW 照常报出")
-          PY
+          bash .github/check-skillspector.sh

@@ -1,0 +1,57 @@
+{
+  "version": 1,
+  "createdAt": "2026-11-14T12:05:01.042Z",
+  "updatedAt": "2026-11-14T12:05:01.042Z",
+  "briefPath": ".omx/ultragoal/brief.md",
+  "goalsPath": ".omx/ultragoal/goals.json",
+  "ledgerPath": ".omx/ultragoal/ledger.jsonl",
+  "codexGoalMode": "aggregate",
+  "goals": [
+    {
+      "id": "G001-g001",
+      "title": "G001 交付判定正确性与执行面收敛",
+      "objective": "修完 readiness.py 的 17 项缺口：零测试假绿、测试发现作用域、覆盖率 glob、依赖抽取、Python 空集假绿、表设计豁免、判据改名、对账层参数化、CSV 配对、通用阈值矛盾、Python 闸门发现、itest 默认行为、脚本白名单+dry-run、环境白名单、psql 凭据、判据条数对齐、evidence 标签预留。每条带回归断言，新测试文件 scripts/test_readiness_r2.py。",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-11-14T12:05:01.042Z",
+      "updatedAt": "2026-11-14T12:05:01.042Z"
+    },
+    {
+      "id": "G002-g002",
+      "title": "G002 写入安全与语言感知",
+      "objective": "修完 req_plan.py 的 5 项：scaffold 路径穿越、scaffold 代码注入、scaffold 语言感知（无 JS/TS 约定时拒绝生成）、r3/r4 家目录绝对路径改为 __file__ 推导且缺失时清晰 skip、req_plan.py:9 声明改准确。新测试文件 scripts/test_req_plan_scaffold_safety.py。",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-11-14T12:05:01.042Z",
+      "updatedAt": "2026-11-14T12:05:01.042Z"
+    },
+    {
+      "id": "G003-g003",
+      "title": "G003 发布骨架与可复现证据",
+      "objective": "CI workflow（含 .pyc 检查与打包冒烟）、5 个黄金 fixture 与钉死的期望判定、evals/evals.json、CHANGELOG.md、install.sh/uninstall.sh、README 更新（语言矩阵/Security/输出契约/缺口关闭状态）。",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-11-14T12:05:01.042Z",
+      "updatedAt": "2026-11-14T12:05:01.042Z"
+    },
+    {
+      "id": "G004-g004-r1-r4",
+      "title": "G004 哲学达标 R1-R4",
+      "objective": "输出契约改证据分层+三档结论+本工具不判定清单（退出码保留）；--self-check 反向验证（默认关、只作用于临时副本）；oracle 独立性启发式检查（提醒级）；判据带 evidence 标签并处理空判据。使用主流开源库。新测试文件 scripts/test_readiness_philosophy.py。",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-11-14T12:05:01.042Z",
+      "updatedAt": "2026-11-14T12:05:01.042Z"
+    },
+    {
+      "id": "G005-g005",
+      "title": "G005 发布前独立复评与全闸门",
+      "objective": "逐条核对两份评测报告的缺口并给出已关闭/仍开放+证据，产出 docs/oss-release-review-v2.md 与 docs/testing-philosophy-review-v2.md；跑通 6 条验收闸门。",
+      "status": "pending",
+      "attempt": 0,
+      "createdAt": "2026-11-14T12:05:01.042Z",
+      "updatedAt": "2026-11-14T12:05:01.042Z"
+    }
+  ],
+  "codexObjective": "Complete the durable ultragoal plan in .omx/ultragoal/goals.json, including later accepted/appended stories, under the original brief constraints; use .omx/ultragoal/ledger.jsonl as the audit trail."
+}

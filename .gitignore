@@ -2,3 +2,7 @@ __pycache__/
 *.pyc
 .deepeval/
 .DS_Store
+
+# OMX 运行态（机器本地）
+.omx/state/
+.omx/hud/

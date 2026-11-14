@@ -238,10 +238,53 @@ export async function write(v: number[]) {
            "静态信号（不能单独支撑「通过」）")
 
 
+def test_strength_env_error() -> None:
+    print("\n测试强度：环境没就绪 ≠ 杀死了（假绿点）")
+    # 测试失败的原因是**连不上中间件** —— 这不是"测试发现了缺陷"，
+    # 是"环境没就绪"。上一版只看退出码 ⇒ 算成杀死了 ⇒ 假绿。
+    d = ts_repo(
+        "export const isBig = (n: number) => n >= 10;\n",
+        "import test from 'node:test';\n"
+        "test('连库', () => {\n"
+        "  throw new Error('connect ECONNREFUSED 127.0.0.1:19530');\n"
+        "});\n")
+    r = run("src", "--repo", str(d), "--mutation-check", "--json")
+    c = check_of(r.stdout, "test-strength")
+    expect(c.get("evidence_kind") == "untested",
+           f"判不了 ⇒ 标成未实测（实际 {c.get('evidence_kind')}）")
+    expect("判不了" in " ".join(c.get("evidence") or []), "证据里写清是判不了")
+    expect("杀死了" not in (c.get("detail") or ""),
+           f"不得说成杀死了（实际：{c.get('detail')}）")
+
+
+def test_vector_pg_dimension() -> None:
+    print("\n向量列：同一个列名在不同地方维度不一致")
+    d = vector_repo(
+        "export const schema = { embedding: Vector(1536) };\n")
+    write(d / "src" / "other.ts",
+          "export const other = { embedding: Vector(768) };\n")
+    c = check_of(run("src", "--repo", str(d), "--json").stdout, "vector-schema")
+    expect(c.get("status") == "warn",
+           f"维度不一致 ⇒ warn（实际 {c.get('status')}）")
+    expect("embedding" in " ".join(c.get("evidence") or []), "点名是哪个列")
+    expect("1536" in " ".join(c.get("evidence") or [])
+           and "768" in " ".join(c.get("evidence") or []), "两个维度都列出来")
+    # 维度一致 ⇒ 不报这条
+    d2 = vector_repo("export const schema = { embedding: Vector(1536) };\n")
+    write(d2 / "src" / "other.ts",
+          "export const other = { embedding: Vector(1536) };\n")
+    c2 = check_of(run("src", "--repo", str(d2), "--json").stdout, "vector-schema")
+    expect("维度" not in " ".join(c2.get("evidence") or [])
+           or "不一致" not in " ".join(c2.get("evidence") or []),
+           "维度一致时不报")
+
+
 def main() -> int:
     test_mutation_points()
     test_strength()
+    test_strength_env_error()
     test_vector_schema()
+    test_vector_pg_dimension()
     print()
     if FAILURES:
         print(f"失败 {len(FAILURES)} 条：")

@@ -252,20 +252,24 @@ def _run_tests(runner: list[str], cwd: Path, test_rels: list[str],
 def run_mutation_check(repo: Path, ws_rel: str,
                        source_rels: list[str], test_rels: list[str],
                        runner: list[str], max_mutants: int = 6,
-                       timeout: int = 120) -> dict:
+                       timeout: int = 120, classify=None) -> dict:
     """对目标模块跑一轮变异检查。
 
     返回：
         attempted   试了几个变异点
         killed      多少个被测试发现（测试红了）
         timeouts    其中多少个是超时（也算发现了，但值得看一眼）
+        unknown     多少个**判不了**（环境没就绪 / 输出格式认不出）
         survivors   杀不死的（位置 + 改了什么）
         notes       说明与阻碍
 
     `ws_rel` 是工作区相对仓库根的路径（"." = 仓库根）。
     `source_rels` / `test_rels` 相对**工作区**。
+    `classify(code, out, name) -> (失败用例, 未实测原因)` 可选：
+    给了就按三分口径判（真失败⇒杀死、环境没就绪/输出认不出⇒**判不了**），
+    不给就退回"退出码非 0 = 杀死" —— 那会把环境错误算成"杀死了"，是假绿。
     """
-    res: dict = {"attempted": 0, "killed": 0, "timeouts": 0,
+    res: dict = {"attempted": 0, "killed": 0, "timeouts": 0, "unknown": 0,
                  "survivors": [], "notes": [], "scanned": 0}
     if not source_rels:
         res["notes"].append("没有可改的源码")
@@ -335,6 +339,24 @@ def run_mutation_check(repo: Path, ws_rel: str,
             if code == 124:
                 res["timeouts"] += 1
                 res["killed"] += 1
+                continue
+            if classify is not None:
+                # 三分口径（与 readiness 的「跑不起来 ≠ 不达标」同一条）：
+                #   真失败      ⇒ 杀死
+                #   环境没就绪  ⇒ **判不了**（既不算杀死，也不算存活）
+                #   输出认不出  ⇒ **判不了**（不能因为退出码非 0 就说"杀死了"）
+                fails, setup = classify(code, out, f"变异 {rel}:{mut.line}")
+                if fails:
+                    res["killed"] += 1
+                elif setup:
+                    res["unknown"] += 1
+                    res["notes"].append(setup[0] if setup else "判不了")
+                else:
+                    res["survivors"].append({
+                        "where": f"{rel}:{mut.line}",
+                        "kind": mut.kind,
+                        "change": f"{mut.original} → {mut.mutated}",
+                    })
                 continue
             if code != 0:
                 res["killed"] += 1

@@ -2419,28 +2419,42 @@ def check_test_strength(m: Module, args) -> Check:
     res = mutation_check.run_mutation_check(
         repo=root, ws_rel=ws_rel, source_rels=source_rels,
         test_rels=test_rels, runner=runner, max_mutants=6,
-        timeout=getattr(args, "mutation_timeout", 120))
+        timeout=getattr(args, "mutation_timeout", 120),
+        classify=_classify_run)
     attempted = res["attempted"]
     killed = res["killed"]
+    unknown = res["unknown"]
     survivors = res["survivors"]
     notes = res["notes"]
     ev = [f"{s['where']}  {s['kind']}（{s['change']}）—— 改了它测试还是绿的"
           for s in survivors]
     if res["timeouts"]:
         ev.append(f"其中 {res['timeouts']} 个是超时（也算发现了，但值得看一眼）")
+    if unknown:
+        ev.append(f"{unknown} 个判不了（环境没就绪 / 输出格式认不出）"
+                  f"—— 既不算杀死，也不算存活")
     ev += notes
     if attempted == 0:
         return Check("test-strength", "测试能发现缺陷", "skipped",
                      "没跑起来：" + ("；".join(notes) or "没有可注入的变异点"),
                      ev, evidence_kind="untested")
+    # 判不了的算"未实测"，不是"杀死"也不是"存活" —— 拿退出码非 0 就说
+    # "杀死了"是假绿（环境错误、runner 输出认不出，都会被算成杀死）。
+    if killed == 0 and not survivors:
+        return Check("test-strength", "测试能发现缺陷", "skipped",
+                     f"{attempted} 个变异点都没跑出可判定的结果"
+                     f"（{unknown} 个判不了）",
+                     ev, "让测试能跑出可解析的结果，再判这条",
+                     evidence_kind="untested")
     if killed == 0:
         return Check("test-strength", "测试能发现缺陷", "fail",
                      f"{attempted} 个变异点全部杀不死 ⇒ 这套测试发现不了这类缺陷",
                      ev, "给这些点补断言：改动后用例应该红", evidence_kind="executed")
-    if survivors:
+    if survivors or unknown:
         return Check("test-strength", "测试能发现缺陷", "warn",
                      f"{killed}/{attempted} 个变异被杀死，{len(survivors)} 个杀不死"
-                     f"（杀不杀得死多少算够，门槛归项目）",
+                     + (f"，{unknown} 个判不了" if unknown else "")
+                     + "（杀不杀得死多少算够，门槛归项目）",
                      ev, "给杀不死的点补断言，或确认那些行为没测到也无所谓",
                      evidence_kind="executed")
     return Check("test-strength", "测试能发现缺陷", "pass",
@@ -2587,7 +2601,8 @@ _VECTOR_PART_RE = re.compile(
 _VECTOR_FIELD_RE = re.compile(
     r"""(\w+)\s*[:=]\s*['"](\w+)['"][^;{}\n]{0,140}?"""
     r"(?:FLOAT_VECTOR|BINARY_VECTOR)")
-_VECTOR_PG_FIELD_RE = re.compile(r"\b(\w+)\s*[:=]\s*(?:sql\.)?Vector\s*\(")
+_VECTOR_PG_FIELD_RE = re.compile(
+    r"\b(\w+)\s*[:=]\s*(?:sql\.)?Vector\s*\(\s*(\d+)")
 #: 模块里的字符串常量（用来把 collection_name: MEM_COLLECTION 解析成真值）
 _CONST_STR_RE = re.compile(
     r"""\b(\w+)\s*(?::\s*string\s*)?=\s*['"]([^'"]{1,120})['"]""")
@@ -2673,6 +2688,7 @@ def check_vector_schema(m: Module) -> Check:
     """
     calls: list[tuple[str, str, str, str, str, str, str]] = []
     vector_fields: set[str] = set()
+    pg_dims: dict[str, set[str]] = {}
     consts: dict[str, str] = {}
     for p in m.sources:
         try:
@@ -2686,6 +2702,7 @@ def check_vector_schema(m: Module) -> Check:
             vector_fields.add(mm.group(2))
         for mm in _VECTOR_PG_FIELD_RE.finditer(text):
             vector_fields.add(mm.group(1))
+            pg_dims.setdefault(mm.group(1), set()).add(mm.group(2))
         for mm in _CONST_STR_RE.finditer(text):
             consts.setdefault(mm.group(1), mm.group(2))
         for mm in _VECTOR_CALL_RE.finditer(text):
@@ -2711,13 +2728,15 @@ def check_vector_schema(m: Module) -> Check:
             part = _resolve_value(_pick_token(part_m), consts) if part_m else ""
             calls.append((p.name, mm.group(1).lower(), key, dim, metric, part,
                           "动态" if dynamic else ""))
-    if not calls:
+    if not calls and not pg_dims:
         return Check("vector-schema", "向量集合属性自洽", "skipped",
                      "这个模块没有向量集合调用点（判不了）",
                      evidence_kind="untested")
 
     problems: list[str] = []
     ev: list[str] = []
+    if not calls:
+        ev.append("这个模块没有向量集合调用点 ⇒ 只判了 pgvector 列的维度")
     by_coll: dict[str, list[tuple]] = {}
     for c in calls:
         by_coll.setdefault(c[2], []).append(c)
@@ -2741,21 +2760,29 @@ def check_vector_schema(m: Module) -> Check:
     # 写入的集合与检索的集合是不是同一个
     writes = {c[2] for c in calls if c[1] in _VECTOR_WRITE_OPS}
     reads = {c[2] for c in calls if c[1] in _VECTOR_READ_OPS}
-    split_hint = ""
+    warnings: list[str] = []
     if writes and reads and not (writes & reads):
-        split_hint = (f"写入集合 {', '.join(sorted(writes))} 与检索集合 "
-                      f"{', '.join(sorted(reads))} 不是同一个")
+        warnings.append(
+            f"写入集合 {', '.join(sorted(writes))} 与检索集合 "
+            f"{', '.join(sorted(reads))} 不是同一个"
+            "（若本意是同一份数据，这就是“写入 A、检索 B”的缺陷）")
+    # pgvector 列的维度：同一个列名在不同地方不一样
+    for col, dims in sorted(pg_dims.items()):
+        if len(dims) > 1:
+            warnings.append(
+                f"向量列 {col} 的维度在不同地方不一致（{', '.join(sorted(dims))}）"
+                "（同一张表里不一致就是缺陷；不同表可以不同，确认一下）")
+    ev += warnings          # 提醒也要进证据（JSON 消费方只看 evidence 就看不到）
     if problems:
         return Check("vector-schema", "向量集合属性自洽", "fail",
                      f"{len(problems)} 处自相矛盾", ev + problems[:8],
                      "把同一集合的属性统一（维度/度量/分区键），"
                      "分区键换成标量字段",
                      evidence_kind="static")
-    if split_hint:
+    if warnings:
         return Check("vector-schema", "向量集合属性自洽", "warn",
-                     "集合属性一致，但" + split_hint,
-                     ev, "若本意是同一份数据，这就是“写入 A、检索 B”的缺陷；"
-                     "若确实是两份数据，忽略这条",
+                     "集合属性一致，但" + "；".join(warnings),
+                     ev, "确认这些是不是有意为之",
                      evidence_kind="static")
     return Check("vector-schema", "向量集合属性自洽", "pass",
                  f"{len(by_coll)} 个集合、{len(calls)} 个调用点，属性一致",

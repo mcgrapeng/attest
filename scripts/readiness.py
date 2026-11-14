@@ -2309,6 +2309,45 @@ def _echo_script_plan(m: Module, gate_scripts, itest_scripts, reconcilers,
         print("将执行的仓库脚本：" + "；".join(parts))
 
 
+def check_oracle_independence(m: Module) -> Check:
+    """R3 断言的期望值是否独立于被测对象。
+
+    oracle 问题是测试的中心难题：判据来自被测对象自身就是同义反复，测试再多也不
+    产生信息（Howden 1968）。SKILL.md 早就写了这条要求，但工具层从来没查过。
+
+    这是**静态启发式**（正则 + 简单别名追踪）：会漏也会误报 ⇒ 只报提醒，不阻塞。
+    措辞保持"可能来自被测对象自身"，不要写成"期望值不独立"——后者会把幂等/不变性
+    断言（按定义就是拿被测对象输出当期望值）误报成缺陷。
+    """
+    try:
+        from oracle_check import check_oracle_independence as _check
+    except ImportError:
+        return Check("oracle", "断言的期望值独立", "skipped",
+                     "oracle_check 模块不可用（没跟 scripts/ 放在一起）",
+                     evidence_kind="untested")
+    files = [p for p in (m.tests + m.itests + m.repo_tests) if p.is_file()]
+    if not files:
+        return Check("oracle", "断言的期望值独立", "skipped",
+                     "这个模块没有测试文件，没有断言可查",
+                     evidence_kind="untested")
+    res = _check(m.root, files)
+    findings = res.get("findings") or []
+    scanned = res.get("scanned", 0)
+    if not findings:
+        return Check("oracle", "断言的期望值独立", "pass",
+                     f"扫了 {scanned} 个测试文件，没发现期望值取自被测对象自身的断言",
+                     evidence_kind="static")
+    taut = [f for f in findings if f.get("kind") in ("自比较", "快照自比对")]
+    detail = f"{len(findings)} 处断言的期望值可能来自被测对象自身"
+    if taut:
+        detail += f"（其中 {len(taut)} 处是恒真的同义反复 —— 那一定要改）"
+    return Check("oracle", "断言的期望值独立", "warn", detail,
+                 [f"{f.get('file')}:{f.get('line')} {f.get('kind')} —— "
+                  f"{f.get('snippet')}" for f in findings[:6]],
+                 "期望值改从接口/库里独立取；恒真的同义反复一定要改",
+                 evidence_kind="static")
+
+
 def _pin_outside_repo(root: Path, fpath: str) -> str:
     """钉指向仓库外 ⇒ 返回原因；没问题返回空串。
 
@@ -2568,6 +2607,7 @@ def run_readiness(args) -> int:
         check_extensibility(m, idx),
         check_no_wheels(m, idx),
         check_open_source(m),
+        check_oracle_independence(m),
     ]
 
     # ---- 结论：证据分层 + 三档，不用"达到交付条件"这种裁决措辞 ----
@@ -2577,7 +2617,9 @@ def run_readiness(args) -> int:
     fails = [c for c in checks if c.status == "fail"]
     warns = [c for c in checks if c.status == "warn"]
     no_signal = [c for c in checks if c.status in ("skipped", "untested")]
-    passed = [c for c in checks if c.status == "pass"]
+    # 「实测通过」只数 executed —— 静态信号永远不能算进实测通过里。
+    passed = [c for c in checks if c.status == "pass"
+              and c.evidence_kind == "executed"]
     static_signals = [c for c in checks if c.evidence_kind == "static"]
     # 关键判据（测试是否绿）没测到 ⇒ 不能说"测过了"。退出码据此非 0，
     # 否则一个零测试的仓库会在 CI 里拿到绿灯。

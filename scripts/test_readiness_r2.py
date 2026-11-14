@@ -477,10 +477,11 @@ def main() -> int:
     r16 = run("src", "--repo", str(layout), "--json")
     data16 = json.loads(r16.stdout)
     keys16 = [c["key"] for c in data16["checks"]]
-    expect(len(keys16) == 11, f"报告里有 11 条判据（实际 {len(keys16)}）")
+    expect(len(keys16) == 12, f"报告里有 12 条判据（实际 {len(keys16)}）")
     expect("field-compare" not in keys16,
            "字段级比对不是独立判据（并入数据流一致）")
     expect("data-flow" in keys16, "数据流一致这条在")
+    expect("oracle" in keys16, "oracle 独立性这条在（G004 加的）")
 
     # ---------------------------------------------------------- 子项 17
     print("\n子项 17：每条判据带证据类别")

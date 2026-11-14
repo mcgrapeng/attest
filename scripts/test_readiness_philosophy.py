@@ -158,6 +158,29 @@ def test_r4_evidence_kinds() -> None:
            "测试全绿是实测类")
     expect(by_key.get("extensibility", {}).get("evidence_kind") == "static",
            "不过度抽象是静态类")
+    expect("oracle" in by_key, "有 oracle 独立性判据")
+    expect(by_key.get("oracle", {}).get("evidence_kind") == "static",
+           "oracle 判据是静态类（提醒不阻塞）")
+
+
+def test_oracle_criterion_wired() -> None:
+    print("\nR3：oracle 判据接进报告，并能报出自比较")
+    d = mkdtemp()
+    write(d / "package.json", json.dumps({"scripts": {"test": "node --test"}}))
+    write(d / "src" / "calc.ts",
+          "export function add(a: number, b: number): number { return a + b }\n")
+    write(d / "src" / "calc.test.ts",
+          "import test from 'node:test';\n"
+          "import assert from 'node:assert/strict';\n"
+          "import { add } from './calc.ts';\n"
+          "test('自比较', () => { assert.equal(add(1, 2), add(1, 2)); });\n")
+    r = run("src", "--repo", str(d))
+    block = _block(r.stdout, "断言的期望值独立")
+    expect("断言的期望值独立" in r.stdout, "报告里有 oracle 这条判据")
+    expect("同义反复" in block, "恒真的自比较被点名")
+    expect("可能来自被测对象自身" in block,
+           "措辞是「可能来自被测对象自身」（不写成断言不独立）")
+    expect(_blocking(r.stdout) == 0, "oracle 只是提醒，不算阻塞项")
 
 
 # ------------------------------------------------- 缺陷 1：漂移表头被算成漂移
@@ -278,6 +301,7 @@ def main() -> int:
     test_r1_output_contract()
     test_r1_exit_codes()
     test_r4_evidence_kinds()
+    test_oracle_criterion_wired()
     test_defect_drift_header_not_counted()
     test_defect_out_of_bounds_pin_not_read()
     test_defect_python_colocated_tests_counted()

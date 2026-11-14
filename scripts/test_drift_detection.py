@@ -136,9 +136,36 @@ console.log('qa-tenant: 0 rows drifted');
     ln = line_of(r.stdout, "数据流一致（跨存储对账） —")
     expect("生产租户" in ln and "无漂移" not in ln,
            "纯文本报告里的 drift 行仍被认出来")
-    print("  （已知限制：纯文本报告里若漂移行同时含 tenant/租户/一致性 字样，"
-          "会被当成表头排除 —— 那是既有行为，本轮不改，避免影响别的项目。"
-          "解法：对账脚本输出表格或 JSON。）")
+    print("  （纯文本报告没有表结构可认，只能这么粗 —— 但不该更粗："
+          "行里出现 tenant/租户/一致性 不再让整行被丢掉。）")
+
+
+def test_plain_text_line_with_tenant_is_detected() -> None:
+    print("\n纯文本报告里含 tenant 的漂移行 ⇒ 也要认出来（不能被当表头丢掉）")
+    plain = """console.log('tenant default: 3 rows drifted');
+console.log('tenant qa-tenant: 0 rows drifted');
+"""
+    repo = repo_with_reconciler(plain)
+    r = run(repo)
+    ln = line_of(r.stdout, "数据流一致（跨存储对账） —")
+    expect("无漂移" not in ln,
+           "含 tenant 的漂移行没被静默吞掉")
+    expect("1 个" in ln, "报 1 个生产租户（qa-tenant 那个是测试租户，不阻塞）")
+
+
+def test_data_row_with_wording_is_not_dropped() -> None:
+    print("\n数据行里含「正文不一致」⇒ 不能被当成表头丢掉")
+    # 这行含「一致性」—— 旧实现按子串匹配把它当表头排除了（真漂移被吞掉）
+    report = """console.log('| 租户 | 正文不一致 | 判定 |');
+console.log('|---|---|---|');
+console.log('| default | 2 | 正文不一致 |');
+console.log('| default | 2 | ❌ 漂移 |');
+"""
+    repo = repo_with_reconciler(report)
+    r = run(repo)
+    ln = line_of(r.stdout, "数据流一致（跨存储对账） —")
+    expect("1 个**生产租户**的数据流漂移" in ln,
+           "带「正文不一致」的漂移行被认出来，且只算 1 个租户")
 
 
 def main() -> int:
@@ -149,6 +176,8 @@ def main() -> int:
     test_prose_line_is_not_drift()
     test_one_drifted_tenant_counts_once()
     test_plain_text_report_still_detected()
+    test_plain_text_line_with_tenant_is_detected()
+    test_data_row_with_wording_is_not_dropped()
     print()
     for d in TMPDIRS:
         shutil.rmtree(d, ignore_errors=True)

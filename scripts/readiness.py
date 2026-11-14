@@ -1254,6 +1254,37 @@ def find_reconcilers(m: Module, root: Path) -> list[tuple[Path, str, str]]:
     return out
 
 
+def _is_sep_row(row: str) -> bool:
+    """|---|---| 这种分隔行。"""
+    return bool(re.fullmatch(r"\|[\s:|-]+\|", row.strip()))
+
+
+def _table_data_rows(lines: list[str],
+                     header_re: "re.Pattern | None" = None) -> list[str]:
+    """表格里的**数据行**：去掉分隔行与表头行。
+
+    表头行 = 下一行是分隔行（|---|---|）。这比"行里含 租户/tenant/一致性 就当表头"
+    准得多 —— 后者会把**数据行**（例：| default | 10 | 正文不一致 |）整行丢掉，
+    于是真漂移被静默吞掉（假绿）。
+    """
+    out: list[str] = []
+    for i, ln in enumerate(lines):
+        s = ln.strip()
+        if not s.startswith("|"):
+            continue
+        if _is_sep_row(s):
+            continue
+        nxt = lines[i + 1].strip() if i + 1 < len(lines) else ""
+        if _is_sep_row(nxt):
+            continue          # 下一行是分隔行 ⇒ 这是表头
+        prev = lines[i - 1].strip() if i > 0 else ""
+        if header_re is not None and (not prev.startswith("|")) \
+                and header_re.search(s):
+            continue          # 没分隔行的表：表头是本块的第一行
+        out.append(s)
+    return out
+
+
 def run_reconciler(m: Module, ws: Path, name: str, cmd: str,
                    timeout: int = 180,
                    drift_re: "re.Pattern | None" = None,
@@ -1293,24 +1324,25 @@ def run_reconciler(m: Module, ws: Path, name: str, cmd: str,
     except FileNotFoundError:
         return [], [], [], Path(out_dir), None
     text = r.stdout + r.stderr
-    table_rows = [ln.strip() for ln in text.splitlines()
-                  if ln.strip().startswith("|")]
-    # 表头行也要排除 —— 英文表头常含 drift 字样（"| tenant | drift | status |"），
-    # 不排除就会把表头当成一条漂移：计数虚高，租户归属还错乱。
+    lines = text.splitlines()
+    raw_rows = [ln.strip() for ln in lines if ln.strip().startswith("|")]
+    table_rows = _table_data_rows(lines, header_re)
     if table_rows:
-        # 报告是**表格形态** ⇒ 漂移只从表里的行认。散文里的「漂移」是说明文字
-        # （例："### 多余向量（2 条：PG 行还在但已非 active ⇒ 真漂移）"），
-        # 当成漂移行有两个后果：把一致的租户误报成漂移；一次真漂移被数成两个
-        # （表里一行 ❌ + 散文一行「漂移」）。
-        drift = [r for r in table_rows
-                 if drift_re.search(r) and not header_re.search(r)]
+        # 报告是**表格形态** ⇒ 漂移只从**数据行**认：表头行与分隔行不是数据。
+        # 散文里的「漂移」是说明文字（例："### 多余向量（2 条：… ⇒ 真漂移）"），
+        # 当成漂移行会有两个后果：把一致的租户误报成漂移；一次真漂移被数成两个。
+        drift = [r for r in table_rows if drift_re.search(r)]
     else:
-        # 没有表格的纯文本报告：只能按行匹配（保持旧行为，别让别人的报告认不出）
-        drift = [ln.strip() for ln in text.splitlines()
-                 if drift_re.search(ln) and not header_re.search(ln)]
-    # 租户列的位置：从表头认（认不到就退回第一列）
+        # 纯文本报告：按行匹配，只排除**伪表头**（带 | 且像表头的那行）。
+        # 不再因为行里出现 tenant/租户/一致性 就整行丢掉 —— 那是把数据行当表头，
+        # 漂移会被静默吞掉（假绿）。纯文本没有表结构可认，只能这么粗，但不该更粗。
+        drift = [ln.strip() for ln in lines
+                 if drift_re.search(ln)
+                 and not ("|" in ln and header_re.search(ln))]
+    # 租户列的位置：从表头认（认不到就退回第一列）。
+    # 表头不在 table_rows 里（它是表头不是数据），所以这里读原始表行。
     tenant_idx: int | None = None
-    for rrow in table_rows:
+    for rrow in raw_rows:
         cells = [c.strip() for c in rrow.strip().strip("|").split("|")]
         for i, c in enumerate(cells):
             if (tenant_col and c.lower() == tenant_col.lower()) \

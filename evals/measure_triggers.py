@@ -110,6 +110,31 @@ def triggered_in_stream(stdout: str) -> tuple[bool, list[str]]:
     return bool(hits), hits
 
 
+def considered_in_thinking(stdout: str) -> bool:
+    """模型的**思考**里有没有把我们当候选。
+
+    skill 列表一直��模型的上下文里，所以"没提到"不等于"没看见"。真正要问的是：
+    描述够不够显眼，让我们在候选集里出现过一次。
+    """
+    markers = ("req-test-plan", "交付就绪度", "测试就绪度", "需求测试计划")
+    for line in stdout.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            ev = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if ev.get("type") != "assistant":
+            continue
+        for c in (ev.get("message") or {}).get("content") or []:
+            if isinstance(c, dict) and c.get("type") == "thinking":
+                th = c.get("thinking") or ""
+                if any(mk in th for mk in markers):
+                    return True
+    return False
+
+
 def run_query(query: str, timeout: int, max_turns: int
                ) -> tuple[bool, str, float, list[str]]:
     work = Path(tempfile.mkdtemp(prefix="trig-"))
@@ -124,6 +149,7 @@ def run_query(query: str, timeout: int, max_turns: int
         except subprocess.TimeoutExpired:
             return False, "超时（模型没在时限内决定）", 0.0, []
         hit, names = triggered_in_stream(proc.stdout)
+        considered = considered_in_thinking(proc.stdout)
         # 模型实际加载了哪些别的 skill —— 用来区分"我们没被选中"和
         # "我们被更强的候选挤掉了"。
         others: list[str] = []
@@ -186,6 +212,7 @@ def main() -> int:
         ok = hit == want
         results.append({"i": i, "query": q["query"], "should_trigger": want,
                         "triggered": hit, "pass": ok, "note": note,
+                        "considered": considered,
                         "other_skills": others,
                         "cost_usd": round(cost, 4)})
         if not args.json:
@@ -201,7 +228,9 @@ def main() -> int:
     precision = tp / (tp + fp) if (tp + fp) else 0.0
     recall = tp / (tp + fn) if (tp + fn) else 0.0
     f1 = (2 * precision * recall / (precision + recall)) if (precision + recall) else 0.0
+    considered_n = sum(1 for r in results if r.get("considered"))
     summary = {"total": len(results),
+               "considered": considered_n,
                "cost_usd": round(sum(r.get("cost_usd", 0.0) for r in results), 4),
                "passed": sum(1 for r in results if r["pass"]),
                "precision": round(precision, 3), "recall": round(recall, 3),
@@ -215,6 +244,8 @@ def main() -> int:
               f" · F1 {summary['f1']}"
               f"（误触发 {fp}，漏触发 {fn}）"
               f" · 本次花销 ${summary['cost_usd']}")
+        print(f"  模型在思考里把我们当候选的：{considered_n}/{len(results)}"
+              f"（这是描述显眼度的指标 —— skill 列表本来就在上下文里）")
     return 0 if summary["passed"] == summary["total"] else 1
 
 

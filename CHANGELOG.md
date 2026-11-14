@@ -173,7 +173,11 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
   - **Windows 未端到端验证**：skill 的**运行时**是纯 Python、**安装**走 `install.py`
     （跨平台，纯标准库）—— 这两块与平台无关。仍需 bash 的是仓库自己的开发脚本
     （`fixtures/run_fixtures.sh`、`.github/*.sh`），在 Windows 上要 WSL 或 Git Bash。
-  - 触发准确度未实测（`skill-creator` 的 `run_loop` 需要 `claude` CLI）。
+  - **触发准确度已实测，有边界**：精确率 1.0（10 条近邻反例一条都没误触发），
+    召回率 0.5，F1 0.667。数据与解读见 `evals/README.md`。
+    **这个数测的是本机 60 多个 skill 的竞争环境，不是描述的绝对质量** —— OSS 用户
+    装上时 skill 集合不同，数不可直接迁移。别对着它反复调 description
+    （v1 这么干过，把召回从 0.4 调到 0.3）。
   - **自检副本默认不带 `node_modules`** ⇒ 多数仓库在副本里跑不动测试，`--self-check`
     默认证明的是"静态判据抓得住东西"，不是"整套判据（含实测项）抓得住东西"。
     报告里明说了这件事（`copy_runnable: false`）。

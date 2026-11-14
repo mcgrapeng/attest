@@ -209,7 +209,7 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清"当前只实现了 
 | `--exec` 显式执行开关没有采纳 | brief 要求"默认不跑、显式开关才跑"，实现改成**默认执行 + 执行前打印审计行**（报告头部一行「将执行的仓库脚本」，加 `--dry-run` 可只看不做）。理由：工具的定位就是实测（不跑测试的交付判定没有意义），而执行面已经收敛到脚本白名单 + 环境变量白名单；再叠一个必填开关，每次调用都要多打一个参数，实际收益不大。想看执行清单用 `--dry-run` |
 | Python 没有真后端（itest）车道 | TS 侧有 `--include-itest`，Python 侧没有对应机制。属 P1，未修 |
 | Windows 未端到端验证 | skill **运行时**是纯 Python、**安装**走 `install.py`（跨平台）——这两块与平台无关。但仓库自己的开发脚本（`fixtures/run_fixtures.sh`、`.github/*.sh`）依赖 bash，在 Windows 上要 WSL 或 Git Bash |
-| 触发准确度未实测 | `skill-creator` 的 `run_loop` 需要 `claude` CLI |
+| 触发准确度 | 已实测：精确率 1.0（近邻反例一条都没误触发）、召回率 0.5、F1 0.667。数据与解读见 [evals/README.md](evals/README.md)。**这个数测的是本机 60 多个 skill 的竞争环境**，OSS 用户 skill 集合不同、不可直接迁移 |
 | 自检副本默认不带 `node_modules` | 多数仓库在副本里跑不动测试，`--self-check` 默认证明的是"静态判据抓得住东西"，不是"整套判据（含实测项）抓得住东西"。报告里明说了这件事（`copy_runnable: false`）。加 `--self-check-deps` 会把依赖**软链**进副本（不复制体积），那时能验到实测类判据 |
 
 另有一条不在 CHANGELOG「已知遗留」里的：`SKILL.md` 正文仍是中文（README 已有英文版 `README.en.md`）。

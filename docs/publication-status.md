@@ -25,7 +25,7 @@
 | 安全扫描 | `bash .github/check-skillspector.sh` | 44 条 HIGH/CRITICAL，未放行 **0** 条 |
 | 环境收口 | `python3 scripts/check_env_inheritance.py` | 生产代码没有整份继承 `os.environ` |
 | 反向验证 | `readiness.py src --repo fixtures/ts-colocated --self-check` | 结论：反向验证通过 |
-| 打包 | `python3 package.py` | 22 个文件，198 KB 的 `.skill` |
+| 打包 | `python3 package.py` | 22 个文件，199 KB 的 `.skill` |
 
 CI（`.github/workflows/ci.yml`）四个 job：字节码卫生 / 回归+fixture+eval+打包冒烟 /
 打包冒烟 / SkillSpector 扫描。package-smoke 已本地逐条模拟通过。

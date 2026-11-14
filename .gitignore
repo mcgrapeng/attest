@@ -18,3 +18,6 @@ dist/
 
 # agent 的机器本地设置
 .claude/
+
+# IDE 的机器本地目录
+.idea/

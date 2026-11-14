@@ -1,14 +1,21 @@
 ---
 name: req-test-plan
 description: >-
-  Generate and verify a requirement-level test plan whose invariants are pinned to
-  real test cases, and run a one-command delivery-readiness check that actually
-  executes the project's own tests, coverage gates, cross-store reconciliation and
-  baseline scripts. Use when starting a new feature, when a requirement needs a
-  test toolset, when writing or reviewing a feature's test plan, when someone
-  claims a feature's test coverage is real, or when asked whether a module is
-  ready to ship, deliver or hand to a customer. Triggers include 写测试计划、
-  核一遍测试覆盖、这个模块能不能交付、能不能上线、测试就绪度、跨存储数据有没有漂。
+  Requirement-level test planning and delivery verification. Generate a test plan
+  covering every test type and key flow detail, pin each invariant to a real
+  test case, reuse the helpers the project already has instead of reinventing
+  them, and scaffold the test files the plan calls for. Then run a one-command
+  readiness check that actually executes the project's own tests, coverage gates,
+  cross-store reconciliation and baseline scripts. Use it when starting a
+  feature, when a requirement needs a test toolset, when writing or reviewing a
+  feature's test plan, when a teammate claims a feature is tested but the
+  pinned file or test case is not actually there, when data drifts between two
+  stores (Postgres vs a vector DB) and you need to know which tenant drifted,
+  when asked whether a module is ready to ship, deliver or hand to a customer,
+  and when you need to know which test dimensions to cover and which existing
+  helpers to reuse. Triggers include 写测试计划、覆盖哪些测试维度、哪些 helper 能复用、
+  核一遍测试覆盖、这个模块能不能交付、能不能上线、测试就绪度、跨存储数据有没有漂、
+  两边对不上、生成测试骨架。
 license: MIT
 metadata:
   author: zhangpeng

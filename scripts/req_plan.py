@@ -781,21 +781,39 @@ def _symbol_uses(root: Path, symbol: str) -> int:
 
 
 def _symbol_exists(root: Path, symbol: str) -> str:
-    """全仓有没有已存在的同名导出。返回出处（没有就空串）。"""
+    """全仓有没有已存在的同名导出。返回出处（没有就空串）。
+
+    之前只认 TS 的 `export function|const|…` ⇒ Python/Rust/Go 仓库里
+    「新建能力」这条"全仓已存在 ⇒ 报红"的检查**整条是死的**。
+    """
     if not re.fullmatch(r"[A-Za-z_$][\w$]*", symbol):
         return ""
-    exp = re.compile(
-        r"^\s*export\s+(?:default\s+)?(?:async\s+)?"
-        r"(?:function|const|let|var|class|interface|type|enum)\s+"
-        + re.escape(symbol) + r"\b", re.M)
-    code_exts = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"}
+    s = re.escape(symbol)
+    pats = (
+        # TS/JS：export function|const|let|var|class|interface|type|enum
+        re.compile(r"^\s*export\s+(?:default\s+)?(?:async\s+)?"
+                   r"(?:function|const|let|var|class|interface|type|enum)\s+"
+                   + s + r"\b", re.M),
+        # Python：模块级（不在缩进里）的 def / class
+        re.compile(r"^(?:async\s+)?(?:def|class)\s+" + s + r"\b", re.M),
+        # Rust：pub fn/struct/enum/trait/type/const
+        re.compile(r"^\s*pub\s+(?:fn|struct|enum|trait|type|const)\s+"
+                   + s + r"\b", re.M),
+        # Go：顶层 func / type
+        re.compile(r"^(?:func|type)\s+" + s + r"\b", re.M),
+    )
+    code_exts = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
+                  ".py", ".rs", ".go"}
     for p in _walk(root, code_exts):
+        if re.search(r"\.(test|spec)\.|_test\.go$|\.itest\.", p.name):
+            continue            # 测试文件里的同名不算"已有实现"
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
-        if exp.search(text):
-            return repo_rel(root, p)
+        for exp in pats:
+            if exp.search(text):
+                return repo_rel(root, p)
     return ""
 
 

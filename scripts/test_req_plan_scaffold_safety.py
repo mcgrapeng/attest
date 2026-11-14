@@ -10,6 +10,7 @@
 """
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -120,6 +121,51 @@ def js_string_arg(line: str, marker: str) -> tuple[str | None, str]:
         buf.append(c)
         j += 1
     return None, ""
+
+
+def test_symbol_exists_across_languages() -> None:
+    print("\n「新建能力」的全仓同名检查要认 Python/Rust/Go")
+    # 之前只认 TS 的 export ⇒ Python 仓里声明一个已存在的函数名不会被报出来
+    d = mkdtemp()
+    (d / "src" / "pkg").mkdir(parents=True)
+    (d / "package.json").write_text(json.dumps({"scripts": {"test": "pytest"}}),
+                                    encoding="utf-8")
+    (d / "src" / "pkg" / "util.py").write_text(
+        "def existing_helper(a):\n    return a + 1\n", encoding="utf-8")
+    (d / "src" / "pkg" / "feature.py").write_text(
+        "def other(a):\n    return a\n", encoding="utf-8")
+    plan = d / "docs" / "plan.md"
+    plan.parent.mkdir(parents=True, exist_ok=True)
+    plan.write_text("""# 测试计划：dup
+
+## 不变式清单
+
+| # | 不变式 | 钉在哪 |
+| --- | --- | --- |
+| I1 | 复用一个已存在的函数 | src/pkg/feature.py::test_other |
+
+## 覆盖矩阵
+
+| 流程 | 落点 |
+| --- | --- |
+| 主流程 | src/pkg/feature.py::test_other |
+
+## 新建能力
+
+| 能力 | 为什么不复用现成的 | 调用点 |
+| --- | --- | --- |
+| existing_helper | （没写） | 1 |
+""", encoding="utf-8")
+    (d / "src" / "pkg" / "test_feature.py").write_text(
+        "def test_other():\n    assert True\n", encoding="utf-8")
+    from req_plan import check_plan, parse_plan, scan_repo  # noqa: E402
+    res = check_plan(parse_plan(plan), scan_repo(d))
+    hits = [f for f in res
+            if "existing_helper" in (f.item + " " + (f.detail or "")
+                                     + " " + (f.fix or ""))]
+    expect(bool(hits), "Python 仓里已存在的函数名被认出来了")
+    expect(any(f.level == "error" for f in hits),
+           "全仓已存在同名实现 ⇒ 报红（不是只提醒）")
 
 
 def main() -> int:
@@ -377,6 +423,8 @@ def main() -> int:
     expect("里不存在: '用例甲'" not in rc.stdout,
            "越界的钉没被读进用例名（说明没去读它）")
     expect("已生成" not in rc.stdout, "check 不写文件")
+
+    test_symbol_exists_across_languages()
 
     print()
     for d in TMPDIRS:

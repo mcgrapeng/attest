@@ -66,6 +66,8 @@ jobs:
         run: bash fixtures/run_fixtures.sh
       - name: 跑 evals（6 条「用户这么说 ⇒ 工具这样回」）
         run: python3 evals/run_evals.py
+      - name: 打包冒烟（.skill 产物必须能构建）
+        run: python3 package.py --check
 
   # ------------------------------------------------------------------
   # 打包冒烟：把 skill 装进临时目录，跑通四条命令里最关键的三条。

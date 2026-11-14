@@ -12,3 +12,6 @@ __pycache__/
 
 # OMX 运行态（机器本地）：目标账本与 handoff 状态不进包
 .omx/
+
+# 打包产物
+dist/

@@ -54,8 +54,8 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> \
 
 任何一项「不通过」⇒ 结论里算**阻塞项**，退出码 1。
 
-**实测的前提**：用项目自己声明的 test 命令（lumen 用 tsx，路径别名要它才解析）。
-裸 `node --test` 会让一堆测试假挂 —— 那测的是假象。
+**实测的前提**：用项目自己声明的 test 命令（有些项目用 tsx 这类 runner，
+路径别名要它才解析）。裸 `node --test` 会让一堆测试假挂 —— 那测的是假象。
 
 ## 存储类模块：数据流自身要审出来
 
@@ -125,8 +125,8 @@ node 的 `--experimental-test-coverage` 在**用了 `mock.module()` 的项目**�
 **优先级：仓库自己的闸门 > 通用并集**。
 
 - 仓库有覆盖率闸门（脚本名在白名单里、命令含 cov、提到该模块）⇒ **驱动它**，判定看它的
-  退出码 —— **门槛归仓库所有**。通用阈值在这里是错的：lumen 的 service 闸阈值是
-  行 49，通用阈值（行 80）会把仓库明确允许的文件判红。
+  退出码 —— **门槛归仓库所有**。通用阈值在这里是错的：有的仓库把行覆盖 49% 的
+  文件明确列为合格，通用阈值（行 80）会把这些文件判红。
   仓库拆闸的原因也写进了它的 AGENTS.md：每闸只测自己那批、只在该批里加载，
   数字才可复现 —— **别拿通用阈值去覆盖仓库的口径**。
 - 仓库**没有**闸门 ⇒ 判「未实测：仓库没有覆盖率闸门，缺少判据」，**默认不阻塞**。
@@ -161,9 +161,10 @@ node 的 `--experimental-test-coverage` 在**用了 `mock.module()` 的项目**�
 | 生产租户 | **fail** —— 阻塞交付 |
 | 测试租户（名字像 itest-/memtest-/mock-/eval-…，或 `--test-tenant` 声明的） | warn —— 信息，不是阻塞 |
 
-实测（lumen agent-memory）：生产租户 `default` ✅ 一致；`memtest-r5-skip` 的 50
-行没向量是**直接 DB insert** 的配额占位，`itest-r4-contract` 的 4 行是**注入
-镜像失败**造出来的 —— 两个都不是缺陷。按租户口径判之后，这条判据才准。
+实测（一个向量记忆模块）：生产租户 ✅ 一致；两个测试租户分别有 50 行和 4 行
+没有向量 —— 前者是测试用例**直接 DB insert** 的配额占位，后者是**注入镜像失败**
+造出来的 —— 两个都不是缺陷。按租户口径判之后，这条判据才准。
+完整案例见 [examples/cross-store-reconciliation.md](examples/cross-store-reconciliation.md)。
 
 ## 「跑不起来」和「不达标」必须分开
 
@@ -196,7 +197,7 @@ pytest 的 `ERROR`（fixture/环境没就绪，例：连不上 PG）与 `FAILED`
 ## 测试要自己收场
 
 **测试往共享库里造的数据不清理 ⇒ 下一个测试看到的是别人的残留。**
-（agent-memory 的 `memtest-r5-skip` 就是这个形状：50 行配额占位留在库里。）
+（一个向量记忆模块的测试租户就是这个形状：50 行配额占位留在库里。）
 
 判据：测试文件有写库动作，却没有清场动作（收场钩子里没有 delete/truncate/
 drop）⇒ 报出来。**只在 `before` 钩子清理**只能保证"不跨轮累积"，跑完仍留
@@ -391,8 +392,8 @@ python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <项目根>
 - **没有跨存储就删掉整节**（留一张空表会被判红）。
 
 校对要覆盖三件事（对账/修复路径必须被测到）：掉的数据能补、重复的不产生、
-跨租户的不误删。项目里已有对账机制就复用它（lumen：`service/scripts/memory-data-reconcile.ts`），
-别另写一套。
+跨租户的不误删。项目里已有对账机制就复用它，别另写一套
+（一个真实案例见 [examples/cross-store-reconciliation.md](examples/cross-store-reconciliation.md)）。
 
 ### 7. 约束：不引入中间件
 

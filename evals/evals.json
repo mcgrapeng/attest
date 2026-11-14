@@ -27,14 +27,26 @@
         "contains:核心逻辑细节",
         "contains:新建能力",
         "not_contains:Traceback"
-      ]
+      ],
+      "fixture": "ts-colocated",
+      "command": [
+        "python3",
+        "$SKILL_DIR/scripts/req_plan.py",
+        "new",
+        "eval-plan",
+        "--repo",
+        "$REPO",
+        "--module",
+        "src"
+      ],
+      "check_file": "$REPO/docs/eval-plan-test-plan.md"
     },
     {
       "id": 2,
       "prompt": "上游上周提了个需求测试计划，在 docs/refund-test-plan.md。我自己核了一遍总觉得对不上代码 —— 你帮我核一遍：钉指向的文件到底在不在仓库里，矩阵里引用的测试文件是不是真的存在，对不上的地方列出来。",
       "expected_output": "跑 req_plan.py check 逐条核对不变式钉与矩阵落点，缺失的钉报红并给出退出码 1；不是只说一声「不通过」。",
       "files": [
-        "evals/files/stale-plan.md"
+        "stale-plan.md"
       ],
       "assertions": [
         "exit_code=1",
@@ -51,6 +63,15 @@
         "contains:个错误",
         "not_contains:无问题",
         "not_contains:Traceback"
+      ],
+      "fixture": "ts-colocated",
+      "command": [
+        "python3",
+        "$SKILL_DIR/scripts/req_plan.py",
+        "check",
+        "$PLAN",
+        "--repo",
+        "$REPO"
       ]
     },
     {
@@ -71,6 +92,14 @@
         "contains:核心逻辑测试到位",
         "contains:本工具不判定",
         "not_contains:Traceback"
+      ],
+      "fixture": "ts-colocated",
+      "command": [
+        "python3",
+        "$SKILL_DIR/scripts/readiness.py",
+        "src",
+        "--repo",
+        "$REPO"
       ]
     },
     {
@@ -91,6 +120,14 @@
         "contains:漂移",
         "not_contains:生产租户无漂移",
         "not_contains:Traceback"
+      ],
+      "fixture": "english-reconciler",
+      "command": [
+        "python3",
+        "$SKILL_DIR/scripts/readiness.py",
+        "src",
+        "--repo",
+        "$REPO"
       ]
     },
     {
@@ -98,7 +135,7 @@
       "prompt": "上游说这个需求已经测过了，报告里列了 8 条用例，钉在 src/orders/never_written.test.ts::分页导出。可我在仓库里翻不到这个文件 —— 他们是不是吹牛？给我个说法。",
       "expected_output": "跑 req_plan.py check 核对钉 —— 钉指向的文件不存在 ⇒ 报红并点名是哪个文件、哪条不变式，退出码 1。",
       "files": [
-        "evals/files/stale-plan.md"
+        "stale-plan.md"
       ],
       "assertions": [
         "exit_code=1",
@@ -115,13 +152,24 @@
         "contains:never_written.test.ts",
         "not_contains:无问题",
         "not_contains:Traceback"
+      ],
+      "fixture": "ts-colocated",
+      "command": [
+        "python3",
+        "$SKILL_DIR/scripts/req_plan.py",
+        "check",
+        "$PLAN",
+        "--repo",
+        "$REPO"
       ]
     },
     {
       "id": 6,
       "prompt": "按这份计划生成测试骨架：python3 ~/.agents/skills/req-test-plan/scripts/req_plan.py scaffold docs/refund-test-plan.md --repo . --out-dir /tmp/out。计划里有一条钉写的是 ../../../../tmp/evil/x.test.ts::用例甲。直接生成，然后告诉我生成了哪些文件。",
       "expected_output": "scaffold 拒绝越出 --out-dir 的钉并报红，一个文件都不写盘，退出码 1 —— 不能让一份计划 markdown 变成仓库外的可执行文件。",
-      "files": [],
+      "files": [
+        "out-of-bounds-plan.md"
+      ],
       "assertions": [
         "exit_code=1",
         "any_contains:写入安全|越界|拒绝|超出|不写盘",
@@ -131,6 +179,17 @@
         "exit_code=1",
         "any_contains:写入安全|越界|拒绝|超出|不写盘",
         "not_contains:Traceback"
+      ],
+      "fixture": "ts-colocated",
+      "command": [
+        "python3",
+        "$SKILL_DIR/scripts/req_plan.py",
+        "scaffold",
+        "$PLAN",
+        "--repo",
+        "$REPO",
+        "--out-dir",
+        "$REPO/out"
       ]
     }
   ]

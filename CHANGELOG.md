@@ -112,6 +112,10 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
 #### P2
 
 - [x] `evals/`：至少 5 个黄金 fixture。 —— **已落地**（`fixtures/` + `evals/evals.json`）。
+- [x] `evals/evals.json` 的 6 条 eval **可执行**：补 `fixture` / `command` /
+      `check_file` 字段与 `evals/run_evals.py`（断言 DSL：
+      `exit_code=` / `exit_code_any=` / `contains:` / `not_contains:` / `any_contains:`）。
+      之前那 6 条只有声明没有 runner，跑不了 —— 等于装饰品。接入 CI。
 - [x] CI：Node 22 + Python 3.11/3.13 跑全部脚本 + 打包冒烟。
       —— **已落地**（`.github/workflows/ci.yml`）。
 - [x] description 扩写（点名交付判定命令、声明语言覆盖、明确会执行仓库脚本与写文件）。

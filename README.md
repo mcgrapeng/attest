@@ -217,6 +217,17 @@ CI 里会装齐并跑全部 5 个。
 覆盖：开工前出计划、已有计划核一遍、模块能不能交付、跨存储数据一致、
 "声称覆盖了但文件不存在"、以及 `scaffold` 的写入越界。
 
+每条 eval 声明用哪个黄金 fixture 当被测仓库、要跑什么命令、断言看命令输出还是
+产物文件。**跑法**：
+
+```bash
+python3 evals/run_evals.py            # 跑全部
+python3 evals/run_evals.py --only 3   # 只跑某一条
+python3 evals/run_evals.py --json     # 机器可读
+```
+
+CI 里会跑。退出码：0 全部通过 / 1 有断言不通过。
+
 ## License
 
 MIT

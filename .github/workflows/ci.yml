@@ -64,6 +64,8 @@ jobs:
           done
       - name: 跑黄金 fixture（5 个期望判定）
         run: bash fixtures/run_fixtures.sh
+      - name: 跑 evals（6 条「用户这么说 ⇒ 工具这样回」）
+        run: python3 evals/run_evals.py
 
   # ------------------------------------------------------------------
   # 打包冒烟：把 skill 装进临时目录，跑通四条命令里最关键的三条。

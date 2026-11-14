@@ -6,3 +6,6 @@ __pycache__/
 # OMX 运行态（机器本地）
 .omx/state/
 .omx/hud/
+.omx-state-locks/
+.omx-state-locks.identity.json
+.omx/tmux-hook.json

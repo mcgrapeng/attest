@@ -2599,9 +2599,24 @@ def check_requirement(m: Module, plan_path: str | None) -> Check:
         return Check("requirement", "需求覆盖到位", "fail",
                      f"{len(missing)}/{len(plan.invariants)} 条不变式没落到真实用例",
                      missing[:8], "写用例，或把不变式改到真实落点上")
+    ev = [f"{i}: {d[:40]}" for i, d, _ in plan.invariants[:6]]
+    if not plan.reviewed:
+        # 钉都实了 ≠ 理解对了。理解对不对本工具判不了（那是人的判断），
+        # 但"没人签过字"是一条必须出现在报告里的事实 —— 不能让一句
+        # 「✓ 需求覆盖到位」把它盖过去。降成 warn：不阻塞，但别当没看见。
+        ev.append(plan.review_note or "计划未经人工确认")
+        return Check("requirement", "需求覆盖到位", "warn",
+                     f"{len(plan.invariants)} 条不变式都钉在真实用例上，"
+                     f"但**计划未经人工确认** ⇒ 需求是否被正确理解未获保证"
+                     f"（本工具不判这一项，只能由人签）",
+                     ev,
+                     "让读需求的人确认一遍不变式清单与覆盖矩阵，填上计划的"
+                     "「人工确认」节",
+                     evidence_kind="executed")
     return Check("requirement", "需求覆盖到位", "pass",
-                 f"{len(plan.invariants)} 条不变式都有真实用例",
-                 [f"{i}: {d[:40]}" for i, d, _ in plan.invariants[:6]])
+                 f"{len(plan.invariants)} 条不变式都有真实用例"
+                 + "；计划已有人工确认",
+                 ev, evidence_kind="executed")
 
 
 def _module_exports_any(m: Module) -> dict[str, str]:

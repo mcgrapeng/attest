@@ -308,6 +308,47 @@ def test_dead_code_removed() -> None:
     expect("_pin_outside_repo" in src, "有钉越界的校验函数")
 
 
+
+def test_plan_review_gate() -> None:
+    print("\n计划的「人工确认」：钉得实 ≠ 理解得对")
+    d = mkdtemp()
+    write(d / "package.json", json.dumps({"scripts": {"test": "node --test"}}))
+    write(d / "src" / "calc.ts", "export const add = (a, b) => a + b;\n")
+    write(d / "src" / "calc.test.ts",
+          "import test from 'node:test';\n"
+          "import assert from 'node:assert';\n"
+          "test('加法', () => { assert.equal(add(1, 2), 3); });\n")
+    plan_body = ("# 测试计划：加法\n\n"
+                 "## 不变式清单\n\n"
+                 "| # | 不变式 | 钉在哪 |\n"
+                 "| --- | --- | --- |\n"
+                 "| I1 | 加法返回两数之和 | src/calc.test.ts::加法 |\n\n"
+                 "## 覆盖矩阵\n\n"
+                 "| 流程 | 落点 |\n"
+                 "| --- | --- |\n"
+                 "| 主流程 | src/calc.test.ts::加法 |\n\n"
+                 "## 人工确认\n\n"
+                 "| 审什么 | 谁 | 什么时候 | 结论 |\n"
+                 "| --- | --- | --- | --- |\n"
+                 "| 不变式清单与需求一致 | {who} | {when} | {verdict} |\n")
+    plan = write(d / "docs" / "plan.md",
+                 plan_body.format(who="<待填：谁读的>", when="<待填：日期>",
+                                   verdict="<待填：一致 / 有出入>"))
+    r = run("src", "--repo", str(d), "--plan", str(plan))
+    expect("计划未经人工确认" in r.stdout,
+           "没人工确认时明说（不能被一句「✓ 需求覆盖到位」盖过去）")
+    expect("✓ 需求覆盖到位" not in r.stdout,
+           "没人工确认时不当成完全通过")
+    expect("需求是否被正确理解" in r.stdout,
+           "说清这一项是人的判断，工具不判")
+
+    write(d / "docs" / "plan.md",
+          plan_body.format(who="张三", when="2026-11-15", verdict="一致"))
+    r2 = run("src", "--repo", str(d), "--plan", str(plan))
+    expect("✓ 需求覆盖到位" in r2.stdout, "人工确认填了才给 ✓")
+    expect("计划已有人工确认" in r2.stdout, "确认过就写明")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -318,6 +359,7 @@ def main() -> int:
     test_r4_evidence_kinds()
     test_oracle_criterion_wired()
     test_selfcheck_wired()
+    test_plan_review_gate()
     test_defect_drift_header_not_counted()
     test_defect_out_of_bounds_pin_not_read()
     test_defect_python_colocated_tests_counted()

@@ -496,6 +496,43 @@ class Plan:
     unfilled: set[str] = field(default_factory=set)
     detail_rows: list[list[str]] = field(default_factory=list)
     newcap_rows: list[list[str]] = field(default_factory=list)
+    # 「人工确认」节：谁读过这份计划、什么时候、对不对。需求理解对不对本工具判不了，
+    # 但"没人签过字"是一条必须出现在报告里的事实。
+    reviewed: bool = False
+    review_note: str = ""
+
+
+
+def _parse_review_section(plan: Plan) -> None:
+    """读「人工确认」节：填了（谁 + 什么时候）才算有人读过。"""
+    lines = plan.text.splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        if ln.strip().startswith("## ") and ("人工确认" in ln
+                                            or "人工复核" in ln
+                                            or "人工审" in ln):
+            start = i
+            break
+    if start is None:
+        plan.reviewed = False
+        plan.review_note = "计划里没有「人工确认」节 ⇒ 没人对需求理解签过字"
+        return
+    body = []
+    for ln in lines[start + 1:]:
+        if ln.strip().startswith("## "):
+            break
+        body.append(ln)
+    text = "\n".join(body)
+    if not text.strip():
+        plan.reviewed = False
+        plan.review_note = "「人工确认」节是空的 ⇒ 没人对需求理解签过字"
+        return
+    if "<待填" in text or "待填" in text:
+        plan.reviewed = False
+        plan.review_note = "「人工确认」节还是模板占位 ⇒ 没人对需求理解签过字"
+        return
+    plan.reviewed = True
+    plan.review_note = "计划已有人工确认（需求理解由人负责，不是本工具判的）"
 
 
 def parse_plan(path: Path) -> Plan:
@@ -683,6 +720,7 @@ def parse_plan(path: Path) -> Plan:
             plan.newcap_rows.append(cells)
         if "constraint" in row_kinds:
             plan.constraint_text += " ".join(cells) + "\n"
+    _parse_review_section(plan)
     return plan
 
 
@@ -1683,6 +1721,16 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
                     f"声称复用的文件不存在: {fpath}",
                     "别引用不存在的东西",
                 ))
+
+    # 「人工确认」没填 ⇒ 提醒（不报红）：需求理解对不对本工具判不了，
+    # 但"没人读过这份计划"是必须让人知道的事。
+    if not plan.reviewed:
+        fs.append(Finding(
+            "warn", "人工确认",
+            plan.review_note or "计划未经人工确认",
+            "让读需求的人确认一遍不变式清单与覆盖矩阵，并填上「人工确认」节 —— "
+            "钉得实不代表理解得对，那一环只能由人签",
+        ))
     return fs
 
 
@@ -1755,6 +1803,19 @@ Python 仓读 Makefile 目标与 tox.ini 环境；别自己编）：
 ## 本需求明确不做的事
 
 <待填：这个需求明确不做的事>
+
+## 人工确认
+
+**这一节是给人用的。** 需求理解对不对，本工具判不了（那是人的判断）；
+但"这份计划有没有被人读过并确认过"必须留下痕迹 —— 否则报告里的"需求覆盖到位 ✓"
+只说明不变式都钉上了，不说明不变式是对的。
+
+| 审什么 | 谁 | 什么时候 | 结论 |
+| --- | --- | --- | --- |
+| 不变式清单与需求一致 | <待填：谁读的> | <待填：日期> | <待填：一致 / 有出入（改哪条）> |
+| 覆盖矩阵覆盖了全部关键流程 | <待填：谁读的> | <待填：日期> | <待填：覆盖到 / 缺哪条> |
+
+没填这一节 ⇒ `check` 会提醒，`readiness` 的报告会明说"计划未经人工确认"。
 """
 
 

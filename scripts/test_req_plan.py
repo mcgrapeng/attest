@@ -209,6 +209,30 @@ def main() -> int:
     expect("## 数据一致性" in mp, "双存储模块有「数据一致性」节")
     expect("## 约束：不引入中间件" in mp, "双存储模块有「约束」节")
 
+    print("\nPython 仓的车道也要认（Makefile 目标 / tox.ini 环境）")
+    py = tmp / "pyrepo"
+    (py / "src" / "pkg").mkdir(parents=True)
+    (py / "pyproject.toml").write_text("[project]\nname='pkg'\n", encoding="utf-8")
+    (py / "src" / "pkg" / "__init__.py").write_text("", encoding="utf-8")
+    (py / "Makefile").write_text(
+        "coverage:\n\tpytest --cov=pkg\n\n"
+        "integration-store:\n\tpytest -m integration src/pkg\n", encoding="utf-8")
+    lanes = lane_scripts(scan_repo(py))
+    expect(any("coverage" in k for k in lanes),
+           "Makefile 的 coverage 目标被认成车道（之前只读 package.json ⇒ Python 仓说"
+           "『项目里可能还没有测试』）")
+    expect(any("integration" in k for k in lanes),
+           "Makefile 的 integration 目标被认成车道")
+
+    print("\nPython 仓的 tox.ini 环境也要认")
+    (py / "tox.ini").write_text(
+        "[testenv]\ncommands = pytest\n\n"
+        "[testenv:integration]\ncommands = pytest -m integration\n", encoding="utf-8")
+    lanes2 = lane_scripts(scan_repo(py))
+    expect(any(k.startswith("tox:") or "#tox:" in k for k in lanes2),
+           "tox.ini 的 testenv 被认成车道")
+
+
     shutil.rmtree(tmp, ignore_errors=True)
     print()
     if FAILURES:

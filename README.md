@@ -138,11 +138,19 @@ python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项�
 
 ## 语言支持
 
-| | 计划生成 | 覆盖率实测 | 导出引用判据 | 跨存储对账 |
-| --- | --- | --- | --- | --- |
-| TypeScript / JavaScript | ✅ | ✅ node / vitest / jest | ✅ | ✅ |
-| Python | ✅ | ✅ pytest-cov | ✅ | ⚠️ 对账脚本只从 `package.json` 找 |
-| Rust / Go | 部分（复用侦察） | — 识别不到模块 | — | — |
+| | 计划生成 | 覆盖率实测 | 导出引用判据 | 跨存储对账 | 真后端 itest 车道 |
+| --- | --- | --- | --- | --- | --- |
+| TypeScript / JavaScript | ✅ | ✅ node / vitest / jest | ✅ | ✅ | ✅ |
+| Python | ✅ | ✅ pytest-cov | ✅ 模块级 `def`/`class` | ✅ | ✅ |
+| Rust / Go | 部分（复用侦察） | — 识别不到模块 | — | — | — |
+
+**车道与对账脚本怎么找**：JS 仓从 `package.json` 的 scripts 认；Python 仓从
+`Makefile` 目标与 `tox.ini` 环境认（例 `make coverage`、`make integration-store`、
+`make reconcile-store`、`[testenv:integration]`）。两条路都要满足两点：
+
+1. 目标名里带关键词（`cov` / `reconcile` / `integration` / `itest`）；
+2. 目标体或命令里提到**这个模块**（路径或表名）—— 工具要确认这是该模块的车道，
+   不是仓库里别人的。
 
 Rust / Go 模块上 `readiness.py` **退出码 2** 并说清"当前只实现了 TS/JS/Python"，
 不给假结论 —— 不是"支持了但没数据"，是"认不出来就说认不出来"。

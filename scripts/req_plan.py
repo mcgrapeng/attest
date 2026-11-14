@@ -316,6 +316,44 @@ def _walk(root: Path, exts: set[str], max_files: int = 40000) -> list[Path]:
     return out
 
 
+def _python_lanes(root: Path) -> dict[str, str]:
+    """Python 仓自己声明的车道：Makefile 目标 / tox.ini 环境。
+
+    判定侧（readiness.py）已经认这两条路，计划侧也得认 —— 否则同一个仓库，
+    判定说"有闸门"，计划却说"项目里可能还没有测试"。
+    """
+    out: dict[str, str] = {}
+    for mk in sorted(root.rglob("Makefile")):
+        if any(p in ("node_modules", ".git", ".venv", "venv") for p in mk.parts):
+            continue
+        try:
+            text = mk.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for mm in re.finditer(r"^([A-Za-z0-9_.-]+)\s*:(?!=)", text, re.M):
+            target = mm.group(1)
+            if not _is_lane(target):
+                continue
+            key = f"{mk.parent.relative_to(root)}#make:{target}" \
+                if mk.parent != root else f"make:{target}"
+            out[key] = f"make {target}"
+    for tox in sorted(root.rglob("tox.ini")):
+        if any(p in ("node_modules", ".git", ".venv", "venv") for p in tox.parts):
+            continue
+        try:
+            text = tox.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        for mm in re.finditer(r"^\[testenv:([A-Za-z0-9_.-]+)\]", text, re.M):
+            env = mm.group(1)
+            if not _is_lane(env):
+                continue
+            key = f"{tox.parent.relative_to(root)}#tox:{env}" \
+                if tox.parent != root else f"tox:{env}"
+            out[key] = f"tox -e {env}"
+    return out
+
+
 def scan_repo(root: Path) -> Repo:
     """收集项目自己的 manifest 与测试车道。
 
@@ -341,6 +379,8 @@ def scan_repo(root: Path) -> Repo:
                 continue
             key = f"{repo.rel(pj.parent)}#{name}" if repo.rel(pj.parent) != "." else name
             repo.scripts[key] = cmd
+    # Python 仓没有 package.json ⇒ 车道在 Makefile / tox.ini 里（判定侧也认这两条路）
+    repo.scripts.update(_python_lanes(root))
     return repo
 
 
@@ -1678,7 +1718,8 @@ TEMPLATE = """# 测试计划：{feature}
 
 ## 测试车道
 
-本项目可用的车道（从 package.json 读出来的，别自己编）：
+本项目可用的车道（从项目自己声明的地方读出来的：JS 仓读 package.json，
+Python 仓读 Makefile 目标与 tox.ini 环境；别自己编）：
 
 {lanes_block}
 

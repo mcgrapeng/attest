@@ -199,6 +199,18 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
 
 回归：`scripts/test_test_strength.py`（31 条新断言）。
 
+### 文档：README 重做
+
+- **默认语言改成英文**：`README.md` 是英文（GitHub 默认入口），中文移到
+  `README.zh-CN.md`（GitHub 会自动出语言切换）。原先的 `README.en.md` 删掉。
+  两份章节一一对应（14 节），内容同步。
+- **加标识与头图**：新增 `assets/logo.svg`（几何印章标记：teal 圆角方块 + 浅色对勾 +
+  内嵌细边），README 顶部改成居中头图 —— 标记 / 标题 / 一句话定位 / badge 行。
+- **加「它怎么运作」流程图**：ASCII 管线图，一屏看清
+  需求 → 计划 → readiness.py → 证据清单。
+- 排版按 `tech-doc-style-chinese` / `md-table-formatter` / `humanizer` 过了一遍：
+  破折号密度降到与旧版持平、表格列数一致、围栏配平、内部链接与锚点全部有效。
+
 ### 已知遗留（发布时仍开放）
 
 - **仍然开放**：

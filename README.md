@@ -1,78 +1,101 @@
-[![CI](https://github.com/mcgrapeng/attest/actions/workflows/ci.yml/badge.svg)](https://github.com/mcgrapeng/attest/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![Python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/)
-[![Stars](https://img.shields.io/github/stars/mcgrapeng/attest?style=social)](https://github.com/mcgrapeng/attest/stargazers)
+<div align="center">
+  <img src="assets/logo.svg" width="96" height="96" alt="attest">
+  <h1>attest</h1>
+  <p><strong>Turns delivery preconditions into a machine-checkable, auditable evidence list.</strong></p>
+  <p><em>It is not a "can we ship" referee. It produces evidence; the decision stays yours.</em></p>
+  <p>
+    <a href="https://github.com/mcgrapeng/attest/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/mcgrapeng/attest/ci.yml?branch=main&style=flat-square&label=CI"></a>&nbsp;&nbsp;
+    <a href="https://github.com/mcgrapeng/attest/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0F766E?style=flat-square"></a>&nbsp;&nbsp;
+    <a href="https://github.com/mcgrapeng/attest"><img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square"></a>&nbsp;&nbsp;
+    <a href="https://github.com/mcgrapeng/attest"><img alt="Stars" src="https://img.shields.io/github/stars/mcgrapeng/attest?style=flat-square&label=stars&color=0F766E"></a>&nbsp;&nbsp;
+    <a href="https://github.com/mcgrapeng/attest/blob/main/README.zh-CN.md"><img alt="中文" src="https://img.shields.io/badge/中文-0F766E?style=flat-square"></a>
+  </p>
+</div>
 
-# attest
+## 60 seconds
 
-中文 | [English](README.en.md)
-
-**把交付前提变成可机读、可核对、可审计的证据清单。**
-
-接一条需求，产出一份**钉得住**的测试计划：每条不变式钉在一个真实存在的用例上，覆盖矩阵在 `check` 时逐条核对。再**实测**这个模块的交付前提：哪些已被证明（已实测）、哪些只是读源码得出的信号（静态信号）、哪些根本没测到（未实测）、哪些它**根本不判**。
-
-**它不是「能不能交付」的裁判。** 它给证据，决策归人。
-
-只依赖 Python 3.11+ 标准库，无第三方依赖。
-
-## 60 秒上手
+The skill is pure Python 3.11+ standard library — there is nothing to install beyond it.
 
 ```bash
-python3 install.py                 # 装进四个 agent 的 skills 目录
-python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项目根>
+python3 install.py                 # install into four agents' skills directories
+python3 ~/.agents/skills/attest/scripts/readiness.py <module path> --repo <repo root>
 ```
 
-第二条命令会实跑目标仓库自己的测试与覆盖率闸门、查 PG catalog、驱动仓库自己的对账脚本，然后给你一份分层的证据清单。**它不会替你下「能不能交付」的结论。**
+The second command runs the target repo's own tests and coverage gate, queries
+the PostgreSQL catalog, drives the repo's own reconciliation script, and hands
+you a layered evidence list. **It does not decide for you whether this can
+ship.**
 
-装到别的 agent、手工安装、Windows 注意事项见[「装」](#装)。
+Other agents, manual install and Windows notes: see [Install](#install).
 
-## 它测什么：14 条判据
+## How it works
 
-工具的输出正文是中文，下表第一列是它**实际打印的判据名**（不是改写），`key` 是 `--json` 里的机器可读标识。
+```
+  requirement
+      │
+      ▼
+  plan ─────── every invariant pinned to a test case that really exists
+      │
+      ▼
+  readiness.py ──▶ runs the repo's own tests · coverage gate · PG catalog · reconcile script
+      │
+      ▼
+  evidence list ─▶ measured │ static signal │ not measured │ not judged
+```
 
-**测测试本身（5 条）**
+## What it measures: 14 criteria
 
-| 判据 | key | 证据类别 | 怎么测 |
+The tool's own output is in Chinese; the first column below is the criterion
+name it **actually prints** (not a rename), and `key` is the machine-readable
+identifier in `--json`.
+
+**The tests themselves (5)**
+
+| Criterion | key | Evidence kind | How it is measured |
 | --- | --- | --- | --- |
-| 测试全绿 | `tests-green` | 实测 | 用**项目自己的** test 命令跑模块测试，列出失败用例（**只认断言失败**；setup 报错 = 环境没就绪 ⇒ 未实测） |
-| 核心逻辑测试到位 | `coverage` | 实测 | **驱动仓库自己的覆盖率闸门**；没闸门才用 `--min-line-coverage` 显式指定（默认不阻塞） |
-| 测试能发现缺陷 | `test-strength` | 实测 | 把源码改坏再跑测试：测试红了 = 杀得死，测试还绿 = **这套测试发现不了这类缺陷**（`--mutation-check`，默认不跑 ⇒ 默认未实测） |
-| 测试卫生（不留残留、不靠 sleep） | `hygiene` | 静态 | 读测试源码：固定等待（flaky 源）与不清理的写库测试（残留源） |
-| 导出的逻辑都有测试 | `uncovered-exports` | 静态 | 读测试源码找引用：导出的函数/类零引用 ⇒ 点名（TS 导出 / Python 公开 def·class / Rust `pub fn`） |
+| 测试全绿 (tests green) | `tests-green` | Measured | Runs the module's tests with the **repo's own** test command and lists the failures (**assertion failures only**; a setup error means the environment is not ready ⇒ not measured) |
+| 核心逻辑测试到位 (core logic is covered) | `coverage` | Measured | **Drives the repo's own coverage gate**; only without a gate do you use `--min-line-coverage` explicitly (and that does not block by default) |
+| 测试能发现缺陷 (the tests can find defects) | `test-strength` | Measured | Breaks the source on purpose and runs the tests: red ⇒ the mutant was killed, still green ⇒ **this suite cannot find this class of defect** (`--mutation-check`; off by default ⇒ not measured by default) |
+| 测试卫生（不留残留、不靠 sleep）(hygiene: no leftovers, no fixed sleeps) | `hygiene` | Static signal | Reads the test sources: fixed waits (a source of flakiness) and database writes without cleanup (a source of leftovers) |
+| 导出的逻辑都有测试 (every export is referenced by a test) | `uncovered-exports` | Static signal | Finds references in the test sources: exported functions/classes with zero references are named (TS exports / Python public def·class / Rust `pub fn`) |
 
-**测数据与存储（4 条）**
+**Data and stores (4)**
 
-| 判据 | key | 证据类别 | 怎么测 |
+| Criterion | key | Evidence kind | How it is measured |
 | --- | --- | --- | --- |
-| 表结构基本合规 | `schema` | 实测 | 查 PG catalog：主键 / 唯一约束 / 租户列 / RLS+FORCE / 时间戳带时区（单租户、配置表、追加表有豁免） |
-| 向量集合属性自洽 | `vector-schema` | 静态 | 同一集合在不同调用点的维度/度量/分区键是否一致；分区键不能是向量字段；写入与检索的集合是不是同一个 |
-| 数据流一致（跨存储对账） | `data-flow` | 实测 | **实跑**模块自己的对账脚本，解析漂移；**按租户口径**判；字段级比对并入这条 |
-| 数据准确（基线对拍） | `data-accuracy` | 实测 | **实跑**项目的基线对拍脚本，解析指标差异 |
+| 表结构基本合规 (schema is basically compliant) | `schema` | Measured | Queries the PG catalog: primary key / unique constraint / tenant column / RLS+FORCE / timestamps with a timezone (single-tenant, config and append-only tables are exempt) |
+| 向量集合属性自洽 (vector collection attributes agree) | `vector-schema` | Static signal | Whether one collection's dimension/metric/partition key agree across call sites; the partition key must not be a vector field; whether the write and the read collection are the same one |
+| 数据流一致（跨存储对账）(data agrees across stores) | `data-flow` | Measured | **Runs** the module's own reconciliation script and parses the drift; judged **per tenant kind**; the field-level comparison is part of this one |
+| 数据准确（基线对拍）(data matches the baseline) | `data-accuracy` | Measured | **Runs** the repo's own baseline script and parses the metric differences |
 
-**测需求与设计（3 条）**
+**Requirements and design (3)**
 
-| 判据 | key | 证据类别 | 怎么测 |
+| Criterion | key | Evidence kind | How it is measured |
 | --- | --- | --- | --- |
-| 需求覆盖到位 | `requirement` | 静态 | 读计划与测试文件：每条不变式的钉 → 真实存在的用例（`--plan`）；计划未经人工确认时降为提醒级 |
-| 不过度抽象 | `extensibility` | 静态 | 导出符号全仓几乎没有调用点（规则之三） |
-| 没有重复造轮子 | `no-wheels` | 静态 | 全仓同名实现（跨域同名降为提醒） |
+| 需求覆盖到位 (requirement is covered) | `requirement` | Static signal | Reads the plan and the test files: every invariant's pin → a test case that really exists (`--plan`); an unreviewed plan downgrades this to advisory |
+| 不过度抽象 (not over-abstracted) | `extensibility` | Static signal | Exported symbols with almost no call sites anywhere in the repo (rule three) |
+| 没有重复造轮子 (no reinvented wheels) | `no-wheels` | Static signal | Same-named implementations across the repo (same name across domains downgraded to advisory) |
 
-**测依赖与断言（2 条）**
+**Dependencies and assertions (2)**
 
-| 判据 | key | 证据类别 | 怎么测 |
+| Criterion | key | Evidence kind | How it is measured |
 | --- | --- | --- | --- |
-| 使用主流开源库 | `open-source` | 静态 | 模块真实依赖清单（排除路径别名与标准库） |
-| 断言的期望值独立 | `oracle` | 静态 | 期望值取自被测对象自身的断言（恒真的同义反复单独点出）⇒ 提醒 |
+| 使用主流开源库 (uses mainstream open-source libraries) | `open-source` | Static signal | The module's real dependency list (path aliases and the standard library excluded) |
+| 断言的期望值独立 (assertion oracles are independent) | `oracle` | Static signal | Assertions whose expected value comes from the system under test (tautological self-comparisons are called out) ⇒ advisory |
 
-**证据类别说的是「这条判据靠什么得出」**（跑出来的 vs 读源码读出来的）。它同时决定报告里它落在哪一节：**静态信号永远不能单独支撑「通过」**。类别按**每次结果**标：需要数据库的判据连不上库时会标成「未实测」而不是「实测」。
+**The evidence kind says what a criterion is derived from** (something that ran
+vs something read out of the source). It also decides which section of the
+report the criterion lands in: **a static signal never supports a pass on its
+own.** The kind is assigned **per run**: a criterion that needs a database is
+marked "not measured" when there is no connection, never "measured".
 
-## 输出长什么样
+## What the output looks like
 
-下面是仓库自带 fixture（`fixtures/ts-colocated`）的真实输出：
+Real output from the repo's own fixture (`fixtures/ts-colocated`):
 
 ```
 交付就绪度分析 — src
-仓库：<项目根>
+仓库：<repo root>
 源码 1 文件（+0 个测试支撑） / 单测 1 个 / itest 0 个
 
 ── 已实测 ───────────────────────────────────────────
@@ -98,40 +121,57 @@ python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项�
 结论：0 项阻塞 · 1 项待人工确认 · 7 项无信号 · 1 项实测通过（另有 6 条静态信号）
 ```
 
-注意最后那段：**7 项无信号**，不是「7 项通过」。没测到的判据写「未实测」，不写「通过」。
+Look at the last line: **7 items with no signal**, not "7 passed". A criterion
+that was not measured is reported as "not measured".
 
-## 怎么用：四步
+## How to use it: four steps
 
-1. **出计划骨架**：`req_plan.py new` 扫目标模块已有的 helper 与项目自己的测试车道，生成不变式清单与覆盖矩阵的空表。开工时做。
-2. **填不变式与矩阵**：每条不变式写成一句**可证伪**的话（例「导出结果包含本月全部已完成订单，不多不少」），每行矩阵给出对应测试文件。这是人读的部分。
-3. **核对计划 vs 代码**：`req_plan.py check` 逐条核：钉指向的文件存在吗、钉的用例真在那个文件里吗。报红退出码 1。
-4. **判定就绪度**：`readiness.py` 实测模块的交付前提，产出上面那份证据清单。**这一步不需要计划也能跑**（只是「需求覆盖到位」会判未实测）。
+1. **Generate the plan skeleton**: `req_plan.py new` scans the target module
+   for existing helpers and for the repo's own test lanes, and writes empty
+   invariant and coverage-matrix tables. Do this when the work starts.
+2. **Fill in the invariants and the matrix**: every invariant is one
+   **falsifiable** sentence (e.g. "the export contains every completed order
+   of this month, no more and no less"), and every matrix row names the test
+   file that covers it. This is the part a human reads.
+3. **Check the plan against the code**: `req_plan.py check` verifies each pin:
+   does the file exist, does the test case really live in it. Exits 1 on errors.
+4. **Judge the readiness**: `readiness.py` measures the module's delivery
+   preconditions and produces the evidence list above. **This step works
+   without a plan too** (only "需求覆盖到位" is then not measured).
 
-第 2 步之后还可以 `req_plan.py scaffold` 按仓库自己的测试约定生成测试文件骨架。认不出约定时它**拒绝生成**并报红，不猜。
+After step 2, `req_plan.py scaffold` can generate test file skeletons that
+follow the repo's own conventions. When it cannot recognise them it
+**refuses to generate** and reports red instead of guessing.
 
-## 装
+## Install
 
 ```bash
-python3 install.py              # 跨平台（纯标准库，没有 bash 依赖）
-# 或者：bash install.sh         # 同一份实现的薄壳
+python3 install.py              # cross-platform (stdlib only, no bash needed)
+# or: bash install.sh           # a thin shell wrapper around the same code
 ```
 
-它把本仓库软链到 `~/.agents/skills/attest`，再软链到四个 agent 的 skills 目录：
+It symlinks this repository to `~/.agents/skills/attest`, then symlinks that
+entry into four agents' skills directories:
 
-| 目标 | 路径 |
+| Target | Path |
 | --- | --- |
-| 稳定入口 | `~/.agents/skills/attest` |
+| Stable entry point | `~/.agents/skills/attest` |
 | Claude Code | `~/.claude/skills/attest` |
 | Codex | `~/.codex/skills/attest` |
 | OpenCode | `~/.config/opencode/skills/attest` |
 
-已存在的同名软链会被覆盖（会打印提示）；目标位置若是**真实目录**则跳过，不删用户数据。装完会自检一次（`readiness.py --help` 能跑通）。
+An existing symlink with the same name is replaced (the script says so); if the
+target path is a **real directory** the script skips it and never deletes user
+data. It self-checks afterwards (`readiness.py --help` runs).
 
-卸载：`python3 install.py --uninstall`（或 `bash uninstall.sh`），只删软链。
+Uninstall with `python3 install.py --uninstall` (or `bash uninstall.sh`);
+it removes symlinks only.
 
-Windows 上 `os.symlink` 可能需要管理员或开发者模式；失败时会打印等价的手工命令，不删用户数据。
+On Windows `os.symlink` may need administrator rights or developer mode; on
+failure the script prints the equivalent manual commands and never deletes user
+data.
 
-手工装等价于：
+Doing it by hand is equivalent to:
 
 ```bash
 ln -s "$(pwd)" ~/.agents/skills/attest
@@ -140,152 +180,243 @@ ln -s ~/.agents/skills/attest ~/.codex/skills/attest
 ln -s ~/.agents/skills/attest ~/.config/opencode/skills/attest
 ```
 
-`~/.agents/skills/attest` 是稳定入口，`~/.agents/testkit/doctor.sh` 从这里跑回归套件。
+`~/.agents/skills/attest` is the stable entry point;
+`~/.agents/testkit/doctor.sh` runs the regression suite from there.
 
-## 打包（.skill）
+## Packaging (`.skill`)
 
 ```bash
 python3 package.py            # → dist/attest.skill
-python3 package.py --check    # 只看会打进包的内容，不写文件
+python3 package.py --check    # list what would be packaged, write nothing
 ```
 
-`.skill` 是社区通行的分发格式（一个 zip，第一层是 skill 目录）。打包脚本**自包含**，不依赖别的工具。排除：`.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` / 字节码，以及 `scripts/test_*.py`（回归套件是仓库的开发资产，不是 skill 的运行时）。
+`.skill` is the community's distribution format (a zip whose first level is the
+skill directory). The packager is **self-contained**: it needs no external
+tooling. Excluded: `.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` /
+bytecode, and `scripts/test_*.py` (the regression suite belongs to the repo, not
+to the skill's runtime).
 
-**打进包前会检查有没有字节码**，有就中止：字节码既泄漏作者环境，又让用户拿到不可读的产物。
+**It refuses to package bytecode.** Compiled artifacts leak the author's
+environment and give users an unreadable bundle.
 
-## 常用开关
+## Common switches
 
-`readiness.py` 的：
+Of `readiness.py`:
 
-| 开关 | 干什么 |
+| Switch | What it does |
 | --- | --- |
-| `--plan <文件>` | 要核对的需求测试计划（驱动「需求覆盖到位」这条） |
-| `--json` | 机器可读输出（checks + 结论计数） |
-| `--dry-run` | **只列出**将要执行的仓库脚本与命令，然后退出（不执行）。跑之前先看它要干什么 |
-| `--self-check` | 反向验证：往**临时副本**里注入一个已知缺陷，证明判据会翻红。不改你的仓库 |
-| `--self-check-deps` | 配合 `--self-check`：把 `node_modules` / `.venv` 软链进副本，让副本能真跑测试（这样才验得到**实测类**判据，不只是静态判据） |
-| `--mutation-check` | 测试强度：把源码改坏，看**测试会不会红**。要复制工作区并多次跑测试，很贵 ⇒ **默认不跑**（不跑时那条判据是「未实测」） |
-| `--include-itest` | 把真后端 itest 车道也算进来（要连 PG + 向量库，慢） |
-| `--test-tenant <名字或前缀>` | 声明测试租户，可重复 —— 测试租户的漂移是夹具状态，报 warn 不阻塞 |
-| `--test-tenant-prefix <前缀>` | 追加测试租户前缀（默认认 `itest-` `memtest-` `mock-` `eval-` 等） |
-| `--test-dir <路径>` | 额外的测试目录（`test/` `tests/` `spec/` 之外还有别处放测试时用），可重复 |
-| `--drift-pattern <正则>` | 对账输出里「漂移行」的样子（默认认 `漂移` / `❌` / `drift` / `mismatch`） |
-| `--table-header-pattern <正则>` | 对账输出里表头/分隔行的样子（默认认 `一致性` / `租户` / `tenant` / `---`） |
-| `--csv-pair a.csv=b.csv` | CSV 对照关系，可重复 —— 按声明配对，不做两两配对 |
-| `--tenant-col <列名>` | CSV 里租户列的名字（默认按 `tenant_id`/`tenant` 认） |
-| `--min-line-coverage` / `--min-branch-coverage` | 显式给覆盖率门槛。**默认不用通用阈值**（仓库没有闸门时判 skipped，不判 fail） |
-| `--database-url <连接串>` | PG 连接串（默认取环境里的 `POSTGRES_URL`） |
-| `--verbose` | 把测试命令的原始输出也打出来 |
+| `--plan <file>` | The requirement test plan to check the module against (drives the 需求覆盖到位 criterion) |
+| `--json` | Machine-readable output (checks + the verdict counters) |
+| `--dry-run` | **Only lists** the repo scripts and commands that would be executed, then exits (executes nothing). Look before you run |
+| `--self-check` | Reverse verification: inject a known defect into a **temporary copy** to prove the criteria turn red. Your repo is not touched |
+| `--self-check-deps` | With `--self-check`: **symlink** `node_modules` / `.venv` into the copy (no copying), so the copy can really run the tests and the measured criteria get verified too |
+| `--mutation-check` | Test strength: break the source and see whether **the tests turn red**. It copies the workspace and runs the tests many times, so it is expensive ⇒ **off by default** (without it that criterion is "not measured") |
+| `--include-itest` | Count the real-backend itest lane too (needs PostgreSQL + a vector store; slow) |
+| `--test-tenant <name or prefix>` | Declare a test tenant (repeatable) — drift in a test tenant is fixture state, so it does not block |
+| `--test-tenant-prefix <prefix>` | Add a test-tenant prefix (defaults recognise `itest-` `memtest-` `mock-` `eval-` …) |
+| `--test-dir <path>` | Extra test directory (for repos that keep tests outside `test/` `tests/` `spec/`); repeatable |
+| `--drift-pattern <regex>` | What a "drift row" looks like in the reconciliation output (default: `漂移` / `❌` / `drift` / `mismatch`) |
+| `--table-header-pattern <regex>` | What a header/separator row looks like in the reconciliation output (default: `一致性` / `租户` / `tenant` / `---`) |
+| `--csv-pair a.csv=b.csv` | CSV pairing, repeatable — pairs are declared, not matched pairwise |
+| `--tenant-col <name>` | Which CSV column holds the tenant |
+| `--min-line-coverage` / `--min-branch-coverage` | Explicit coverage thresholds. **No generic threshold by default** (no repo gate ⇒ judged `skipped`, not `fail`) |
+| `--database-url <url>` | PostgreSQL connection string (defaults to `POSTGRES_URL`) |
+| `--verbose` | Print the raw test output too |
 
-`req_plan.py` 的子命令与额外开关：`new` 接 `--out`（默认 `docs/<feature>-test-plan.md`）与 `--force`；`scaffold` 接 `--out-dir`（默认仓库根）、`--framework`（`node:test` / `vitest` / `jest` / `mocha`）与 `--force`；`check` 只接 `<计划文件>` 与 `--repo`。
+`req_plan.py` sub-commands and their extra flags: `new` takes `--out` (default
+`docs/<feature>-test-plan.md`) and `--force`; `scaffold` takes `--out-dir`
+(default: the repo root), `--framework` (`node:test` / `vitest` / `jest` /
+`mocha`) and `--force`; `check` takes only `<plan>` and `--repo`.
 
-## 判据是怎么测的
+## How the criteria are measured
 
-- **门槛归仓库所有**。仓库有覆盖率闸门就驱动它，判定看它的退出码；通用阈值只在仓库没有闸门时兜底（且默认不阻塞）。
-- **实测优先**。每条判据要么有实测证据，要么明说环境没就绪（缺什么条件），不拿静态推断冒充实测。
-- **跑不起来 ≠ 不达标**。setup 报错、缺产物、连不上中间件，都判 skipped 并说清缺什么。
-- **判交付看生产租户**。测试租户的漂移是夹具状态，报 warn 不阻塞。
-- **跨存储字段级比对**。同一个 id 在权威库与派生库里的同一个字段值对不上，点名 id 与字段。
-- **覆盖率高 ≠ 测试有劲**。覆盖率只说明代码被执行过，不说明断言会失败 ⇒ 另有「测试能发现缺陷」这条。
-- **环境没就绪 ≠ 杀死了**。变异点跑出的是环境错误而不是断言失败时，那个点判**未判定**，不算「测试发现了缺陷」。
-- **PG 侧与集合侧对称**。表结构有五条自有规则，向量集合也有对应的一条：同一集合的属性在调用点之间必须自洽。
+- **The threshold belongs to the repo**. If the repo has a coverage gate, the
+  tool drives it and judges by its exit code. Generic thresholds are only a
+  fallback when the repo has no gate, and they do not block by default.
+- **Measurement first**. Every criterion either has measured evidence or states
+  which precondition is missing. A static inference never passes as a
+  measurement.
+- **"Cannot run" is not "below the bar"**. Setup errors, missing artifacts and
+  unreachable middleware are judged `skipped`, with the missing condition named.
+- **Delivery is judged on the production tenant**. Drift in a test tenant is
+  fixture state: reported as a warning, never blocking.
+- **Field-level comparison across stores**. When the same id has different
+  values for the same field in the authoritative store and in a derived store,
+  the report names the id and the field.
+- **High coverage ≠ strong tests**. Coverage only says the code was executed,
+  not that an assertion would fail ⇒ there is a separate "the tests can find
+  defects" criterion.
+- **Environment not ready ≠ the mutant was killed**. When a mutated point
+  fails because of an environment error rather than an assertion failure, that
+  point is judged **not decided**, not "the tests found the defect".
+- **The PG side and the collection side are symmetric**. The table structure
+  has five rules of its own, and the vector collection has its counterpart: one
+  collection's attributes must agree across call sites.
 
-### 输出契约
+### Output contract
 
-报告分四段，结论**不是**一句「可以交付 / 不可以交付」：
+The report has four sections. The verdict is **not** one sentence of "can ship
+/ cannot ship":
 
-| 段 | 意思 |
+| Section | Meaning |
 | --- | --- |
-| **已实测** | 实测出来的结果（跑过测试、跑过覆盖率、查过 PG） |
-| **静态信号** | 静态分析的信号 —— 标注了「不能单独支撑「通过」」 |
-| **未实测** | 没测出来的（环境没就绪、找不到测试文件、没有可分析的导出符号） |
-| **本工具不判定** | 固定清单，见下 |
+| **已实测** (Measured) | Results that came from running something (tests run, coverage measured, PostgreSQL queried) |
+| **静态信号** (Static signal) | Signals from static analysis — marked as "cannot support a pass on their own" |
+| **未实测** (Not measured) | What was not measured (environment not ready, no test file found, no analysable exports) |
+| **本工具不判定** (Not judged by this tool) | A fixed list, see below |
 
-结论分三档：
+The verdict has three tiers:
 
-| 档 | 意思 |
+| Tier | Meaning |
 | --- | --- |
-| **阻塞项** | 实测出来不达标的 —— 有它就不能交付 |
-| **待人工确认** | 实测了，但结论要人拿主意（正文类字段不一致、旁路存储是不是权威数据…） |
-| **无信号** | 没测出来的 —— 环境没就绪、找不到测试文件、这个模块没有可分析的导出符号 |
+| **阻塞项** (Blocking) | Measured and below the bar — with one of these you do not hand over |
+| **待人工确认** (Needs a human) | Measured, but a person has to make the call (body fields disagree, is the side store authoritative?) |
+| **无信号** (No signal) | Not measured — environment not ready, no test file found, no analysable exports in this module |
 
-工具固定列出一段 **本工具不判定** 的清单：
+A static signal never supports "pass" on its own. The tool also prints a fixed
+**not judged by this tool** list:
 
 > 需求是否被正确理解 · 产品行为是否正确 · 性能 · 安全 · 可用性 · 运维就绪
+> (whether the requirement was understood correctly · whether product behaviour
+> is correct · performance · security · availability · operational readiness)
 
-这六项**不在**本工具的判定范围内。交付决策仍然由人承担。
+Those six are **out of scope** for this tool. The delivery decision stays with
+a human.
 
-退出码：
+Exit codes:
 
-| 码 | 意思 |
+| Code | Meaning |
 | --- | --- |
-| 0 | 没有阻塞项 |
-| 1 | 有阻塞项，或关键判据（测试是否绿）没测到 —— 不能判「达标」 |
-| 2 | 认不出这个模块（语言不在支持范围、路径不存在、参数非法）—— 说清原因，不给假结论 |
+| 0 | No blocking items |
+| 1 | There are blocking items, or a key criterion (whether the tests are green) was not measured — "meets the bar" cannot be claimed |
+| 2 | The module could not be recognised (language out of scope, path does not exist, invalid argument) — it says why instead of giving a false verdict |
 
-## 语言支持
+A failed `--self-check` also exits 1. That is a failure of the tool's own
+self-test (the criteria did not catch the injected defect), not a verdict about
+the module. `req_plan.py check` exits 1 when the plan has errors; `new` exits 1
+when the plan file already exists and `--force` was not given.
 
-| | 计划生成 | 覆盖率实测 | 导出引用判据 | 跨存储对账 | 真后端 itest 车道 |
+## Language support
+
+| | Plan generation | Coverage measurement | Export-reference criterion | Cross-store reconciliation | Real-backend itest lane |
 | --- | --- | --- | --- | --- | --- |
 | TypeScript / JavaScript | ✅ | ✅ node / vitest / jest | ✅ | ✅ | ✅ |
-| Python | ✅ | ✅ pytest-cov | ✅ 模块级 `def`/`class` | ✅ | ✅ |
-| Rust / Go | 部分（复用侦察） | — 识别不到模块 | — | — | — |
+| Python | ✅ | ✅ pytest-cov | ✅ module-level `def`/`class` | ✅ | ✅ |
+| Rust / Go | partial (reconnaissance is reused) | — module not recognised | — | — | — |
 
-**车道与对账脚本怎么找**：JS 仓从 `package.json` 的 scripts 认；Python 仓从 `Makefile` 目标与 `tox.ini` 环境认（例 `make coverage`、`make integration-store`、`make reconcile-store`、`[testenv:integration]`）。两条路都要满足两点：
+The plan generator handles Rust and Go exports in its reconnaissance (the export
+index recognises Rust `pub fn` and Go top-level functions), and
+`req_plan.py scaffold` has Rust and Go branches. It is the readiness checker
+that stops at the language boundary.
 
-1. 目标名里带关键词（`cov` / `reconcile` / `integration` / `itest`）；
-2. 目标体或命令里提到**这个模块**（路径或表名）：工具要确认这是该模块的车道，不是仓库里别人的。
+**How the lanes and the reconciliation script are found**: in a JS repo from the
+`package.json` scripts; in a Python repo from `Makefile` targets and `tox.ini`
+environments (e.g. `make coverage`, `make integration-store`,
+`make reconcile-store`, `[testenv:integration]`). Both routes need two things:
 
-Rust / Go 模块上 `readiness.py` **退出码 2** 并说清「当前只实现了 TS/JS/Python」，不给假结论：不是「支持了但没数据」，是「认不出来就说认不出来」。一个满屏 ✓ 但其实什么都没测的报告，比报错更糟。
+1. a keyword in the target name (`cov` / `reconcile` / `integration` / `itest`);
+2. the target body or command mentioning **this module** (a path or a table
+   name). The tool has to confirm this is this module's lane, not someone
+   else's.
 
-## 安全须知
+On a Rust or Go module `readiness.py` **exits with code 2** and says that only
+TS/JS/Python is implemented. It does not give a false verdict: "recognised but
+no data" and "not recognised" are different, and only the second one is true.
+A report full of ✓ where nothing was measured is worse than an error.
 
-`readiness.py` 会**执行目标仓库自己定义的脚本**（`package.json` 里的 `test`、`coverage`、`reconcile`、`eval:baseline:check` 等）。三件事要知道：
+## Security notes
 
-1. **先看它要跑什么**。`--dry-run` 只列出候选脚本与将执行的命令，不执行。正常模式下工具也会在执行前把那几行（白名单命中的脚本 + 确切命令）打印出来。那是审计入口。脚本选取走**显式白名单**（精确脚本名或白名单前缀）：名字里带关键词的脚本（例如 `reconcile:reset`）不会被自动执行。
-2. **子进程只拿到白名单环境变量**。`PATH`、`HOME`、`LANG`/`LC_*`、`TMPDIR`、`NODE_*`、`PYTHON*`，以及工具自己需要的 `POSTGRES_URL` / `DATABASE_URL` / `MEMORY_ITEST` / `REQ_PLAN_RECONCILE_OUT_DIR`。**其余环境变量一律不透传**：你的云厂商密钥、npm token 之类不会进目标仓库的脚本。注意那两个连接串**会**透传：仓库自己的集成车道要连库，这是刻意的取舍 —— 不想要就把它们从白名单里去掉，或改用 `.pgpass`。`psql` 的口令走 `PGPASSWORD` 环境变量，不出现在命令行参数里。
-3. **信任一个仓库的 `test` 脚本，就等于把它交给了你的环境变量**。这一层的风险等级 = 它所运行的每一个脚本的风险等级。
+`readiness.py` **executes scripts the target repo defines itself** (the `test`,
+`coverage`, `reconcile` and `eval:baseline:check` entries in `package.json`).
+Three things to know:
 
-`req_plan.py scaffold` 会向仓库写测试文件。写入前有两道闸：钉的路径必须规范化后仍在 `--out-dir` 之下（越界的钉不写盘），用例名按语言做引号转义（计划 markdown 不会被变成可执行代码）。认不出仓库的测试约定时**拒绝生成**并报红，不猜。
+1. **See what it will run first**. `--dry-run` lists the candidate scripts and
+   the exact commands without executing them. In normal mode the tool also
+   prints those lines (the allowlisted scripts plus the exact commands) before
+   it runs anything. That line is the audit trail. Script selection uses an
+   **explicit allowlist** (exact script names or allowlisted prefixes), so a
+   script that merely has a keyword in its name (for example `reconcile:reset`)
+   is never auto-executed.
+2. **Child processes get an allowlisted environment only**: `PATH`, `HOME`,
+   `LANG`/`LC_*`, `TMPDIR`, `NODE_*`, `PYTHON*`, and the `POSTGRES_URL` /
+   `DATABASE_URL` / `MEMORY_ITEST` / `REQ_PLAN_RECONCILE_OUT_DIR` variables the
+   tool itself needs. **Nothing else is passed through**: your cloud provider
+   keys and npm tokens do not reach the target repo's scripts. Note that those
+   two connection strings *are* passed through: a repo's own integration lane
+   has to reach its database, and that trade-off is deliberate. Drop them from
+   the allowlist, or use `.pgpass`, if you do not want that. The `psql`
+   password travels in the `PGPASSWORD` environment variable, never in a
+   command-line argument.
+3. **Trusting a repo's `test` script means handing it your environment**. The
+   risk level of that layer equals the risk level of every script it runs.
 
-## 已知缺口
+`req_plan.py scaffold` writes test files into the repo. Two gates run before
+anything is written: a pinned path must still be under `--out-dir` after
+normalisation (a pin that escapes it is neither read nor written), and test
+case names are quote-escaped per language (the plan's markdown is not turned
+into executable code). When it cannot recognise the repo's test conventions it
+**refuses to generate** and reports red instead of guessing.
 
-诚实清单：完整版见 [CHANGELOG.md](CHANGELOG.md) 的「已知遗留」，逐条评审记录见 [docs/oss-release-review.md](docs/oss-release-review.md) 与 [docs/testing-philosophy-review.md](docs/testing-philosophy-review.md)（只读）。发布时仍开放的是这七条：
+`readiness.py` reads pins from a plan file too, and applies the same rule: a
+pin that points outside the repo is neither read nor written.
 
-| 项 | 状态 |
+## Known gaps
+
+The honest list: the full version is in [CHANGELOG.md](CHANGELOG.md) under
+"已知遗留" (known leftovers), and the per-item review records are in
+[docs/oss-release-review.md](docs/oss-release-review.md) and
+[docs/testing-philosophy-review.md](docs/testing-philosophy-review.md)
+(read-only). These are the seven items still open at release time:
+
+| Item | Status |
 | --- | --- |
-| SkillSpector 的 `E2`（Env Variable Harvesting）仍报 HIGH | 子进程必须透传环境变量（白名单实现）。CI 用 `.github/skillspector-allowlist.yaml` 把**已复核的规则**显式放行，每条带理由，allowlist 之外的新 HIGH 仍然拦住。放行是**规则级、不是逐条 finding** —— 逐条基线按位置指纹匹配，改一行代码就失效 ⇒ 对贡献者是持续的假红。代价写在 allowlist 文件头，不藏着 |
-| `--exec` 显式执行开关没有采纳 | 实现是**默认执行 + 执行前打印审计行** + `--dry-run` 可只看不做。工具的定位就是实测（不跑测试的交付判定没有意义），执行面已收敛到脚本白名单 + 环境变量白名单 |
-| Python 没有真后端（itest）车道 | TS 侧有 `--include-itest`，Python 侧没有对应机制 |
-| Windows 未端到端验证 | skill **运行时**是纯 Python、**安装**走 `install.py`（跨平台）—— 这两块与平台无关。但仓库自己的开发脚本依赖 bash，在 Windows 上要 WSL 或 Git Bash |
-| 触发准确度 | 已实测：精确率 1.0（近邻反例一条都没误触发）、召回率 0.5、F1 0.667。**这个数测的是本机 60 多个 skill 的竞争环境**，OSS 用户 skill 集合不同、不可直接迁移 |
-| 自检副本默认不带 `node_modules` | 多数仓库在副本里跑不动测试，`--self-check` 默认证明的是「静态判据抓得住东西」。报告里明说了这件事（`copy_runnable: false`）。加 `--self-check-deps` 会把依赖**软链**进副本，那时能验到实测类判据 |
-| 向量集合与**线上真实租户**是否一致 | 不判。这条要连活的向量库并用项目自己的凭据 —— 本工具不替项目保管向量库凭据，也不替项目猜集合命名规范。现在判的是**代码侧自洽** |
+| SkillSpector's `E2` (Env Variable Harvesting) still reports HIGH | Child processes must inherit environment variables (allowlist implementation). CI uses `.github/skillspector-allowlist.yaml` to allowlist the **reviewed rules** explicitly, each with a reason, and a new HIGH outside the allowlist still fails the build. The allowlist is **rule-level, not finding-level**: the old baseline matched by source location, so changing one line of code invalidated it, which is a permanent false red for contributors. Rule-level allowlisting does not depend on location, while a **new rule** is still blocked. The cost is written in the allowlist header rather than hidden |
+| The `--exec` explicit execution switch was not adopted | The implementation is **execute by default, print an audit line before executing**, plus `--dry-run` to look without doing. The tool's purpose is measurement (a delivery verdict that does not run the tests is meaningless), and the execution surface is already narrowed to a script allowlist plus an environment-variable allowlist |
+| Python has no real-backend (itest) lane | The TS side has `--include-itest`; Python has no equivalent mechanism |
+| Windows not verified end to end | The skill's **runtime** is pure Python and its **install** goes through `install.py` (cross-platform), so neither depends on the platform. But the repo's own dev scripts need bash: on Windows that means WSL or Git Bash |
+| Trigger accuracy | Measured: precision 1.0 (not one of the near-miss queries triggered it), recall 0.5, F1 0.667. Data and reading in [evals/README.md](evals/README.md). **The number measures the competition on this machine (60+ installed skills)** — an OSS user has a different skill set, so it does not transfer directly |
+| The self-check copy does not include `node_modules` by default | Most repos therefore cannot run their tests in the copy, so `--self-check` proves that "the static criteria catch things", not that "the whole criterion set (including the measured ones) catches things". The report says so explicitly (`copy_runnable: false`). Add `--self-check-deps` to symlink the dependencies into the copy (no copying) and the measured criteria get verified too |
+| Whether a vector collection matches the **live production tenant** | Not judged. That needs a live vector store and the project's own credentials — this tool does not hold vector-store credentials for the project, and does not guess the project's naming convention. What is judged today is **agreement on the code side** |
 
-## 开发与验证
+One more item that is not in the CHANGELOG's "known leftovers" list: the body of
+`SKILL.md` is still Chinese. This README has a Chinese version; the skill body
+does not.
 
-本仓库把自己的工具用在了自己身上，证据可复现：
+## Development and verification
 
-| 闸门 | 命令 | 结果 |
+This repo runs its own tool on itself, and the evidence is reproducible:
+
+| Gate | Command | Result |
 | --- | --- | --- |
-| 回归套件 | `for t in scripts/test_*.py; do python3 "$t"; done` | 24/24 全绿 |
-| 黄金 fixture | `bash fixtures/run_fixtures.sh` | 5/5 命中，0 不符，0 未判定 |
-| 行为 eval | `python3 evals/run_evals.py` | 6/6 通过 |
-| 安全扫描 | `bash .github/check-skillspector.sh` | 47 条 HIGH/CRITICAL，未放行 **0** 条 |
-| 环境收口 | `python3 scripts/check_env_inheritance.py` | 生产代码没有整份继承 `os.environ` |
-| 反向验证 | `python3 scripts/selfcheck.py src --repo fixtures/ts-colocated` | 结论：反向验证通过 |
+| Regression suite | `for t in scripts/test_*.py; do python3 "$t"; done` | 24/24 green |
+| Golden fixtures | `bash fixtures/run_fixtures.sh` | 5/5 hit, 0 mismatches, 0 undecided |
+| Behaviour evals | `python3 evals/run_evals.py` | 6/6 passed |
+| Security scan | `bash .github/check-skillspector.sh` | 47 HIGH/CRITICAL, **0** outside the allowlist |
+| Environment containment | `python3 scripts/check_env_inheritance.py` | No production code inherits the whole `os.environ` |
+| Reverse verification | `python3 scripts/selfcheck.py src --repo fixtures/ts-colocated` | Reverse verification passed |
 
-**黄金 fixture** 是 5 个自包含的小仓库，每个带**钉死的期望判定**，它们是「这个工具会不会假绿」的可复现证据（例 `no-tests` fixture 钉死「结论不得是『达到交付条件』」）。每个 fixture 目录里的 `README.md` 写明**为什么有它**（挡的是评审里的哪一条质疑）。
+The **golden fixtures** are 5 self-contained mini repositories, each with a
+**pinned expected verdict**. They are the reproducible evidence for "does this
+tool go falsely green" (the `no-tests` fixture, for instance, pins "the
+conclusion must not be 'meets the delivery conditions'"). Each fixture directory
+has a `README.md` explaining **why it exists** (which review objection it
+blocks).
 
-**evals** 是 6 条「用户这么说 ⇒ 工具这样回」的行为断言，每条带可机检的判据（期望退出码 / 必须出现的字符串 / 必须不出现的字符串）。跑法：
+The **evals** are 6 "user says this ⇒ tool answers that" behavioural assertions,
+each with a machine-checkable expectation (expected exit code / strings that must
+appear / strings that must not appear). How to run them:
 
 ```bash
-python3 evals/run_evals.py            # 跑全部
-python3 evals/run_evals.py --only 3   # 只跑某一条
-python3 evals/run_evals.py --json     # 机器可读
+python3 evals/run_evals.py            # all of them
+python3 evals/run_evals.py --only 3   # just one
+python3 evals/run_evals.py --json     # machine-readable
 ```
 
-CI（`.github/workflows/ci.yml`）跑全部四道：字节码卫生 / 回归+fixture+eval / 打包冒烟 / 安全扫描。
+Exit codes: 0 = all passed / 1 = an assertion failed / 2 = there was no eval to
+run (for example `--only` was given an id that does not exist).
+
+CI (`.github/workflows/ci.yml`) runs four jobs: bytecode hygiene / regression +
+fixtures + evals / packaging smoke / security scan.
 
 ## License
 

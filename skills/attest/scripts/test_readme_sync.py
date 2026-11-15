@@ -188,7 +188,7 @@ def main() -> int:
     print("\nREADME 自称的版本与 CHANGELOG 最新版本一致")
     ch = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
     versions = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", ch, re.M)
-    expect(not versions, "CHANGELOG 里没有版本段")
+    expect(bool(versions), "CHANGELOG 里有版本段")
     latest = versions[0] if versions else ""
     for label, text in (("英文", en), ("中文", zh)):
         claimed = re.findall(r"(?:Released as|已发)\s*`v(\d+\.\d+\.\d+)`", text)

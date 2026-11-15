@@ -4,54 +4,166 @@
     <img alt="attest" src="assets/logo.svg" width="96" height="96">
   </picture>
   <h1>attest</h1>
-  <p><strong>把交付前提变成可机读、可核对、可审计的证据清单。</strong></p>
-  <p><em>它不是「能不能交付」的裁判。它给证据，决策归人。</em></p>
-  <p>
-    <a href="https://github.com/mcgrapeng/attest/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/mcgrapeng/attest/ci.yml?branch=main&style=flat-square&label=CI"></a>&nbsp;&nbsp;
-    <a href="https://github.com/mcgrapeng/attest/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0F766E?style=flat-square"></a>&nbsp;&nbsp;
-    <a href="https://github.com/mcgrapeng/attest"><img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square"></a>&nbsp;&nbsp;
-    <a href="https://github.com/mcgrapeng/attest"><img alt="Stars" src="https://img.shields.io/github/stars/mcgrapeng/attest?style=flat-square&label=stars&color=0F766E"></a>&nbsp;&nbsp;
-    <a href="https://github.com/mcgrapeng/attest/blob/main/README.md"><img alt="English" src="https://img.shields.io/badge/English-0F766E?style=flat-square"></a>
-  </p>
 </div>
 
-## 它给你什么
+<p align="center">
+  <a href="https://github.com/mcgrapeng/attest/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/mcgrapeng/attest/ci.yml?branch=main&style=flat-square&label=CI"></a>
+  <a href="https://github.com/mcgrapeng/attest/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0F766E?style=flat-square"></a>
+  <a href="https://github.com/mcgrapeng/attest"><img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square"></a>
+  <a href="https://github.com/mcgrapeng/attest"><img alt="Stars" src="https://img.shields.io/github/stars/mcgrapeng/attest?style=flat-square&label=stars&color=0F766E"></a>
+</p>
 
-- **实测，不是推断**。跑的是仓库自己的测试、覆盖率闸门、PG catalog 查询和对账脚本；没有一条判据是靠读源码得出的。
-- **四档证据分层**。已实测 / 静态信号 / 未实测 / 本工具不判定 —— 跑不了的判据会写「未实测」，不会写「通过」。
-- **钉得住的计划**。每条不变式都指向一个真实存在的用例；文件或用例不存在时 `check` 直接报红。
-- **跨存储漂移**。实跑仓库自己的对账脚本，点名漂移的租户与不一致的字段。
-- **测的是测试有没有劲，不只是覆盖率**。`--mutation-check` 会把源码改坏，看测试会不会红。
-- **结论诚实**。三档（阻塞项 / 待人工确认 / 无信号），外加一份固定的「本工具不判定」清单。
-- **它驱动你的仓库，不替代它**。零依赖：只用 Python 3.11+ 标准库。
+<p align="center">
+  <a href="#安装"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-0F766E?style=flat-square"></a>
+  <a href="#安装"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-0F766E?style=flat-square"></a>
+  <a href="#安装"><img alt="OpenCode" src="https://img.shields.io/badge/OpenCode-supported-0F766E?style=flat-square"></a>
+  <a href="#已知缺口"><img alt="Windows" src="https://img.shields.io/badge/Windows-partial-8A8F98?style=flat-square"></a>
+</p>
 
-## 60 秒上手
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-skill 是纯 Python 3.11+ 标准库，除了它本身没有别的要装。
+---
+
+## attest 是什么
+
+attest 是一套面向交付就绪度的需求级测试工具包。接一条需求，产出一份**钉得住**的测试计划 —— 每条不变式都指向一个真实存在的用例 —— 再**实测**这个模块的交付前提：哪些已被证明、哪些只是读源码得出的信号、哪些根本没测到、哪些它拒绝去判。
+
+它**驱动目标仓库自己的脚本**（test 命令、覆盖率闸门、对账脚本），不替代它们；表结构则直接查 PG catalog。没有一条判据是靠读源码得出的。
+
+**它不是「能不能交付」的裁判。** 它给证据，决策归交付责任人。
+
+## 本仓库的实测数据
+
+> 下面每个数字都来自一条你可以重跑的命令。触发准确度那两个数测的是**当时那台机器上的竞争环境**（装了 60 多个 skill）；你机器上的 skill 集合不同，这两个数不可迁移。
+
+| 闸门 | 测的是什么 | 为什么要在意 |
+| --- | --- | --- |
+| **24 / 24** 回归脚本 | 工具自身的行为，包括它已知会出现的每一种假绿 | 不会翻红的判据不算判据 |
+| **5 / 5** 黄金 fixture | 在钉死期望的小仓库上，结论是否一致 | 对「会不会假绿」的可复现证据 |
+| **6 / 6** 行为 eval | 「用户这么说 ⇒ 工具这样回」是否成立 | 考的是 skill 契约，不只是脚本 |
+| **14** 条判据 | 每条判据都带证据类别：已实测 / 静态信号 / 未实测 | 没测到的绝不写成测到了 |
+| **1.0 / 0.5** 触发精确率 / 召回率 | 该触发时触发、近似问法时不误触发 | 召回低是**竞争**的锅，不是描述词的锅 |
+| **0** 条未放行 HIGH / CRITICAL | 安全扫描 + 规则级 allowlist | 已复核的规则有名有姓，新规则仍然拦 |
+
+## 为什么需要 attest
+
+### 「看起来是绿的」靠不住
+
+- **覆盖率不等于测试有劲**。行覆盖 90% 只说明代码跑过，不说明断言会失败。断言恒真的测试套件，穿过所有缺陷都还是绿的。
+- **聊天记录里的清单不是证据**。「写好了测试，已标记完成」事后核不了 —— 那条钉可能指向一个从来没存在过的文件。
+- **两个存储、一份真相、没人盯着**。PG 与向量库悄悄漂开，漂到客户看见的时候才发现。
+
+### 核心设计：能测的实测，该人判的给人
+
+**实测 —— 硬约束**
+
+- **跑的是仓库自己的脚本**：工具驱动你的 test 命令、你的覆盖率闸门、你的对账脚本，不重新实现你的技术栈。
+- **每条判据都带证据类别**：已实测（真跑了）／静态信号（读源码读出来的）／未实测（跑不了）。静态信号永远不能单独支撑「通过」。
+- **钉要跟现实核对**：计划把不变式钉在一个文件里并不存在的用例上，`check` 报红，退出码 1。
+
+**判断 —— 留给人**
+
+- **需求理解**。工具只能告诉你每条不变式是否钉在真实用例上，判断不了这条不变式是不是对需求的正确理解。生成的计划里有一节 `人工确认` 专门留给这件事；没人填之前，每份报告都会写明「计划未经人工确认」。
+- **能不能交付**。性能、安全、可用性、运维就绪不在它的射程内，而它每份报告都会把这份清单列出来。
+
+## 怎么用
+
+### 前置条件
+
+- **Python 3.11+** —— 工具本身只用标准库，但它要跑你的仓库脚本，所以你的运行时得在。
+
+### 安装
 
 ```bash
-python3 install.py                 # 装进四个 agent 的 skills 目录
-python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项目根>
+python3 install.py              # 跨平台（纯标准库，没有 bash 依赖）
+# 或者：bash install.sh         # 同一份实现的薄壳
 ```
 
-第二条命令会实跑目标仓库自己的测试与覆盖率闸门、查 PG catalog、驱动仓库自己的对账脚本，然后给你一份分层的证据清单。**它不会替你下「能不能交付」的结论。**
+它把本仓库软链到 `~/.agents/skills/attest`，再软链到 `~/.claude/skills/`、`~/.codex/skills/` 和 `~/.config/opencode/skills/`。已存在的同名软链会被覆盖（会打印提示）；目标位置若是**真实目录**则跳过，不删用户数据。卸载：`python3 install.py --uninstall`（或 `bash uninstall.sh`），只删软链。
 
-装到别的 agent、手工安装、Windows 注意事项见[「装」](#装)。
+手工装等价于：
 
-## 它怎么运作
-
+```bash
+ln -s "$(pwd)" ~/.agents/skills/attest
+ln -s ~/.agents/skills/attest ~/.claude/skills/attest
+ln -s ~/.agents/skills/attest ~/.codex/skills/attest
+ln -s ~/.agents/skills/attest ~/.config/opencode/skills/attest
 ```
-  需求
-   │
-   ▼
-  计划 ────── 每条不变式钉在一个真实存在的用例上
-   │
-   ▼
-  readiness.py ──▶ 实跑仓库自己的测试 · 覆盖率闸门 · PG catalog · 对账脚本
-   │
-   ▼
-  证据清单 ──▶ 已实测 │ 静态信号 │ 未实测 │ 本工具不判定
+
+`~/.agents/skills/attest` 是稳定入口，`~/.agents/testkit/doctor.sh` 从这里跑回归套件。
+
+### 打包分发（.skill）
+
+```bash
+python3 package.py            # → dist/attest.skill
+python3 package.py --check    # 只看会打进包的内容，不写文件
 ```
+
+`.skill` 是社区通行的分发格式（一个 zip，第一层是 skill 目录）。打包脚本**自包含**，不依赖别的工具。排除：`.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` / 字节码，以及 `scripts/test_*.py`（回归套件是仓库的开发资产，不是 skill 的运行时）。**打进包前会检查有没有字节码**，有就中止 —— 字节码既泄漏作者环境，又让用户拿到不可读的产物。
+
+### 快速上手
+
+**1. 给需求出计划**
+
+```bash
+python3 ~/.agents/skills/attest/scripts/req_plan.py new <feature> \
+  --repo <项目根> --module <子路径> [--module <子路径>...]
+```
+
+扫目标模块已有的 helper 与项目自己的测试车道，生成不变式清单与覆盖矩阵的空表。
+
+**2. 填不变式与矩阵**
+
+每条不变式写成一句**可证伪**的话（例「导出结果包含本月全部已完成订单，不多不少」），每行矩阵给出对应测试文件。这是人读的部分。
+
+**3. 核对计划 vs 代码**
+
+```bash
+python3 ~/.agents/skills/attest/scripts/req_plan.py check <计划文件> \
+  --repo <项目根>
+```
+
+逐条核钉：文件存在吗、用例真在那个文件里吗。报红退出码 1。
+
+**4. 实测就绪度**
+
+```bash
+python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> \
+  --repo <项目根> \
+  [--plan <需求测试计划>] [--include-itest] [--test-tenant <名字或前缀>] [--json]
+```
+
+实跑仓库自己的测试与覆盖率闸门、查 PG catalog、驱动仓库自己的对账脚本，打印证据清单。`--dry-run` 只列出它将要执行的脚本，不执行。
+
+另外 `req_plan.py scaffold <计划> --repo <根>` 可以按仓库自己的测试约定生成测试文件骨架 —— 认不出约定时它**拒绝生成**并报红，不猜。
+
+### 常用开关
+
+`readiness.py` 的：
+
+| 开关 | 干什么 |
+| --- | --- |
+| `--plan <文件>` | 要核对的需求测试计划（驱动「需求覆盖到位」这条） |
+| `--json` | 机器可读输出（checks + 结论计数） |
+| `--dry-run` | **只列出**将要执行的仓库脚本与命令，然后退出（不执行）。跑之前先看它要干什么 |
+| `--self-check` | 反向验证：往**临时副本**里注入一个已知缺陷，证明判据会翻红。不改你的仓库 |
+| `--self-check-deps` | 配合 `--self-check`：把 `node_modules` / `.venv` 软链进副本，让副本能真跑测试（这样才验得到**实测类**判据，不只是静态判据） |
+| `--mutation-check` | 测试强度：把源码改坏，看**测试会不会红**。要复制工作区并多次跑测试，很贵 ⇒ **默认不跑**（不跑时那条判据是「未实测」） |
+| `--include-itest` | 把真后端 itest 车道也算进来（要连 PG + 向量库，慢） |
+| `--test-tenant <名字或前缀>` | 声明测试租户，可重复 —— 测试租户的漂移是夹具状态，报 warn 不阻塞 |
+| `--test-tenant-prefix <前缀>` | 追加测试租户前缀（默认认 `itest-` `memtest-` `mock-` `eval-` 等） |
+| `--test-dir <路径>` | 额外的测试目录（`test/` `tests/` `spec/` 之外还有别处放测试时用），可重复 |
+| `--drift-pattern <正则>` | 对账输出里「漂移行」的样子（默认认 `漂移` / `❌` / `drift` / `mismatch`） |
+| `--table-header-pattern <正则>` | 对账输出里表头/分隔行的样子（默认认 `一致性` / `租户` / `tenant` / `---`） |
+| `--csv-pair a.csv=b.csv` | CSV 对照关系，可重复 —— 按声明配对，不做两两配对 |
+| `--tenant-col <列名>` | CSV 里租户列的名字（默认按 `tenant_id`/`tenant` 认） |
+| `--min-line-coverage` / `--min-branch-coverage` | 显式给覆盖率门槛。**默认不用通用阈值**（仓库没有闸门时判 skipped，不判 fail） |
+| `--database-url <连接串>` | PG 连接串（默认取环境里的 `POSTGRES_URL`） |
+| `--verbose` | 把测试命令的原始输出也打出来 |
+
+`req_plan.py` 的子命令与额外开关：`new` 接 `--out`（默认 `docs/<feature>-test-plan.md`）与 `--force`；`scaffold` 接 `--out-dir`（默认仓库根）、`--framework`（`node:test` / `vitest` / `jest` / `mocha`）与 `--force`；`check` 只接 `<计划文件>` 与 `--repo`。
 
 ## 它测什么：14 条判据
 
@@ -126,96 +238,6 @@ python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项�
 ```
 
 注意最后那段：**7 项无信号**，不是「7 项通过」。没测到的判据写「未实测」，不写「通过」。
-
-## 怎么用：四步
-
-1. **出计划骨架**：`req_plan.py new` 扫目标模块已有的 helper 与项目自己的测试车道，生成不变式清单与覆盖矩阵的空表。开工时做。
-2. **填不变式与矩阵**：每条不变式写成一句**可证伪**的话（例「导出结果包含本月全部已完成订单，不多不少」），每行矩阵给出对应测试文件。这是人读的部分。
-3. **核对计划 vs 代码**：`req_plan.py check` 逐条核：钉指向的文件存在吗、钉的用例真在那个文件里吗。报红退出码 1。
-4. **判定就绪度**：`readiness.py` 实测模块的交付前提，产出上面那份证据清单。**这一步不需要计划也能跑**（只是「需求覆盖到位」会判未实测）。
-
-第 2 步之后还可以 `req_plan.py scaffold` 按仓库自己的测试约定生成测试文件骨架。认不出约定时它**拒绝生成**并报红，不猜。
-
-## 装
-
-```bash
-python3 install.py              # 跨平台（纯标准库，没有 bash 依赖）
-# 或者：bash install.sh         # 同一份实现的薄壳
-```
-
-它把本仓库软链到 `~/.agents/skills/attest`，再软链到四个 agent 的 skills 目录：
-
-| 目标 | 路径 |
-| --- | --- |
-| 稳定入口 | `~/.agents/skills/attest` |
-| Claude Code | `~/.claude/skills/attest` |
-| Codex | `~/.codex/skills/attest` |
-| OpenCode | `~/.config/opencode/skills/attest` |
-
-已存在的同名软链会被覆盖（会打印提示）；目标位置若是**真实目录**则跳过，不删用户数据。装完会自检一次（`readiness.py --help` 能跑通）。
-
-卸载：`python3 install.py --uninstall`（或 `bash uninstall.sh`），只删软链。
-
-Windows 上 `os.symlink` 可能需要管理员或开发者模式；失败时会打印等价的手工命令，不删用户数据。
-
-手工装等价于：
-
-```bash
-ln -s "$(pwd)" ~/.agents/skills/attest
-ln -s ~/.agents/skills/attest ~/.claude/skills/attest
-ln -s ~/.agents/skills/attest ~/.codex/skills/attest
-ln -s ~/.agents/skills/attest ~/.config/opencode/skills/attest
-```
-
-`~/.agents/skills/attest` 是稳定入口，`~/.agents/testkit/doctor.sh` 从这里跑回归套件。
-
-## 打包（.skill）
-
-```bash
-python3 package.py            # → dist/attest.skill
-python3 package.py --check    # 只看会打进包的内容，不写文件
-```
-
-`.skill` 是社区通行的分发格式（一个 zip，第一层是 skill 目录）。打包脚本**自包含**，不依赖别的工具。排除：`.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` / 字节码，以及 `scripts/test_*.py`（回归套件是仓库的开发资产，不是 skill 的运行时）。
-
-**打进包前会检查有没有字节码**，有就中止：字节码既泄漏作者环境，又让用户拿到不可读的产物。
-
-## 常用开关
-
-`readiness.py` 的：
-
-| 开关 | 干什么 |
-| --- | --- |
-| `--plan <文件>` | 要核对的需求测试计划（驱动「需求覆盖到位」这条） |
-| `--json` | 机器可读输出（checks + 结论计数） |
-| `--dry-run` | **只列出**将要执行的仓库脚本与命令，然后退出（不执行）。跑之前先看它要干什么 |
-| `--self-check` | 反向验证：往**临时副本**里注入一个已知缺陷，证明判据会翻红。不改你的仓库 |
-| `--self-check-deps` | 配合 `--self-check`：把 `node_modules` / `.venv` 软链进副本，让副本能真跑测试（这样才验得到**实测类**判据，不只是静态判据） |
-| `--mutation-check` | 测试强度：把源码改坏，看**测试会不会红**。要复制工作区并多次跑测试，很贵 ⇒ **默认不跑**（不跑时那条判据是「未实测」） |
-| `--include-itest` | 把真后端 itest 车道也算进来（要连 PG + 向量库，慢） |
-| `--test-tenant <名字或前缀>` | 声明测试租户，可重复 —— 测试租户的漂移是夹具状态，报 warn 不阻塞 |
-| `--test-tenant-prefix <前缀>` | 追加测试租户前缀（默认认 `itest-` `memtest-` `mock-` `eval-` 等） |
-| `--test-dir <路径>` | 额外的测试目录（`test/` `tests/` `spec/` 之外还有别处放测试时用），可重复 |
-| `--drift-pattern <正则>` | 对账输出里「漂移行」的样子（默认认 `漂移` / `❌` / `drift` / `mismatch`） |
-| `--table-header-pattern <正则>` | 对账输出里表头/分隔行的样子（默认认 `一致性` / `租户` / `tenant` / `---`） |
-| `--csv-pair a.csv=b.csv` | CSV 对照关系，可重复 —— 按声明配对，不做两两配对 |
-| `--tenant-col <列名>` | CSV 里租户列的名字（默认按 `tenant_id`/`tenant` 认） |
-| `--min-line-coverage` / `--min-branch-coverage` | 显式给覆盖率门槛。**默认不用通用阈值**（仓库没有闸门时判 skipped，不判 fail） |
-| `--database-url <连接串>` | PG 连接串（默认取环境里的 `POSTGRES_URL`） |
-| `--verbose` | 把测试命令的原始输出也打出来 |
-
-`req_plan.py` 的子命令与额外开关：`new` 接 `--out`（默认 `docs/<feature>-test-plan.md`）与 `--force`；`scaffold` 接 `--out-dir`（默认仓库根）、`--framework`（`node:test` / `vitest` / `jest` / `mocha`）与 `--force`；`check` 只接 `<计划文件>` 与 `--repo`。
-
-## 判据是怎么测的
-
-- **门槛归仓库所有**。仓库有覆盖率闸门就驱动它，判定看它的退出码；通用阈值只在仓库没有闸门时兜底（且默认不阻塞）。
-- **实测优先**。每条判据要么有实测证据，要么明说环境没就绪（缺什么条件），不拿静态推断冒充实测。
-- **跑不起来 ≠ 不达标**。setup 报错、缺产物、连不上中间件，都判 skipped 并说清缺什么。
-- **判交付看生产租户**。测试租户的漂移是夹具状态，报 warn 不阻塞。
-- **跨存储字段级比对**。同一个 id 在权威库与派生库里的同一个字段值对不上，点名 id 与字段。
-- **覆盖率高 ≠ 测试有劲**。覆盖率只说明代码被执行过，不说明断言会失败 ⇒ 另有「测试能发现缺陷」这条。
-- **环境没就绪 ≠ 杀死了**。变异点跑出的是环境错误而不是断言失败时，那个点判**未判定**，不算「测试发现了缺陷」。
-- **PG 侧与集合侧对称**。表结构有五条自有规则，向量集合也有对应的一条：同一集合的属性在调用点之间必须自洽。
 
 ### 输出契约
 
@@ -297,7 +319,14 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清「当前只实现�
 
 另有一条不在 CHANGELOG「已知遗留」里的：`SKILL.md` 正文仍是中文。README 有中文版，skill 正文没有。
 
-## 开发与验证
+## 文档
+
+- [SKILL.md](SKILL.md) —— 完整的 skill 契约：什么时候触发、工作流、判据全表
+- [CHANGELOG.md](CHANGELOG.md) —— 改了什么，以及已知遗留
+- [docs/publication-status.md](docs/publication-status.md) —— 发布状态与它是怎么被验证的
+- [docs/testing-philosophy-review.md](docs/testing-philosophy-review.md) —— 测试哲学审，以及它改掉了什么
+
+## 开发
 
 本仓库把自己的工具用在了自己身上，证据可复现：
 

@@ -224,6 +224,22 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
 - 设计方向由 `ui-ux-pro-max` 的资料库给（Phosphor 线性图标语言、JetBrains Mono /
   IBM Plex Sans 的开发者工具字体配对、深板岩 + 绿强调色），不是随手挑的。
 
+### README 按 alibaba/open-code-review 的信息架构重排
+
+参考 [alibaba/open-code-review](https://github.com/alibaba/open-code-review)（51.5k stars）
+的 README 骨架重排，两份 README 各 20 节一一对应：
+
+- 头部改成「居中 logo + h1 → 项目 badge 行 → 平台/agent badge 行 → 语言行 → `---`」，
+  平台行如实标出 Claude Code / Codex / OpenCode 已支持、Windows 仅部分支持。
+- 新增「Measured on this repo」：一个 blockquote 讲清每个数字怎么来的（含
+  「触发召回测的是当时那台机器的竞争环境，不可迁移」这句诚实限定），配一张
+  「测的是什么 / 为什么要在意」两列说明表。
+- 新增「Why attest?」：先讲「看起来是绿的」的三种失效（覆盖率不等于测试有劲、
+  聊天记录里的清单不是证据、两个存储没人盯着），再讲核心设计
+  ——**能测的实测（硬约束）／该人判的留给人**。
+- 「How to use」按 Prerequisites / Install / Distribute / Quick start / Switches 分层，
+  Quick start 改成四步编号 + 加粗小标题。
+
 ### 已知遗留（发布时仍开放）
 
 - **仍然开放**：

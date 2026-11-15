@@ -4,57 +4,213 @@
     <img alt="attest" src="assets/logo.svg" width="96" height="96">
   </picture>
   <h1>attest</h1>
-  <p><strong>Turns delivery preconditions into a machine-checkable, auditable evidence list.</strong></p>
-  <p><em>It is not a "can we ship" referee. It produces evidence; the decision stays yours.</em></p>
-  <p>
-    <a href="https://github.com/mcgrapeng/attest/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/mcgrapeng/attest/ci.yml?branch=main&style=flat-square&label=CI"></a>&nbsp;&nbsp;
-    <a href="https://github.com/mcgrapeng/attest/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0F766E?style=flat-square"></a>&nbsp;&nbsp;
-    <a href="https://github.com/mcgrapeng/attest"><img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square"></a>&nbsp;&nbsp;
-    <a href="https://github.com/mcgrapeng/attest"><img alt="Stars" src="https://img.shields.io/github/stars/mcgrapeng/attest?style=flat-square&label=stars&color=0F766E"></a>&nbsp;&nbsp;
-    <a href="https://github.com/mcgrapeng/attest/blob/main/README.zh-CN.md"><img alt="中文" src="https://img.shields.io/badge/中文-0F766E?style=flat-square"></a>
-  </p>
 </div>
 
-## What it gives you
+<p align="center">
+  <a href="https://github.com/mcgrapeng/attest/actions/workflows/ci.yml"><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/mcgrapeng/attest/ci.yml?branch=main&style=flat-square&label=CI"></a>
+  <a href="https://github.com/mcgrapeng/attest/blob/main/LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-0F766E?style=flat-square"></a>
+  <a href="https://github.com/mcgrapeng/attest"><img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square"></a>
+  <a href="https://github.com/mcgrapeng/attest"><img alt="Stars" src="https://img.shields.io/github/stars/mcgrapeng/attest?style=flat-square&label=stars&color=0F766E"></a>
+</p>
 
-- **Measurement, not inference.** It runs the repo's own tests, coverage gate, PostgreSQL catalog queries and reconciliation script. No criterion is judged from reading source alone.
-- **Four evidence tiers.** Measured, static signal, not measured, not judged. A criterion that could not run says so instead of passing.
-- **Pinned plans.** Every invariant points at a test case that really exists; `check` fails when the file or the case is missing.
-- **Cross-store drift.** It runs the repo's reconcile script and names the tenant that drifted, plus the field that differs.
-- **Test strength, not just coverage.** With `--mutation-check` it breaks the source and checks whether the tests notice.
-- **Honest verdicts.** Three tiers (blocking / needs a human / no signal) and a fixed list of what the tool does not judge.
-- **It drives your repo, it does not replace it.** Zero dependencies: the Python 3.11+ standard library is all it needs.
+<p align="center">
+  <a href="#install"><img alt="Claude Code" src="https://img.shields.io/badge/Claude_Code-supported-0F766E?style=flat-square"></a>
+  <a href="#install"><img alt="Codex" src="https://img.shields.io/badge/Codex-supported-0F766E?style=flat-square"></a>
+  <a href="#install"><img alt="OpenCode" src="https://img.shields.io/badge/OpenCode-supported-0F766E?style=flat-square"></a>
+  <a href="#known-gaps"><img alt="Windows" src="https://img.shields.io/badge/Windows-partial-8A8F98?style=flat-square"></a>
+</p>
 
-## 60 seconds
+<p align="center">
+  <a href="README.md">English</a> | <a href="README.zh-CN.md">简体中文</a>
+</p>
 
-The skill is pure Python 3.11+ standard library — there is nothing to install beyond it.
+---
+
+## What is attest?
+
+attest is a requirement-level test toolkit for delivery readiness. It takes one
+requirement and produces a test plan whose every invariant is pinned to a test
+case that really exists, then **measures** the module's delivery preconditions:
+which ones are proven, which are only signals read out of the source, which were
+never measured, and which it refuses to judge.
+
+It drives the target repo's own scripts — its test command, its coverage gate,
+its reconciliation script — instead of replacing them, and it queries the
+PostgreSQL catalog for the real schema. Nothing is judged from reading source
+alone.
+
+**It is not a "can we ship" referee.** It produces evidence; the decision stays
+with whoever owns the delivery.
+
+## Measured on this repo
+
+> Every number below comes from a command you can re-run. The trigger-accuracy
+> figures measure the competition on the machine where they were taken (60+
+> installed skills); on your machine the skill set differs, so those two do not
+> transfer.
+
+| Gate | What it measures | Why it matters |
+| --- | --- | --- |
+| **24 / 24** regression scripts | The tool's own behaviour, including every false green it has been known to produce | A criterion that cannot fail is not a criterion |
+| **5 / 5** golden fixtures | Whether the tool reports the same verdict on small repos with pinned expectations | Reproducible proof against false greens |
+| **6 / 6** behaviour evals | Whether "the user says X ⇒ the tool answers Y" holds | The skill contract, not just the scripts |
+| **14** criteria | Every criterion carries an evidence kind: measured, static signal, or not measured | Nothing is presented as measured unless it was |
+| **1.0 / 0.5** trigger precision / recall | Whether the skill fires on the right requests and stays quiet on near misses | The low recall is the competition's fault, not the description's |
+| **0** unallowed HIGH / CRITICAL findings | The security scan, with a rule-level allowlist | Reviewed rules are named; new ones still block the build |
+
+## Why attest?
+
+### The problem with "it looks green to me"
+
+- **Coverage is not strength.** 90% line coverage says the code ran, not that an
+  assertion would fail. A suite whose assertions are tautological stays green
+  through every defect.
+- **A checklist in a chat thread is not evidence.** "Wrote the test, marked it
+  done" cannot be checked later, and the pin may point at a file that never
+  existed.
+- **Two stores, one truth, nobody watching.** Postgres and the vector store
+  drift apart silently, and the drift surfaces when a customer sees it.
+
+### Core design: measurement, not judgment
+
+**Measurement — hard constraints**
+
+- **The repo's own scripts run.** The tool drives your test command, your
+  coverage gate, your reconciliation script. It does not reimplement your stack.
+- **Every criterion carries an evidence kind.** Measured (something ran),
+  static signal (read out of the source), or not measured (it could not run). A
+  static signal can never support a pass on its own.
+- **Pins are checked against reality.** A plan that pins an invariant to a test
+  case that is not in the file fails `check`, with exit code 1.
+
+**Judgment — left to a human**
+
+- **Requirement understanding.** The tool reports whether each invariant is
+  pinned to a real case; it cannot tell you the invariant is the right reading
+  of the requirement. The generated plan carries a `人工确认` section for that,
+  and until someone fills it in, every report says the plan was not reviewed.
+- **Delivery.** Performance, security, availability and operational readiness
+  are outside its scope, and it prints that list on every report.
+
+## How to use
+
+### Prerequisites
+
+- **Python 3.11+** — the tool itself is standard library only, but it runs your
+  repo's own scripts, so your repo's runtime has to be present.
+
+### Install
 
 ```bash
-python3 install.py                 # install into four agents' skills directories
-python3 ~/.agents/skills/attest/scripts/readiness.py <module path> --repo <repo root>
+python3 install.py              # cross-platform (stdlib only, no bash needed)
+# or: bash install.sh           # a thin shell wrapper around the same code
 ```
 
-The second command runs the target repo's own tests and coverage gate, queries
-the PostgreSQL catalog, drives the repo's own reconciliation script, and hands
-you a layered evidence list. **It does not decide for you whether this can
-ship.**
+It symlinks this repository to `~/.agents/skills/attest`, then symlinks that
+entry into `~/.claude/skills/`, `~/.codex/skills/` and
+`~/.config/opencode/skills/`. An existing symlink with the same name is
+replaced (the script says so); if the target path is a **real directory** the
+script skips it and never deletes user data. Uninstall with
+`python3 install.py --uninstall` (or `bash uninstall.sh`) — symlinks only.
 
-Other agents, manual install and Windows notes: see [Install](#install).
+Manual install is equivalent to:
 
-## How it works
-
+```bash
+ln -s "$(pwd)" ~/.agents/skills/attest
+ln -s ~/.agents/skills/attest ~/.claude/skills/attest
+ln -s ~/.agents/skills/attest ~/.codex/skills/attest
+ln -s ~/.agents/skills/attest ~/.config/opencode/skills/attest
 ```
-  requirement
-      │
-      ▼
-  plan ─────── every invariant pinned to a test case that really exists
-      │
-      ▼
-  readiness.py ──▶ runs the repo's own tests · coverage gate · PG catalog · reconcile script
-      │
-      ▼
-  evidence list ─▶ measured │ static signal │ not measured │ not judged
+
+`~/.agents/skills/attest` is the stable entry point;
+`~/.agents/testkit/doctor.sh` runs the regression suite from there.
+
+### Distribute as a `.skill`
+
+```bash
+python3 package.py            # → dist/attest.skill
+python3 package.py --check    # list what would be packaged, write nothing
 ```
+
+`.skill` is the community's distribution format (a zip whose first level is the
+skill directory). The packager is **self-contained**: it needs no external
+tooling. Excluded: `.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` /
+bytecode, and `scripts/test_*.py` (the regression suite belongs to the repo, not
+to the skill's runtime). **It refuses to package bytecode** — compiled artifacts
+leak the author's environment and give users an unreadable bundle.
+
+### Quick start
+
+**1. Plan the requirement**
+
+```bash
+python3 ~/.agents/skills/attest/scripts/req_plan.py new <feature> \
+  --repo <repo root> --module <subpath> [--module <subpath>...]
+```
+
+Scans the target module for existing helpers and for the repo's own test lanes,
+then writes empty invariant and coverage-matrix tables.
+
+**2. Fill in the invariants**
+
+Every invariant is one falsifiable sentence ("the export contains every
+completed order of this month, no more and no less"); every matrix row names
+the test file that covers it. This is the part a human reads.
+
+**3. Check the plan against the code**
+
+```bash
+python3 ~/.agents/skills/attest/scripts/req_plan.py check <plan file> \
+  --repo <repo root>
+```
+
+Verifies each pin: does the file exist, does the test case really live in it.
+Exits 1 on errors.
+
+**4. Measure the readiness**
+
+```bash
+python3 ~/.agents/skills/attest/scripts/readiness.py <module path> \
+  --repo <repo root> \
+  [--plan <requirement test plan>] [--include-itest] [--test-tenant <name or prefix>] [--json]
+```
+
+Runs the repo's own tests and coverage gate, queries the PG catalog, drives the
+repo's own reconciliation script, and prints the evidence list. `--dry-run`
+lists the scripts it would execute without running them.
+
+Optionally, `req_plan.py scaffold <plan> --repo <root>` generates test file
+skeletons that follow the repo's own conventions; when it cannot recognise them
+it refuses to generate and reports red instead of guessing.
+
+### Switches
+
+Of `readiness.py`:
+
+| Switch | What it does |
+| --- | --- |
+| `--plan <file>` | The requirement test plan to check the module against (drives the 需求覆盖到位 criterion) |
+| `--json` | Machine-readable output (checks + the verdict counters) |
+| `--dry-run` | **Only lists** the repo scripts and commands that would be executed, then exits (executes nothing). Look before you run |
+| `--self-check` | Reverse verification: inject a known defect into a **temporary copy** to prove the criteria turn red. Your repo is not touched |
+| `--self-check-deps` | With `--self-check`: **symlink** `node_modules` / `.venv` into the copy (no copying), so the copy can really run the tests and the measured criteria get verified too |
+| `--mutation-check` | Test strength: break the source and see whether **the tests turn red**. It copies the workspace and runs the tests many times, so it is expensive ⇒ **off by default** (without it that criterion is "not measured") |
+| `--include-itest` | Count the real-backend itest lane too (needs PostgreSQL + a vector store; slow) |
+| `--test-tenant <name or prefix>` | Declare a test tenant (repeatable) — drift in a test tenant is fixture state, so it does not block |
+| `--test-tenant-prefix <prefix>` | Add a test-tenant prefix (defaults recognise `itest-` `memtest-` `mock-` `eval-` …) |
+| `--test-dir <path>` | Extra test directory (for repos that keep tests outside `test/` `tests/` `spec/`); repeatable |
+| `--drift-pattern <regex>` | What a "drift row" looks like in the reconciliation output (default: `漂移` / `❌` / `drift` / `mismatch`) |
+| `--table-header-pattern <regex>` | What a header/separator row looks like in the reconciliation output (default: `一致性` / `租户` / `tenant` / `---`) |
+| `--csv-pair a.csv=b.csv` | CSV pairing, repeatable — pairs are declared, not matched pairwise |
+| `--tenant-col <name>` | Which CSV column holds the tenant |
+| `--min-line-coverage` / `--min-branch-coverage` | Explicit coverage thresholds. **No generic threshold by default** (no repo gate ⇒ judged `skipped`, not `fail`) |
+| `--database-url <url>` | PostgreSQL connection string (defaults to `POSTGRES_URL`) |
+| `--verbose` | Print the raw test output too |
+
+`req_plan.py` sub-commands and their extra flags: `new` takes `--out` (default
+`docs/<feature>-test-plan.md`) and `--force`; `scaffold` takes `--out-dir`
+(default: the repo root), `--framework` (`node:test` / `vitest` / `jest` /
+`mocha`) and `--force`; `check` takes only `<plan>` and `--repo`.
 
 ## What it measures: 14 criteria
 
@@ -102,7 +258,7 @@ report the criterion lands in: **a static signal never supports a pass on its
 own.** The kind is assigned **per run**: a criterion that needs a database is
 marked "not measured" when there is no connection, never "measured".
 
-## What the output looks like
+## The output
 
 Real output from the repo's own fixture (`fixtures/ts-colocated`):
 
@@ -136,135 +292,6 @@ Real output from the repo's own fixture (`fixtures/ts-colocated`):
 
 Look at the last line: **7 items with no signal**, not "7 passed". A criterion
 that was not measured is reported as "not measured".
-
-## How to use it: four steps
-
-1. **Generate the plan skeleton**: `req_plan.py new` scans the target module
-   for existing helpers and for the repo's own test lanes, and writes empty
-   invariant and coverage-matrix tables. Do this when the work starts.
-2. **Fill in the invariants and the matrix**: every invariant is one
-   **falsifiable** sentence (e.g. "the export contains every completed order
-   of this month, no more and no less"), and every matrix row names the test
-   file that covers it. This is the part a human reads.
-3. **Check the plan against the code**: `req_plan.py check` verifies each pin:
-   does the file exist, does the test case really live in it. Exits 1 on errors.
-4. **Judge the readiness**: `readiness.py` measures the module's delivery
-   preconditions and produces the evidence list above. **This step works
-   without a plan too** (only "需求覆盖到位" is then not measured).
-
-After step 2, `req_plan.py scaffold` can generate test file skeletons that
-follow the repo's own conventions. When it cannot recognise them it
-**refuses to generate** and reports red instead of guessing.
-
-## Install
-
-```bash
-python3 install.py              # cross-platform (stdlib only, no bash needed)
-# or: bash install.sh           # a thin shell wrapper around the same code
-```
-
-It symlinks this repository to `~/.agents/skills/attest`, then symlinks that
-entry into four agents' skills directories:
-
-| Target | Path |
-| --- | --- |
-| Stable entry point | `~/.agents/skills/attest` |
-| Claude Code | `~/.claude/skills/attest` |
-| Codex | `~/.codex/skills/attest` |
-| OpenCode | `~/.config/opencode/skills/attest` |
-
-An existing symlink with the same name is replaced (the script says so); if the
-target path is a **real directory** the script skips it and never deletes user
-data. It self-checks afterwards (`readiness.py --help` runs).
-
-Uninstall with `python3 install.py --uninstall` (or `bash uninstall.sh`);
-it removes symlinks only.
-
-On Windows `os.symlink` may need administrator rights or developer mode; on
-failure the script prints the equivalent manual commands and never deletes user
-data.
-
-Doing it by hand is equivalent to:
-
-```bash
-ln -s "$(pwd)" ~/.agents/skills/attest
-ln -s ~/.agents/skills/attest ~/.claude/skills/attest
-ln -s ~/.agents/skills/attest ~/.codex/skills/attest
-ln -s ~/.agents/skills/attest ~/.config/opencode/skills/attest
-```
-
-`~/.agents/skills/attest` is the stable entry point;
-`~/.agents/testkit/doctor.sh` runs the regression suite from there.
-
-## Packaging (`.skill`)
-
-```bash
-python3 package.py            # → dist/attest.skill
-python3 package.py --check    # list what would be packaged, write nothing
-```
-
-`.skill` is the community's distribution format (a zip whose first level is the
-skill directory). The packager is **self-contained**: it needs no external
-tooling. Excluded: `.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` /
-bytecode, and `scripts/test_*.py` (the regression suite belongs to the repo, not
-to the skill's runtime).
-
-**It refuses to package bytecode.** Compiled artifacts leak the author's
-environment and give users an unreadable bundle.
-
-## Common switches
-
-Of `readiness.py`:
-
-| Switch | What it does |
-| --- | --- |
-| `--plan <file>` | The requirement test plan to check the module against (drives the 需求覆盖到位 criterion) |
-| `--json` | Machine-readable output (checks + the verdict counters) |
-| `--dry-run` | **Only lists** the repo scripts and commands that would be executed, then exits (executes nothing). Look before you run |
-| `--self-check` | Reverse verification: inject a known defect into a **temporary copy** to prove the criteria turn red. Your repo is not touched |
-| `--self-check-deps` | With `--self-check`: **symlink** `node_modules` / `.venv` into the copy (no copying), so the copy can really run the tests and the measured criteria get verified too |
-| `--mutation-check` | Test strength: break the source and see whether **the tests turn red**. It copies the workspace and runs the tests many times, so it is expensive ⇒ **off by default** (without it that criterion is "not measured") |
-| `--include-itest` | Count the real-backend itest lane too (needs PostgreSQL + a vector store; slow) |
-| `--test-tenant <name or prefix>` | Declare a test tenant (repeatable) — drift in a test tenant is fixture state, so it does not block |
-| `--test-tenant-prefix <prefix>` | Add a test-tenant prefix (defaults recognise `itest-` `memtest-` `mock-` `eval-` …) |
-| `--test-dir <path>` | Extra test directory (for repos that keep tests outside `test/` `tests/` `spec/`); repeatable |
-| `--drift-pattern <regex>` | What a "drift row" looks like in the reconciliation output (default: `漂移` / `❌` / `drift` / `mismatch`) |
-| `--table-header-pattern <regex>` | What a header/separator row looks like in the reconciliation output (default: `一致性` / `租户` / `tenant` / `---`) |
-| `--csv-pair a.csv=b.csv` | CSV pairing, repeatable — pairs are declared, not matched pairwise |
-| `--tenant-col <name>` | Which CSV column holds the tenant |
-| `--min-line-coverage` / `--min-branch-coverage` | Explicit coverage thresholds. **No generic threshold by default** (no repo gate ⇒ judged `skipped`, not `fail`) |
-| `--database-url <url>` | PostgreSQL connection string (defaults to `POSTGRES_URL`) |
-| `--verbose` | Print the raw test output too |
-
-`req_plan.py` sub-commands and their extra flags: `new` takes `--out` (default
-`docs/<feature>-test-plan.md`) and `--force`; `scaffold` takes `--out-dir`
-(default: the repo root), `--framework` (`node:test` / `vitest` / `jest` /
-`mocha`) and `--force`; `check` takes only `<plan>` and `--repo`.
-
-## How the criteria are measured
-
-- **The threshold belongs to the repo**. If the repo has a coverage gate, the
-  tool drives it and judges by its exit code. Generic thresholds are only a
-  fallback when the repo has no gate, and they do not block by default.
-- **Measurement first**. Every criterion either has measured evidence or states
-  which precondition is missing. A static inference never passes as a
-  measurement.
-- **"Cannot run" is not "below the bar"**. Setup errors, missing artifacts and
-  unreachable middleware are judged `skipped`, with the missing condition named.
-- **Delivery is judged on the production tenant**. Drift in a test tenant is
-  fixture state: reported as a warning, never blocking.
-- **Field-level comparison across stores**. When the same id has different
-  values for the same field in the authoritative store and in a derived store,
-  the report names the id and the field.
-- **High coverage ≠ strong tests**. Coverage only says the code was executed,
-  not that an assertion would fail ⇒ there is a separate "the tests can find
-  defects" criterion.
-- **Environment not ready ≠ the mutant was killed**. When a mutated point
-  fails because of an environment error rather than an assertion failure, that
-  point is judged **not decided**, not "the tests found the defect".
-- **The PG side and the collection side are symmetric**. The table structure
-  has five rules of its own, and the vector collection has its counterpart: one
-  collection's attributes must agree across call sites.
 
 ### Output contract
 
@@ -395,7 +422,17 @@ One more item that is not in the CHANGELOG's "known leftovers" list: the body of
 `SKILL.md` is still Chinese. This README has a Chinese version; the skill body
 does not.
 
-## Development and verification
+## Documentation
+
+- [SKILL.md](SKILL.md) — the full skill contract: when the skill fires, the
+  workflow, and the criteria table
+- [CHANGELOG.md](CHANGELOG.md) — what changed, and the known leftovers
+- [docs/publication-status.md](docs/publication-status.md) — the release status
+  and how it was verified
+- [docs/testing-philosophy-review.md](docs/testing-philosophy-review.md) — the
+  review of its testing philosophy, and what it changed
+
+## Development
 
 This repo runs its own tool on itself, and the evidence is reproducible:
 

@@ -32,8 +32,8 @@ OCR 报出 5 处真缺陷，每处都配了回归钉：
 | 根因 | 机制 | 证据 |
 | --- | --- | --- |
 | R-A 清单完整性没人管 | `check` 只验「不变式 → 钉 → 用例」的闭合，不验「需求 → 不变式」的完整性。缺陷 2/3/4 在 20 条不变式里**根本没有对应条目** | `docs/agent-memory-delivery-test-plan.md` 全文无「分类 / 关闭 / 缓存 / 生命周期」；`req_plan.py` 的 `check` 无此校验 |
-| R-B 变异算子只看比较运算符 | `mutation_check.py` 的算子集只有 `== != === !== >= <=` 六种。缺陷 1/2/3/5 都是**结构性**缺陷（filter→throw、语句删除、正则改写），不在算子射程内 | `scripts/mutation_check.py:44-51` |
-| R-C 变异「杀死」答的不是这个问题 | 变异杀死 = 套件对某个改动敏感；它从不回答「当前生产代码对不对」。缺陷 1 处把 `!==` 变异成 `===` 会被现有测试杀死 ⇒ 报「测试能发现缺陷 ✓」，而缺陷当时是活的 | `scripts/mutation_check.py:11-16` |
+| R-B 变异算子只看比较运算符 | `mutation_check.py` 的算子集只有 `== != === !== >= <=` 六种。缺陷 1/2/3/5 都是**结构性**缺陷（filter→throw、语句删除、正则改写），不在算子射程内 | `scripts/mutation_check.py:47-54`（`_OP_MAP`）、`:60`（`_OP_RE`） |
+| R-C 变异「杀死」答的不是这个问题 | 变异杀死 = 套件对某个改动敏感；它从不回答「当前生产代码对不对」。缺陷 1 处把 `!==` 变异成 `===` 会被现有测试杀死 ⇒ 报「测试能发现缺陷 ✓」，而缺陷当时是活的 | `skills/attest/scripts/mutation_check.py` 模块文档字符串（讲的是「测试能发现缺陷」这条判据）；`run_mutation_check` 的 `killed`/`unknown`/`survivors` 三分口径（`:252-271`） |
 
 外加一条：**缺陷 1 处，attest 的对账判据其实有机会抓到，但它报的是实话。**
 2026-11-14 对账报告 default 租户 49 行、缺向量 0、✅ 一致 —— 缺陷 1 要有一条正文为空的
@@ -110,9 +110,43 @@ OCR 报出 5 处真缺陷，每处都配了回归钉：
 
 ### 2.3 标识
 
-`file:line:kind` —— 人类可读、可 grep、可直接被 fixture 断言匹配。
+**`file#anchor#kind[#ordinal]`** —— 人类可读、可 grep、可直接被 fixture 断言匹配。
 
-例：`service/src/agent-memory/mem0-vector-store.ts:128:drop`
+| 段 | 取值 | 为什么这样取 |
+| --- | --- | --- |
+| `file` | **仓库相对路径**（`service/src/agent-memory/mem0-vector-store.ts`） | 与钉的路径口径一致（`_pin_violation` 只认仓库内相对路径）⇒ DP 列天然过越界闸，且**计划 ↔ 机器矩阵 ↔ fixture 断言**三处用同一个键 |
+| `anchor` | 所在**函数 / 方法 / 类成员名**；不在任何函数内 ⇒ `<toplevel>` | **不用行号**（见 §2.3.1） |
+| `kind` | 8 类之一（§2.2） | |
+| `ordinal` | 同一 `(file, anchor, kind)` 内的第几个，从 1 起；唯一时**省略** | 解决同一符号内同类 DP 撞 ID（§2.3.2） |
+
+例：`service/src/agent-memory/mem0-vector-store.ts#insertRow#drop`
+
+**行号不进 ID，但进报告**：行号作为独立字段（`line`）出现在「判定点覆盖」节与 JSON 里，
+供人复现。**ID 里没有行号 ⇒ 代码增删几行不会让 ID 漂移。**
+
+#### 2.3.1 为什么 ID 里不能带行号（builder-check 提出的硬问题）
+
+带行号的直接后果：生产代码**任何一处无关改动**都会让后面所有 DP 的行号偏移
+⇒ 计划里自动填好的 DP 列整列失效 ⇒ 双向对齐把每个移过行的 DP 判成「机器有 / 人工无」
+⇒ 高危档**批量报红**。这与 §1.3 的反目标「噪音机」直接冲突。
+
+⇒ 决定：**ID 不含行号；行号只是报告里的一个字段。**
+代码改了、函数没改名 ⇒ ID 不变 ⇒ 对齐结果不变 ⇒ 只有**真的改了判定点本身**
+（增删分支、改了资源归属）才会让 ID 变或数量变 ⇒ 那才是真的该重新对齐。
+
+代价：同一个函数里同类的多个判定点，要靠 `ordinal` 区分（§2.3.2）。
+
+#### 2.3.2 同一符号内同类 DP 撞 ID（builder-check 提出的硬问题）
+
+`if (x === 1 && y === 2)` 一行里两个 `boundary`；`if (a) { if (b) {} }` 写在一行两个 `branch`。
+若 ID 只到 `kind` 为止 ⇒ 两个 DP 的 ID 完全相同 ⇒ 静默合并成一条 ⇒ 计数错、归属错。
+
+⇒ 决定：**加 `ordinal` 段**（同一 `(file, anchor, kind)` 内从 1 开始编号，唯一时省略）。
+`ordinal` 的稳定性代价：在同一函数里**前面**插入一个同类 DP 会让后面的 ordinal 顺移
+⇒ 这时候要重跑 `upgrade` 重生成 DP 列（这是合理的：判定点集合真的变了）。
+
+**归一化**：报告与断言里比较 DP ID 时，先做**归一化**（`#` 分段、每段去空白、kind 段小写），
+`ordinal` 段可有可无（`x#f#drop` 与 `x#f#drop#1` 视为同一个 —— 前者是「唯一那个」的简写）。
 
 ### 2.4 与「核心逻辑细节」维度表的关系
 
@@ -240,15 +274,20 @@ Python 侧（`ast` 模块）：`If` / `Match` / `IfExp` / `Compare` / `Raise` / 
 
 ### 4.1 新版「核心逻辑细节」表
 
+**保留原有的「维度」列** —— 它承载现有的 `_DETAIL_DIMENSIONS` 覆盖判据（§4.4），
+丢掉它等于回退一条既有判据。新表是 **6 列**：
+
 ```markdown
-| DP ID | 判定点 | 归属的不变式 | 落点（文件::用例名） | 豁免理由 |
-| --- | --- | --- | --- | --- |
-| src/mem0-vector-store.ts:128:drop | 缺主键/正文的行必须报错而非丢弃 | I1 | mem0-vector-store.test.ts::rejects a row without id or text | |
-| src/vector-store-milvus.ts:436:resource | store.close 不得关闭共享 client | I21 | vector-store-milvus.test.ts::does not tear down the shared client | |
-| src/mem0-engine.ts:173:resource | 关闭后必须清空引擎缓存 | I22 | mem0-engine.test.ts::clears the engine cache so no handle keeps a closed client | |
+| 维度 | DP ID | 判定点 | 归属的不变式 | 落点（文件::用例名） | 豁免理由 |
+| --- | --- | --- | --- | --- | --- |
+| 错误路径 | service/src/agent-memory/mem0-vector-store.ts#insertRow#drop | 缺主键/正文的行必须报错而非丢弃 | I1 | service/src/agent-memory/mem0-vector-store.test.ts::rejects a row without id or text | |
+| 资源上限 | service/src/agent-memory/vector-store-milvus.ts#close#resource | store.close 不得关闭共享 client | I21 | service/src/agent-memory/vector-store-milvus.test.ts::does not tear down the shared client | |
+| 资源上限 | service/src/agent-memory/mem0-engine.ts#closeMemoryEngine#resource | 关闭后必须清空引擎缓存 | I22 | service/src/agent-memory/mem0-engine.test.ts::clears the engine cache so no handle keeps a closed client | |
+| 权限 |  | （该维度不对应任何判定点） |  | service/src/agent-memory/guards.test.ts::rejects a cross-tenant read | 不适用：权限由网关拦截，不在本模块判定 |
 ```
 
-- `req_plan.py new` **自动填前两列**（机器推导所得），人只填后三列。
+- `req_plan.py new` **自动填 DP ID 与判定点两列**（机器推导所得），人只填后三列。
+- **DP ID**：机器推导所得，格式见 §2.3。允许为空（该维度不对应任何判定点）。
 - **归属的不变式**：填不变式编号（`I1`）；该编号必须在不变式清单里存在。
 - **落点**：填 `测试文件::用例名`；工具核对用例真实存在（与现有「钉」同规格）。
 - **豁免理由**：非空即视为已豁免。
@@ -263,19 +302,57 @@ Python 侧（`ast` 模块）：`If` / `Match` / `IfExp` / `Compare` / `Raise` / 
 | 落点指向的用例在文件里不存在 | **报红** |
 | 落点只有文件、没有用例名 | 提醒（与现有「钉只到文件」同档） |
 | 豁免理由非空但没写清豁免的是什么 | 提醒 |
+| DP ID 指向的文件在仓库里不存在 | **报红**（机器推导出来的 ID 指向不存在的文件 ⇒ 推导器有 bug） |
 
-**实现提示（已核代码）**：`req_plan.py::_plan_pins`（约 1229 行）现在从「核心逻辑细节」表的
-**第 1 列**（索引 1）抽钉。新表把落点放在**索引 3** ⇒ 这一处的列号要跟着改，
-并且要同时认旧表（索引 1）与新表（索引 3），否则旧计划会被误判成「钉缺失」。
-`_plan_pins` 还要继续对所有节的钉做仓库越界闸，新表新增的两列不得引入新的写入面。
+**DP 列豁免「钉存在性/越界」检查**（与 builder-check 的问题①对齐）：
+`_plan_pins` 只从**落点列**抽钉，DP 列不参与 ⇒ DP 列不会引入新的写入面，
+也不会因为路径写法不同被判成「越界」。但 DP ID 里的文件部分**必须真实存在**（上表末行），
+否则说明推导器有 bug。
 
-### 4.3 老计划兼容（用户已选「条件式阻塞」）
+### 4.3 新旧格式识别（builder-check 的问题③：判据的判据）
+
+「计划已是判定点粒度吗」这个开关决定三条新判据是否硬判，**必须能机械判定**：
+
+| 输入 | 判定 |
+| --- | --- |
+| 表头含 `DP ID` 列 | 新格式 |
+| 无「核心逻辑细节」表 | 旧格式 ⇒ 三条新判据一律 **warn** |
+| 有该表但表头无 `DP ID`，且数据行的第 1 列**不是**可解析的 DP ID | 旧格式 ⇒ warn |
+| 有该表，表头无 `DP ID`，但数据行第 1 列**是**可解析的 DP ID | 新格式（按数据行判，不信表头） |
+
+「可解析的 DP ID」= 匹配 `^[^#]+#[^#]+#[a-z-]+(#\d+)?$`（归一化后）。
+
+**没有 `--plan` 时**（`readiness.py` 不带计划参数）：
+三条新判据一律 **`skipped`（证据类别 `untested`）**，**不是 fail**。
+理由与现有 `check_requirement` 一致（`readiness.py:2971`：无计划 ⇒ skipped + untested），
+且**现有 5 个黄金 fixture 都不传 `--plan`、期望退出码 0/1/2 不变** ⇒ 新判据在无计划时必须不是 fail。
+
+### 4.4 老计划兼容（用户已选「条件式阻塞」）
 
 - `check` 与 `readiness` 都能识别旧格式（维度表 ⇒ 无 DP 列）。
 - 旧计划 ⇒ 三条新判据一律降为 **warn**，并明确写：
   「本计划还是旧的模块级维度表；升级到判定点粒度后，这三条判据才会硬判」
-- 提供 `req_plan.py upgrade <计划文件>`：把旧表保留为附录，新增 DP 列（机器推导填好前两列），
+- 提供 `req_plan.py upgrade <计划文件>`：把旧表保留为附录，新增 DP 列（机器推导填好 DP ID 与判定点两列），
   人工补后三列。**不自动归属** —— 归属是人的判断。
+- **升级是「代码改了判定点集合才需要重跑」**，不是「代码动一行就要重跑」
+  （ID 不含行号 ⇒ 无关改动不需要重跑；§2.3.1）。
+
+### 4.5 `_plan_pins` 与维度覆盖判据的改法（已核代码）
+
+**已核事实**（`skills/attest/scripts/req_plan.py`）：
+- `_plan_pins`（`:1229-1233`）现在从「核心逻辑细节」表的 **第 1 列**（索引 1）抽钉
+  —— 旧表是 2 列（`维度 | 落点`）。
+- 维度覆盖判据（`:1470-1496`）同样读 `row[0]`（维度）与 `row[1]`（落点），
+  并用 `_DETAIL_DIMENSIONS` 做子串匹配。
+- `_pin_violation` 只认**仓库内相对路径**（越界闸）。
+
+**改法**：
+1. 落点列从索引 1 移到索引 **4** ⇒ `_plan_pins` 与维度覆盖判据都要**按格式分叉**：
+   新格式读 `row[4]`，旧格式读 `row[1]`。**两套都要认** ⇒ 旧计划不会被误判成「钉缺失」。
+2. 新增列 3（DP ID / 判定点 / 归属 / 豁免）**不引入新的写入面** —— 它们不参与抽钉。
+3. 维度覆盖判据在**新格式**下额外多一条：DP ID 非空 ⇒ 该行必须落在某个可变式；
+   DP ID 为空 ⇒ 仍按旧规则要求「落点」或「不适用 + 理由」。
+4. 格式分叉的判据用 §4.3 那张表，**不许靠列数猜**（列数会随人加列变）。
 
 ---
 
@@ -285,33 +362,105 @@ Python 侧（`ast` 模块）：`If` / `Match` / `IfExp` / `Compare` / `Raise` / 
 
 ```
 不变式 I_k
-  └─ 钉（测试文件::用例名）
+  └─ 钉（测试文件::用例名）            ← parse_pins() 已有，可直接用
        └─ 该测试文件 import 的生产符号（限目标模块内）
             └─ 这些符号的**可达闭包**内的 DP
                  ⇒ I_k 覆盖这些 DP
 ```
 
+- **钉的解析**：`req_plan.py::parse_pins(cell)`（`:816`）已把单元格解析成 `(文件路径, 用例名|None)`，
+  且 `::` 之后的整段都算用例名。**直接复用，别重写。**
+- **运行时 import**：见 §5.1.1（三种形态，动态 import 是主导形态）。
 - **可达闭包**：模块内调用图上的传递闭包。
-  TS：文件内 `f(` 形式的调用正则 + 导出符号的入口 ⇒ 保守上近似（多算不少算）。
+  **L3**：AST 后端给出的调用图（精确）。
+  **L2**：文件内 `f(` 形式的调用正则 + 导出符号的入口 ⇒ 保守上近似（多算不少算）。
   Python：`ast` 的调用图（精确）。
-- **可复用件（已核代码）**：`readiness.py:278` 的 `_import_specs(text, suffix)` 已能抽测试文件的
-  import 规格；`req_plan.py` 侧**没有**同类工具（只 import 了 `re`）⇒ 归属映射的实现位置由实现者定，
-  但 `_import_specs` 的行为口径（抽什么、抽到什么粒度）要复用，别另写一套。
 - 保守上近似是**有意的**：宁可多算覆盖（少报缺口），也不要把无关 DP 塞给人。
+
+#### 5.1.1 import 解析要新写，`_import_specs` 用不了（已核代码）
+
+`readiness.py:278` 的 `_import_specs(text, suffix)` 是**第三方依赖扫描器**：
+它对 JS/TS **显式跳过相对导入**（`spec.startswith(".")`）与路径别名（`@/`、`~`），
+且只返回**包名集合，不返回被导入的符号名**。
+而归属映射需要的是「**相对/别名路径 → 目标文件 → 被导入的符号名**」⇒ **口径相反，用不上**。
+
+需要新写一个 import 解析器。**但解析器的形态不能照抄「静态 import」的直觉** ——
+实测（2026-11-15，`service/src/agent-memory/` 25 个测试文件）发现三种形态并存，
+且**动态 import 是主导形态**：
+
+| 形态 | 实测例子 | 归属含义 |
+| --- | --- | --- |
+| **静态具名 import**（可跨多行） | `classification.test.ts:3` `import {\n  a,\n  b,\n} from './classification.ts';` | 取花括号里的符号名 |
+| **动态 import**（主导形态，25 个文件里约 17 个用） | `mem0-engine.test.ts:104` `} = await import('./mem0-engine.ts');`<br>`agent-pool.test.ts:8` `const { poolColumnFilter } = await import('./service.ts');` | 同静态：**优先取解构出的符号名**；**无解构 ⇒ 命名空间级**（整个模块的公开面都算引用） |
+| **纯类型 import** | `mem0-engine.test.ts:4` `import type { EngineHandle } from './mem0-engine.ts';`<br>`zz-vector-repro.unit.test.ts:90` `type Mem0Api = import('./mem0-engine.ts').Mem0Api;` | **运行时被擦除 ⇒ 不构成运行时覆盖，不计入** |
+
+**这条「纯类型 import 不计入」不是细节，是硬要求**：
+`mem0-engine.test.ts` 对 `./mem0-engine.ts` 只有一处 `import type`（第 4 行），
+真正的运行时引用是第 104 行的**动态** import。若解析器只认静态 import，
+它会把这个模块**最核心的测试文件**判成「零覆盖」⇒ §5.2 直接假红。
+反过来 `mem0-glue.test.ts:10` 与 `mem0-vector-store.test.ts:8` 对 `./vector-store.ts`
+**只有** `import type` ⇒ 判「零覆盖」是**正确**的（它们确实没在运行时碰那段代码）。
+
+**解析器要处理的 specifier 三类**（已核 lumen `service/` 的 `tsconfig`）：
+
+| 类别 | 规则 | 实测例子 |
+| --- | --- | --- |
+| 相对路径 | 后缀即文件名，直接相对**测试文件所在目录**解析 | `'./mem0-engine.ts'`、`'../agent-sensitive-data/protection-context.ts'` |
+| 路径别名 | 按目标仓库 `tsconfig` 的 `paths` 映射。**别名规则要从目标仓库的 `tsconfig` 读，不硬编码 lumen 的** | `@/chat/telemetry.ts` → `./src/chat/telemetry.ts`；`@config/env.ts`、`@lib/api-error.ts` |
+| 裸包名 | 第三方 ⇒ **忽略**（但注意：`@lumen/service-api` 是**作用域包名**不是路径别名，别把它当别名解） | `node:test`、`drizzle-orm/pg-core`、`@lumen/service-api`、`fastify-type-provider-zod` |
+
+lumen `service/` 的 `tsconfig` 实测值：`moduleResolution: "bundler"`、
+`allowImportingTsExtensions: true`（⇒ **import 直接带 `.ts` 后缀**）、
+`paths` 有 `@/*`、`@config/*`、`@lib/*`、`@middleware/*` 四组。
+
+**符号名的取法**：具名 import 的花括号（`import { a, b as c }` ⇒ `a`、`c`）、
+默认 import、命名空间 import（`import * as ns` ⇒ 命名空间级）、
+动态 import 的解构模式（`const { a, b } = await import(...)` ⇒ `a`、`b`；
+无解构 ⇒ 命名空间级）。
+
+**实现约束**：解析必须**跨行**（具名 import 的花括号列表常换行），
+且必须能区分 `import type` / `import { type X }`（类型）与其余（运行时）。
+纯正则要小心 —— **L3 路径下这一整套应该从 AST 后端取**（后端天然区分 type-only import），
+**L2 回退路径下才用正则**，且 L2 的类型/运行时区分不可靠 ⇒
+L2 下**保守地把 `import type` 也算进去**（宁可多算覆盖，不假红）。
+
+#### 5.1.2 「这个文件导出了哪些符号」
+
+- **L3**：AST 后端解析时顺手产出每个文件的导出符号表（精确）。
+- **L2**：`req_plan.py::module_helpers`（`:406`）已有一套正则导出扫描
+  （`export function|const|class|…` / `export { a, b }` / 解构导出 / Python `def`/`class`），
+  但它按**模块**聚合、不按文件 ⇒ L2 路径下需要一版按文件的（逻辑可复用，粒度要改）。
 
 ### 5.2 「钉不碰目标模块」要报
 
 若某条不变式的钉**引用的生产符号集合为空**（测试文件没 import 目标模块的任何东西），
-则它对目标模块零覆盖 ⇒ **报红**：「这条不变式的钉不碰目标模块的任何代码」。
+则它对目标模块零覆盖 ⇒ **报红**：「这条不变式的钉不直接引用目标模块的任何代码」。
 
-这一条能抓「钉指向的用例其实测的是别的东西」。
+「引用」的口径按 §5.1.1 定：
+**运行时 import 才算**（静态具名 / 动态 / 命名空间），
+**纯类型 import 不算**（运行时被擦除），
+`mock.module('./x.ts')` 算引用（它点名了那个模块）。
+
+这一条能抓「钉指向的用例其实测的是别的东西」（缺陷 ④ 的形态）。
+
+**已知误报面**：覆盖可能经由**间接调用**发生（测试只 import 了一个 helper，helper 内部调目标模块）。
+本工具的归属链**只做模块内可达闭包，不跨文件追 helper** ⇒ 这种情形会被误报成零覆盖。
+处置：**默认报红，但必须能用 §5.3 的豁免机制豁免**，报告文案要写明
+「若是通过间接调用覆盖，请豁免并写理由」。**不许**因为怕误报就默认放过 —— 那等于回到今天的盲区。
+
+**这一条的实测代价与收益（2026-11-15 实测）**：
+在 `service/src/agent-memory` 上扫 25 个测试文件，
+`mem0-glue.test.ts` 与 `mem0-vector-store.test.ts` 对 `./vector-store.ts`
+**只有** `import type` ⇒ 这两个文件对 `vector-store.ts` 判零覆盖是**正确**的，
+不是误报。这条判据在真实模块上**没有出现误报面**。
 
 ### 5.3 豁免语法
 
 两种都接受，取其一：
 
 - 表格的「豁免理由」列非空；
-- 计划正文里的注释：`<!-- attest:waive src/x.ts:12:drop reason="该分支由上游校验拦截" -->`
+- 计划正文里的注释（**ID 格式与 §2.3 一致：不含行号**）：
+  `<!-- attest:waive service/src/agent-memory/x.ts#insertRow#drop reason="该分支由上游校验拦截" -->`
 
 豁免**必须给理由**（非空字符串），否则报红。豁免在报告里逐条列出（让人能复核是否滥用了豁免）。
 
@@ -326,55 +475,185 @@ Python 侧（`ast` 模块）：`If` / `Match` / `IfExp` / `Compare` / `Raise` / 
 1. 解析钉 → 测试文件 `T` + 用例名 `C`。
 2. 求 `T` 引用的目标模块生产符号集合 `S`，及其可达闭包 `S*`。
 3. 在 `S*` 的函数体里生成变异点（§6.3 的算子集）。
-4. 对每个变异点 `m`：
-   - **复制工作区**（复用 `mutation_check.py` 的 `_copy_repo` + `_link_deps`；
-     副本默认不带 `node_modules`，`readiness.py --self-check-deps` 才软链；
-     **计划从原仓库读，副本里没有 `docs/`**）
+4. **建一份副本**（复用 `mutation_check.py` 的 `_copy_repo` + `_link_deps`；
+   副本默认不带 `node_modules`，`readiness.py --self-check-deps` 才软链；
+   **计划从原仓库读，副本里没有 `docs/`**），
+   然后**在副本里逐个变异、跑完原地还原**（复用 `run_mutation_check` 的做法）。
+   **不每个变异点复制一份**（builder-check 的问题⑦）：
+   磁盘与复制时间降 ~6×，而每个变异点**都要重跑一次测试**（这才是真成本，省不掉）。
+5. 对每个变异点 `m`：
    - 应用 `m`（只改副本）
-   - 跑测试，判定**用例 `C` 本身**是否变红（复用现有 `classify` 三分口径）
-   - 还原/丢弃副本
-5. 结论：
+   - **先验变异体可解析**（§6.3.2）⇒ 解析不过 ⇒ 该点记 `unknown`，不跑测试
+   - **再验变异确实生效**（§6.4.1）⇒ 没生效 ⇒ 记 `not-applicable`，不跑测试
+   - 跑测试，判定**用例 `C` 本身**是否变红（复用现有 `classify` 三分口径 + §6.2.1 的严格匹配）
+   - 原地还原副本里的文件
+6. 结论：
 
 | 情况 | 判定 | 说明 |
 | --- | --- | --- |
 | 至少 1 个变异被 `C` 杀死 | **pass** | 这条钉能发现这类缺陷 |
 | 全部变异存活 | **fail**（条件式阻塞下） | 列出存活变异点位置：`file:line` + 算子 |
 | 环境没就绪（runner 跑不起来 / 解析不出用例名） | **untested** | 不是 fail —— 沿用现有「跑不起来 ≠ 不达标」口径 |
+| **闭包里一个变异点都没有**（纯计算函数，没有比较、没有 throw、没有 filter） | **not-applicable** | builder-check 的问题④：**不是 fail**。判 fail ⇒ 纯函数一律被报「钉无区分力」⇒ 噪音机；判 pass ⇒ 假绿。这一档**不计入杀死率分母**，并在报告里写明「该不变式的可达闭包内没有可变异点」 |
+
+四档的口径统一为：**只有「全部存活」这一档报红**。其余三档都不报红。
+
+**为什么必须新增第四档**：三档表（pass / fail / untested）里，「零变异点」只能被硬塞进 fail 或 untested，
+两个都不对 —— fail 是假红，untested 把「这条钉本来就没被变异算子覆盖」说成「没测到」，
+会把工具自己的覆盖面不足伪装成项目的问题。**第四档是必需的，不是可选的。**
 
 ### 6.2 「只跑钉住的那一个用例」—— 关键细节
 
 若跑整个测试文件，别的用例红会掩盖「这个钉到底有没有区分力」。所以必须精确定位到 `C`。
 
-**主路径（runner 无关，推荐）**：跑**整个测试文件**，然后用现有的 `_failed_tests_detail`
-解析出失败的用例名列表，判断 `C` 是否在其中。
-—— 完全复用现成的 runner 输出解析（`_node_summary` / `_pytest_summary` / `_failed_tests_detail`），
-   对任何 runner 都成立。
+**主路径（runner 无关，推荐）**：跑**整个测试文件**，然后从 runner 输出里解析出
+**失败的用例名列表**，判断 `C` 是否在其中。
+
+⚠️ **这里踩到一个既有缺陷 ⇒ 必须先修（P0，见 §10）**：
+
+`readiness.py::_failed_tests_detail`（`:722`）的正则是
+`re.match(r"^not ok \d+ - (.+)$", ln)` —— **锚在行首**。
+node:test 的 TAP 输出里，**嵌在 `describe` 里的用例行有缩进**
+（实测：`    not ok 2 - failing case`），**匹配不到**；只有顶层套件聚合行
+（`not ok 1 - outer group`）在行首、匹配得到。
+
+**实测后果（2026-11-15，node 22 + `node --test`）**：
+
+```
+输入：describe('outer group') 里一个 ECONNREFUSED 的失败用例
+现有 _failed_tests_detail ⇒ ['outer group | 1 subtest failed']   ← 套件名，不是用例名
+现有 _classify_run        ⇒ 失败用例非空、未实测原因为空 ⇒ 判「产品缺陷（阻塞）」
+正确判定                   ⇒ 环境没就绪（未实测），不阻塞
+```
+
+⇒ **嵌套在 `describe` 里的环境错误，今天会被误判成产品缺陷（假红）**。
+`service/src/agent-memory` 的所有测试都包在 `describe` 里 ⇒ 这条在目标模块上是活的。
+
+**修法（已原型验证）**：
+
+1. 匹配前**去缩进**（`ln.strip()` 后再匹配）；
+2. 用 `# Subtest: <名字>` 行的**缩进栈**重建**全路径**
+   （`# Subtest: outer group` 在缩进 0，`# Subtest: failing case` 在缩进 4
+   ⇒ 全路径 = `outer group > failing case`）；
+3. 用紧随其后的 YAML 块里的 `type: 'suite'` **排除套件聚合行**（否则套件名会混进列表）；
+4. 失败用例的判定见 §6.2.1（**严格匹配**，不能用现有的模糊匹配）。
+
+原型实测结果：
+```
+修复后失败用例全路径 ⇒ ['outer group > failing case', 'outer group']
+去掉 type:'suite' 后   ⇒ ['outer group > failing case']
+```
+
+**既有测试不回归**：`scripts/test_readiness_runners.py::test_env_error_not_blocking`
+用的是**平铺**的 `not ok 1 - connect ECONNREFUSED ...`（行首）⇒ 去缩进后仍匹配 ⇒ 仍绿。
+但它**没有覆盖嵌套情形** ⇒ 修的时候要**补一条嵌套用例**（新缺陷 ⇒ 必测）。
+
+**这条修复会改变一条既有判据的行为**（「环境没就绪 vs 产品缺陷」的判定），
+方向是**消除假红**，不是放松门槛 ⇒ 在 §12 DoD 里显式声明，不藏在「行为不变」底下。
 
 **快路径（可选加速）**：已知 runner 且支持单用例筛选时（node:test 的 `--test-name-pattern`、
 pytest 的 `-k`、go 的 `-run`），直接筛。**前提是必须能确认筛的是同一个用例**
 （筛完的 runner 输出里要能看到该用例名）。确认不了就回退主路径。
 
+#### 6.2.1 用例名比对必须**严格**（builder-check 的问题⑤/Q6）
+
+**不能复用 `req_plan.py::case_matches`（`:792`）**。它是**模糊匹配**：
+完全相同，或 ≥8 字符的前/后缀落在词边界上就算命中。拿它判「C 变红了没」会**假杀死**：
+
+```
+C = "rejects a row"
+失败用例全路径 = "outer group > rejects a row without id"
+case_matches ⇒ True   ← 假：这不是 C 红了，是**另一个**用例红了
+⇒ 报「这条钉有区分力」⇒ 假绿
+```
+
+⇒ 决定：**新写一个严格匹配函数 `match_case(case, full_path)`**，规则只有两条：
+
+1. 归一化（折叠空白、去首尾空格）后**完全相等** ⇒ 命中；
+2. 否则把 `full_path` 按 `>` 切成段，把 `case` 也按 `>` 切成段，
+   取 `full_path` 的**末尾 k 段**（k = `case` 的段数）⇒ 与 `case` **逐段完全相等** ⇒ 命中；
+   段数不足 ⇒ 不命中。
+
+效果：
+```
+"failing case"                vs "outer group > failing case"            ⇒ 命中（末段相等）
+"outer group > failing case"  vs "outer group > failing case"            ⇒ 命中（完全相等）
+"rejects a row"               vs "outer group > rejects a row without id" ⇒ 不命中 ✔ 堵住假杀死
+```
+**规则只有这两条，没有第三条** —— 不做「去前缀」「包含」「去标点」等任何宽松化。
+
+**计划里写哪一种用例名算数**：`node:test` 的 TAP 给的是**内层**用例名，
+而 `req_plan.py::test_case_names`（`:748`）对 `describe` 嵌套同时登记「内层名」与「外层 > 内层」全名。
+⇒ 两种都算命中（规则 1 与规则 2 天然覆盖）。**计划里写全名更保险**（能钉住是哪个 `describe` 下的用例）。
+
 ### 6.3 变异算子集（扩展后）
 
-| 算子 | 变换 | 覆盖的缺陷形态 |
-| --- | --- | --- |
-| `cmp-negate` | `==`↔`!=`、`===`↔`!==` | 比较写反（现有） |
-| `cmp-tighten` | `>=`→`>`、`<=`→`<` | 边界含不含（现有） |
-| `drop-throw` | 删掉一条 `throw`/`raise` | 错误被吞（缺陷 4 形态） |
-| `drop-call` | 删掉一条 `await f(...)` / `f(...)` 调用语句 | 关键动作被跳过（缺陷 3 形态） |
-| `in-to-hasown` | `x in Y` → `Object.hasOwn(Y, x)`（Python：`x in Y` → `hasattr`→`Y.__contains__` 语义等价物不适用 ⇒ Python 侧跳过此算子） | 原型链绕过（缺陷 4 形态） |
-| `predicate-negate` | `filter`/`map` 谓词取反 | 过滤方向错（缺陷 1 形态） |
-| `catch-drop` | `catch` 块体清空 | 错误被吞成空结果 |
+| 算子 | 变换 | 覆盖的缺陷形态 | 需要哪一级后端 |
+| --- | --- | --- | --- |
+| `cmp-negate` | `==`↔`!=`、`===`↔`!==` | 比较写反（现有） | **L2 即可**（现有 `_OP_RE`） |
+| `cmp-tighten` | `>=`→`>`、`<=`→`<` | 边界含不含（现有） | **L2 即可**（现有 `_OP_RE`） |
+| `in-to-hasown` | `x in Y` → `Object.hasOwn(Y, x)`（Python 侧跳过此算子） | 原型链绕过（缺陷 4 形态） | **L2 即可**（有界文本替换） |
+| `drop-throw` | `throw E` → `void E`（**表达式替换**，不是删整行） | 错误被吞（缺陷 4 形态） | **仅 L3**（要语句/表达式边界） |
+| `drop-call` | `f(args)` → `undefined`（**表达式替换**，不是删整行） | 关键动作被跳过（缺陷 3 形态） | **仅 L3** |
+| `predicate-negate` | `filter(P)` → `filter(x => !P(x))` | 过滤方向错（缺陷 1 形态） | **仅 L3**（要谓词参数边界） |
+| `catch-drop` | `catch (e) { BODY }` → `catch (e) { }` | 错误被吞成空结果 | **仅 L3** |
 
-**规则不变**（继承 `mutation_check.py` 现状）：不改常量、不改字符串、不改控制流结构；
-字符串与注释里的运算符不碰；改完仍是同类语义、不会死循环。
+**「规则不变」这句话必须改写（builder-check 的问题①：原文自相矛盾）**：
+
+原文写的是「不改常量、不改字符串、**不改控制流结构**」，而 `drop-throw` / `drop-call` / `catch-drop`
+三个算子**本质上就是改控制流** —— 一句话同时说了两件矛盾的事。
+
+⇒ 改写为两条明确规则：
+
+1. **（保留）不改常量、不改字符串、不改注释；字符串与注释里的运算符不碰。**
+2. **（新）允许改控制流 —— 这正是新算子的目的**，但必须同时满足：
+   - **变异体仍能解析**（§6.3.2）；
+   - **不产生未定义引用**（§6.3.3）。
+
+**分级的原因（也是 L2 下的口径）**：语句级手术在词法层做不可靠 ⇒
+**结构算子只在 L3（AST）路径下实现**。L2 路径只保留三个可做词法的算子
+（`cmp-negate` / `cmp-tighten` / `in-to-hasown`）。
+⇒ **L2 下某条不变式的可达闭包里若只有结构算子 ⇒ 零变异点 ⇒ 落在 §6.1 的 `not-applicable` 档**，
+既不报红也不假装测过。**这比「在 L2 下硬做结构算子」诚实得多。**
+
 每个新算子必须能被自证（**该算子能杀死一个已知的坏实现**）—— 否则它可能只是制造编译错误。
+
+#### 6.3.1 「删语句」为什么改成「表达式替换」
+
+`drop-call` 若真把 `const r = await f(x)` 整行删掉 ⇒ `r` 未定义 ⇒ 后续用到 `r` 的地方
+抛 `ReferenceError` ⇒ 测试红了 ⇒ 被判「杀死」—— **但死因与被测语义无关** ⇒ 假绿。
+
+⇒ 决定：**用表达式替换代替删语句**：
+- `drop-call`：`f(args)` → `undefined`（保留绑定，`r` 变成 `undefined` 而不是「未定义」）；
+- `drop-throw`：`throw E` → `void E`（保留 `E` 的求值副作用，只是不再抛）。
+
+这样变异体**不会引入未定义引用**，被测代码也不会因为「变量不存在」而崩。
+
+`catch-drop` 是例外：它的语义就是「catch 体不执行」，只能清空块体 ⇒ 必须靠 §6.3.3 的守卫。
+
+#### 6.3.2 变异体必须仍能解析（否则不算「杀死」）
+
+一个编译不过的变异体，跑测试必然红 ⇒ 会被判「杀死」⇒ **假绿**（死因是语法错误，不是被测语义）。
+
+⇒ 决定：**应用变异后先做一次解析校验**：
+- TS/JS：用 §3.3 的 AST 后端解析该文件；
+- Python：`ast.parse`。
+解析失败 ⇒ 该变异点记 **`unknown`（判不了）**，**不跑测试、不计入分母**，并在报告里写明原因。
+
+#### 6.3.3 删块体不得留下未定义引用
+
+`catch-drop` 清空 catch 体后，若体里声明了标识符（`const e = ...`）且该标识符在**后续代码**里被引用
+⇒ 未定义引用 ⇒ 同上会产生与语义无关的红。
+
+⇒ 决定：`catch-drop` 在生成变异点前先做**声明-使用检查**：
+catch 体里声明的标识符，若在文件后续（块外）仍被引用 ⇒ **放弃该变异点**（记 `not-applicable`）。
+（实现：AST 取 catch 体的绑定名，在文件其余部分做标识符引用检查。）
 
 ### 6.4 与现有 `mutation_check.py` 的关系
 
 **事实校准**（已核代码，2026-11-15）：
 
-- `scripts/mutation_check.py` 是**库**，不是 CLI。它自己的 argparse 只接一个源码文件（单文件调试用）。
+- `skills/attest/scripts/mutation_check.py` 是**库**，不是 CLI。它自己的 argparse 只接一个源码文件（单文件调试用）。
   对外入口是 `run_mutation_check(repo, ws_rel, source_rels, test_rels, runner, max_mutants, timeout, classify)`，
   由 `readiness.py:2477` 调用。**所以 DPSP 的新参数是函数级参数，不是命令行开关。**
 - 副本机制已存在：`_copy_repo`（`shutil.copytree` + `SKIP_DIRS`）+ `_link_deps`（软链 `node_modules` /
@@ -393,10 +672,37 @@ pytest 的 `-k`、go 的 `-run`），直接筛。**前提是必须能确认筛�
 | `mutation_check.py` | 7 类算子（§6.3） | 现有 6 个比较运算符保留 |
 | `mutation_check.py` | `run_mutation_check(..., case_name=None)` | 给了 `case_name` 时判定「**这个用例**是否红」，而不是「整个文件是否红」 |
 | `mutation_check.py` | 限定变异点作用域的参数（只在目标符号的可达闭包内找变异点） | 具体签名由实现者定 |
-| 新文件 `scripts/discriminate.py` | 钉 → 符号 → 变异点 → 副本 → 单用例 → 结论 | 编排层，不重复造轮子 |
+| 新文件 `skills/attest/scripts/discriminate.py` | 钉 → 符号 → 变异点 → 副本 → 单用例 → 结论 | 编排层，不重复造轮子 |
 | `readiness.py` | `--discriminating {auto,off,quick,full}`、`--lenient` | CLI 开关挂在 readiness（与 `--mutation-check` 同级） |
 
 **保留**：原有的「按文件跑一遍」用法不变（现有测试脚本 `test_test_strength.py` 等不得回归）。
+
+#### 6.4.1 副本必须**密闭**，且要**验变异真的生效**（builder-check 的问题⑨d）
+
+**已核事实**（`mutation_check.py:176-197`）：`_link_deps` 把 `node_modules` **软链**进副本，
+链接指向**原仓库**的绝对路径。⇒ pnpm workspace 里
+`service/node_modules/@lumen/xxx` 会解析回**原仓库**的包，**不是副本里的**。
+
+⇒ 两条规则：
+
+1. **只对「测试文件经相对路径可达」的源文件做变异。**
+   经路径别名（`@/…`）或包名（`@lumen/…`）可达的文件 ⇒ **不变异**，
+   记 `not-applicable` 并写明「经包路径可达，副本不密闭」。
+   （这条可判定：§5.1.1 的 import 解析器已经知道每条 import 的形态。）
+2. **每个变异点要验「变异确实生效」**。做法：在副本里被测文件的**末尾**追加一行标记
+   `console.error("__ATTEST_MUTANT__:<relpath>")`（不改语义，只是打印），
+   跑测试后检查子进程输出里有没有这个标记。
+   - **有标记** ⇒ 副本里的文件确实被加载了 ⇒ 变异有效 ⇒ 判定成立；
+   - **无标记** ⇒ 被测代码**根本没被加载**（或是被测代码来自原仓库）⇒ 该变异点无效
+     ⇒ 记 `not-applicable`，**既不算杀死也不算存活**。
+
+   为什么必须做这一步：没有它，「测试压根没跑到这段代码」会被算成「存活」
+   ⇒ 报「这条钉是橡皮章」—— 那是**假红**（真实原因是代码没被执行，不是断言不严）。
+   标记只打在**副本**里，不影响用户仓库。
+
+**密闭性自检（先做，不做就等于在测原仓库）**：改造完成后必须在真实模块上验证
+「副本里被测文件被加载的是副本」—— 判据＝标记出现在子进程输出里。
+若标记不出现 ⇒ 说明软链把代码引回了原仓库 ⇒ 此时**所有 DPSP 结论一律作废**（记 `untested`）。
 
 ### 6.5 预算与抽样（用户已选「自适应 + 明写抽样比例」）
 
@@ -428,8 +734,21 @@ pytest 的 `-k`、go 的 `-run`），直接筛。**前提是必须能确认筛�
 | key | 标题 | 证据类别 | 默认状态 |
 | --- | --- | --- | --- |
 | `plan-alignment` | 计划与机器推导双向对齐 | static | 条件式阻塞（旧计划 ⇒ warn） |
-| `decision-coverage` | 应有判定点覆盖到位 | static（推导）+ executed（自证合成） | 条件式阻塞 |
-| `pin-discriminating` | 每条不变式的钉有区分力 | executed | 条件式阻塞 |
+| `decision-coverage` | 应有判定点覆盖到位 | **static** | 条件式阻塞 |
+| `pin-discriminating` | 每条不变式的钉有区分力 | **executed** | 条件式阻塞 |
+
+**证据类别怎么定（builder-check 的问题⑦）**：
+`Check` 结构只有一个 `evidence_kind` 字段，而 `decision-coverage` 天然是混合的
+（DP 推导是静态的，覆盖情况靠静态归属表 ⇒ 静态；「自证」那部分由 `pin-discriminating` 承担）。
+
+⇒ 决定：**拆清** ——
+- `decision-coverage` = **static**（只看「应有矩阵 vs 计划的归属/豁免」）。它**不声称**任何东西被实测过。
+- `pin-discriminating` = **executed**（真的跑测试、真的看用例红不红）。
+
+这样每条判据只有一个证据类别，不出现「static + executed 混在一张卡里」。
+**代价与口径**：`decision-coverage` 是静态信号 ⇒ 按 R1「静态信号永远不能单独支撑『通过』」，
+它**不产生 pass**，只产生缺口清单；「实测覆盖」由 `pin-discriminating` 支撑。
+（这与现有判据表的口径一致：静态类判据只报事实，不报绿。）
 
 「条件式阻塞」的判定逻辑：
 
@@ -447,7 +766,7 @@ pytest 的 `-k`、go 的 `-run`），直接筛。**前提是必须能确认筛�
   判定点总数 128 ｜ 已归属 91 ｜ 豁免 12 ｜ 缺口 25
   高危四类缺口：error-path 3 ｜ resource 4 ｜ drop 1 ｜ state 0
   缺口清单（只列高危档）：
-    src/vector-store-milvus.ts:436:resource  共享 client 的关闭归属未声明
+    service/src/agent-memory/vector-store-milvus.ts#close#resource  共享 client 的关闭归属未声明
     …
 ```
 
@@ -476,19 +795,25 @@ measured_pass / static_signals / not_judged / exit_rule。
   "decision_points": {
     "total": 128, "attributed": 91, "waived": 12, "gaps": 14,
     "gaps_high_risk": [
-      {"id": "src/vector-store-milvus.ts:436:resource", "kind": "resource",
-       "file": "src/vector-store-milvus.ts", "line": 436, "why": "未归属且未豁免"}
+      {"id": "service/src/agent-memory/vector-store-milvus.ts#close#resource",
+       "kind": "resource",
+       "file": "service/src/agent-memory/vector-store-milvus.ts", "line": 436,
+       "why": "未归属且未豁免"}
     ],
-    "analysis_level": "L3-ast",
+    "analysis_level": "L3",
+    "analysis_backend": "B1-ts5-classic",
+    "analysis_backend_source": "repo-local",
     "analysis_note": ""
   },
   "alignment": {
-    "machine_only": ["src/x.ts:12:drop"],
+    "machine_only": ["service/src/agent-memory/x.ts#insertRow#drop"],
     "human_only": ["I21"]
   },
   "discriminating": {
     "checked": 37, "total": 120, "sample_rate": 0.31,
-    "killed": 22, "survivors": [
+    "killed": 22,
+    "not_applicable": 5, "untested": 3,
+    "survivors": [
       {"pin": "I7", "test": "quota.itest.ts::net zero",
        "mutants": [{"file": "quota.ts", "line": 88, "op": "cmp-tighten"}]}
     ],
@@ -496,6 +821,17 @@ measured_pass / static_signals / not_judged / exit_rule。
   }
 }
 ```
+
+**必须写明「用了哪个后端、从哪来」**（builder-check 的问题③）：
+`analysis_level`（L3/L2）、`analysis_backend`（B1/B2/B3）、`analysis_backend_source`
+（`repo-local` / `global-npm`）三个字段缺一不可。
+
+理由：**同一份仓 + 同一份计划，在 CI（有全局 TS）与在本机（没装 TS）上必须能被区分开。**
+没有这三个字段，两边的绿长得一模一样，出了事没法归因。
+
+**判定口径（关键）**：**L2 下三条新判据一律不硬判（warn）** ⇒
+「装了 TS 的机器报红、没装 TS 的机器报黄」是**安全的方向**（缺能力 ⇒ 绝不报绿）。
+要拿严格结论就显式指定后端（§8.4）。
 
 ### 7.5 退出码
 
@@ -517,12 +853,20 @@ measured_pass / static_signals / not_judged / exit_rule。
 - 退出码：`0` 全部命中 / `1` 有不符 / `3` 有环境缺失未判定；
 - CI 步骤「跑黄金 fixture（5 个期望判定）」调的就是它。
 
-**因此本设计不新增 `fixtures/golden/`、不新增 `scripts/test_golden_defects.py`** ——
+**因此本设计不新增 `fixtures/golden/`、不新增 `skills/attest/scripts/test_golden_defects.py`** ——
 新缺陷集就是现有机制的**第 6–10 个 fixture**，断言继续用 `+`/`-`/`?` 语言。
 
-需要扩的是 `check()`：现在它固定跑 `python3 readiness.py <module> --repo <dest>`，**不带 `--plan`**。
+需要扩的是 `check()`：现在它固定跑
+`python3 "$READYNESS" <module> --repo "$dest"`（`fixtures/run_fixtures.sh:66`），
+**不带 `--plan`**。
 缺陷集 fixture 必须带计划文件 ⇒ `check()` 要多接一个「额外参数」位（放在模块路径之后或用环境变量，
 具体形式实现者定），并把 fixture 里的计划文件路径传进去。
+
+> **路径现状（2026-11-15 实测）**：仓库在本设计成文期间被重构成 skill 布局 ——
+> `SKILL.md` → `skills/attest/SKILL.md`，`scripts/` → `skills/attest/scripts/`，
+> `fixtures/`、`evals/`、`README.md`、`CHANGELOG.md` 仍在仓库根。
+> `fixtures/run_fixtures.sh:18` 已指向 `$REPO_ROOT/skills/attest/scripts/readiness.py`。
+> **文件内容与行号未变（纯重命名）** ⇒ 本设计里所有行号引用仍然有效。
 
 **命名**：现有 README 把它们叫「黄金 fixture」。新的一批叫**缺陷集 fixture**（`fixtures/<name>/`），
 `fixtures/README.md` 的期望判定表加一节「缺陷集 fixture」，避免两套叫法混。
@@ -543,14 +887,21 @@ measured_pass / static_signals / not_judged / exit_rule。
 「误报为 0」的断言形态：在每个 fixture 的期望里加 `-` 行，把**该 fixture 不该有的其他类别**钉死
 （例如 `defect-silent-drop` 里加 `-resource`、`-branch`）。这正是现有 `-文本` 机制能干的事。
 
+**fixture 代码的写法要求**（决定断言能不能稳定命中）：
+- 被测逻辑必须放在**具名函数**里（DP ID 的 `anchor` 段取函数名 ⇒ 断言里能写出来）；
+- 判定点必须落在**词法层能看见**的形态上（`filter` / `close` / `in`）⇒ L2/L3 都能产出；
+- **不要**把多个判定点塞进同一行（`if (a === 1 && b === 2)`）⇒ `ordinal` 段会漂。
+
 ### 8.3 验收断言
 
 1. 5 个缺陷集 fixture **全部 5/5** 命中；
 2. **误报为 0** —— 用 `-` 行钉死不该出现的类别；
-3. 每条发现必须带 `file:line` ⇒ 断言里用 `+src/x.ts:128:drop` 这类稳定字符串
-   （现有 `fixtures/README.md` 已写明「不用行号做断言主键」的规矩 —— 那是说**不要用报告格式里的行号**；
-   DP ID 里带行号是**内容**不是**格式**，改动 DP 就该让 fixture 变红，这是有意的）；
-4. 判定点推导级别在报告里标明（L3 / L2）⇒ 断言一条稳定串。
+3. 每条发现必须带 DP ID ⇒ 断言里用 `+service/src/x.ts#insertRow#drop` 这类稳定串
+   （**不含行号** —— §2.3.1 的理由：行号会漂，函数名不会）。
+   注意这与现有 `fixtures/README.md`「不用行号做断言主键」的规矩**方向一致**，不冲突；
+4. 判定点推导级别在报告里标明（L3 / L2）⇒ 断言一条稳定串；
+5. **判定结论要分档断言**：`pin-discriminating` 的四档（pass / fail / untested / not-applicable）
+   各自至少被一个 fixture 覆盖 ⇒ 防止「四档退化成一档」这种橡皮章。
 
 **这就是「attest 能证明自己能失败」的完整版**：现在的 `--self-check` 只能证明静态判据能红，
 新 fixture 能证明**新的实测判据能红**（`pin-discriminating` 在 `defect-prototype-class` 上必须报 fail）。
@@ -561,16 +912,35 @@ measured_pass / static_signals / not_judged / exit_rule。
 ⇒ 缺陷集 fixture 默认会走 **L2**。
 若 L3 路径只在 CI 之外被跑过，就等于**没人测测具** —— 与本设计的立意相反。
 
-处置（两条都要）：
+处置（三条都要）：
 
 1. **CI 里装一份 TS 5.x**（`npm i -g typescript@5`）—— 与 CI 现有的 `pip install pytest pytest-cov` 对称，
    **只影响 fixture 车道，不影响 attest 运行时**（attest 本身仍然不联网、不加依赖）。
-   探测时也要看**全局安装**（`npm root -g` / `NODE_PATH`），不能只看仓库内的 `node_modules`。
-2. **断言要后端无关**：缺陷集 fixture 的期望 DP 只用**两种后端都会产出**的那几条
-   （fixture 代码故意写简单：`filter` / `close` / `in` / 一条正则，都是词法层能看见的）。
-   再加一条**交叉一致性测试**（在 `scripts/test_decision_points.py` 里）：
-   当 TS 后端可用时，对 fixture 源码断言 L2 与 L3 产出的 DP 集合**一致** ——
-   不一致就是两个后端之一有 bug，当场抓住。
+2. **缺陷集 fixture 走「有 TS 才跑，没 TS 就跳过」**（不是「没 TS 就红」）。
+   做法与现有 `run_fixtures.sh` 的 `have_pytest_cov` 前置条件**同构**：
+   新增一个 `have_ts_backend` 前置条件 ⇒ 没装 TS 时该 fixture 记「跳过（环境不满足）」，
+   汇总里退出码是 **3**（未判定），**不是 1（不符）**。
+   理由：L3 与 L2 的**结论强度不同**（L2 下结构算子不可用 ⇒ 可能落到 `not-applicable`），
+   让没装 TS 的开发机跑出「不符」是**环境问题冒充产品问题**。
+   ⇒ **CI 装 TS ⇒ 5 个缺陷集 fixture 全部真跑；开发机没装 TS ⇒ 明确显示「跳过」**。
+3. **断言要后端无关**：缺陷集 fixture 的期望 DP 只用**两种后端都会产出**的那几条
+   （fixture 代码故意写简单：具名函数 + `filter` / `close` / `in`）。
+   再加一条**交叉一致性测试**（在 `skills/attest/scripts/test_decision_points.py` 里）：
+   当 TS 后端可用时，断言 **L2 的每个 DP 都能在 L3 里找到同 `(file, kind)` 的 DP**
+   （即 L2 的假阳性必须被 L3 覆盖），**允许 L3 多出 L2 看不到的**。
+
+   **为什么不是「集合完全相等」**（builder-check 的问题⑨）：§3.2 明说 L2 是「有误报漏报」的启发式 ⇒
+   全集相等等于要求 L2 无漏报，**一般情况下不可达**。
+   「L2 ⊆ L3（按 file+kind）」才是可达且有意义的断言：
+   它抓的是「L2 报了个 L3 根本不认的 DP」= L2 的假阳性。
+
+**全局 TS 的探测要处理 `NODE_PATH`（builder-check 指出）**：
+npm 的全局包装**不在** `NODE_PATH` 里，`require('typescript')` 仍会失败。
+⇒ 探测时：把 `npm root -g` 的结果加进探测进程的 `NODE_PATH`（只加给子进程，不改用户环境），
+并用 `createRequire` 从**绝对路径**加载（pnpm 下 `node_modules/typescript` 是指向 `.pnpm/` 的软链，
+相对 `require` 解析不到）。**探测必须验能力（真跑一遍解析合成代码），不能只看版本号或路径存在。**
+
+**探测结论要进报告**（§7.4 的 `analysis_backend_source`）：`repo-local` / `global-npm` / `none`。
 
 ### 8.5 与真实模块的关系
 
@@ -597,15 +967,17 @@ measured_pass / static_signals / not_judged / exit_rule。
 
 | 阶段 | 内容 | 文件 | 完成判据 |
 | --- | --- | --- | --- |
-| P1 | DP 推导引擎 | 新增 `scripts/decision_points.py` | TS/Python 各能枚举 8 类 DP；L2 回退可用；单测全绿 |
-| P2 | 计划格式升级 | 改 `scripts/req_plan.py` | `new` 填 DP 列；`check` 校验归属/豁免/旧格式识别；`upgrade` 子命令 |
-| P3 | 变异算子扩展 + 单用例判定 | 改 `scripts/mutation_check.py` | 7 类算子各能被自证（能杀死已知坏实现）；`run_mutation_check(..., case_name=)` 可用 |
-| P4 | 区分力自证 | 新增 `scripts/discriminate.py` | 钉→符号→变异点→副本→单用例→结论全链通 |
-| P5 | 判据接入与输出 | 改 `scripts/readiness.py` | 3 条新判据 + 「判定点覆盖」节 + JSON 三段 + 条件式阻塞 + `--lenient` |
+| **P0** | **修 `_failed_tests_detail` 的嵌套 TAP 解析**（§6.2）—— 这是**既有缺陷**，不是新功能 | 改 `skills/attest/scripts/readiness.py`；补 `skills/attest/scripts/test_readiness_runners.py` 的嵌套用例 | 嵌套 `describe` 里的环境错误判「未实测」不阻塞；嵌套用例名能报出全路径；既有 6 条 runner 用例仍绿 |
+| P1 | DP 推导引擎 | 新增 `skills/attest/scripts/decision_points.py` | TS/Python 各能枚举 8 类 DP；L2 回退可用；单测全绿 |
+| P2 | 计划格式升级 | 改 `skills/attest/scripts/req_plan.py` | `new` 填 DP 列；`check` 校验归属/豁免/旧格式识别；`upgrade` 子命令 |
+| P3 | 变异算子扩展 + 单用例判定 | 改 `skills/attest/scripts/mutation_check.py` | 7 类算子各能被自证（能杀死已知坏实现）；`run_mutation_check(..., case_name=)` 可用 |
+| P4 | 区分力自证 | 新增 `skills/attest/scripts/discriminate.py` | 钉→符号→变异点→副本→单用例→结论全链通 |
+| P5 | 判据接入与输出 | 改 `skills/attest/scripts/readiness.py` | 3 条新判据 + 「判定点覆盖」节 + JSON 三段 + 条件式阻塞 + `--lenient` |
 | P6 | 缺陷集 fixture | 新增 `fixtures/defect-*/`（含 `plan.md`）；改 `fixtures/run_fixtures.sh` 的 `check()` 以接额外参数；改 `fixtures/README.md` | 5/5 报出，误报 0；`run_fixtures.sh` 退出码 0 |
-| P7 | 文档 | 改 `SKILL.md`、`README.md`、`CHANGELOG.md` | 判据表 14+3=17 条与代码一致；新节写入 SKILL.md |
+| P7 | 文档 | 改 `README.md`、`README.zh-CN.md`、`CHANGELOG.md`；**`skills/attest/SKILL.md` 只产出「要改什么」的清单，不动文件** | README/CHANGELOG 与代码一致；SKILL.md 改动清单已交付集成方 |
 
-**依赖关系**：P1 → P2/P3 → P4 → P5 → P6 → P7。
+**依赖关系**：**P0 → P1** → P2/P3 → P4 → P5 → P6 → P7。
+P0 独立可先落地（它本身就是一个真缺陷修复），但 DPSP（P4）依赖它 ⇒ 必须排在 P4 之前。
 
 ---
 
@@ -620,44 +992,85 @@ measured_pass / static_signals / not_judged / exit_rule。
 | R5 | 计划变长（DP 表可能有上百行）⇒ 维护成本上升 | `new` 自动生成；只报未归属的；豁免机制；DP 表按类别折叠展示 |
 | R6 | Rust/Go 不支持 ⇒ 用户以为「没报＝没问题」 | 该判据 `skipped` + 明说；输出契约里写明「本工具不判定」新增项 |
 | R7 | 判据越多 ⇒ Goodhart 风险越高 | 新判据全部条件式阻塞；报告永远列出未判/抽样部分；不产出「达到交付条件」类措辞 |
+| R8 | P0 修掉嵌套 TAP 假红 ⇒ 有人读成「attest 变松了」 | 变更**只影响**「环境错误 vs 产品缺陷」的归类，**不放宽任何阈值**；新旧对照用例钉住；DoD §12-4 显式声明 |
+| R9 | **判定结论依赖机器环境**（装了全局 TS 的机器报红，没装的报黄） | L2 下新判据一律不硬判（缺能力 ⇒ 绝不报绿）；报告与 JSON 写明 `analysis_level` / `analysis_backend` / `analysis_backend_source` 三项；缺陷集 fixture 没 TS 就**跳过**（退出码 3）而不是红 |
+| R10 | **副本不密闭** ⇒ 测的是原仓库不是副本 | 只变异「相对路径可达」的源文件；每个变异点用标记行验「副本里的代码真的被加载了」；标记不出现 ⇒ 结论作废（`untested`），不报红 |
+| R11 | **变异体编译不过** ⇒ 被误判成「杀死」（假绿） | 应用变异后先做解析校验（TS 走 AST 后端、Python 走 `ast.parse`）⇒ 解析失败记 `unknown`，不计入分母 |
+| R12 | **DP ID 随代码漂移** ⇒ 每次无关改动都批量报红 | ID 不含行号（§2.3.1）⇒ 无关改动 ID 不变；只有改了判定点集合才需重跑 `upgrade` |
 
 ---
 
 ## 12. 验收标准（Definition of Done）
 
 1. **缺陷集 fixture**：5 个新 fixture 5/5 独立报出，误报 0（`bash fixtures/run_fixtures.sh` 全命中）
-2. **实测判据能红**：`--self-check` 现在能证明**实测**类判据翻红（标尺 3 的缺口关闭）
+2. **实测判据能红**：**新缺陷集 fixture** 能证明**实测类**判据（`pin-discriminating`）翻红
+   （标尺 3 的缺口关闭）。
+   事实校准：现有 `--self-check` 只有两种注入（`drop-test` ⇒ `uncovered-exports`、
+   `inject-sleep` ⇒ `hygiene`，见 `skills/attest/scripts/selfcheck.py:40-46`）⇒ **全是静态判据**，
+   实测类判据（`tests-green`）从未被证明能红。**本设计的实测自证由缺陷集 fixture 承担，
+   不挂在 `--self-check` 名下**（`--self-check` 的两条静态注入不动，避免动既有行为）。
+   ⇒ 连带修 `skills/attest/SKILL.md` 里「反向验证能覆盖实测类判据（测试是否绿、覆盖率）」这句**过度声称**
+   （现与代码不符）。
 3. **真实模块人工核对**：在 `service/src/agent-memory` 上，新判据报出的缺口与 OCR 那 5 处对应
-4. **无回归**：现有全部测试脚本（`scripts/test_*.py`）与 14 条既有判据行为不变
+4. **无回归**：现有全部测试脚本（`skills/attest/scripts/test_*.py`）与 14 条既有判据行为不变。
+   **唯一声明的行为变更**：P0 修掉嵌套 `describe` 里环境错误被误判成产品缺陷的假红（§6.2）
+   —— 变的是「误判为阻塞」变成「未实测」，**门槛不放宽**，且有新旧对照用例钉住。
 5. **约束不被破坏**：无新增第三方 Python 依赖；不联网；不写用户仓库（除 `scaffold`/`upgrade`
    的既有受控写入范围）
-6. **文档一致**：`SKILL.md` 判据表 17 条与代码一致；`README.md` 与 `CHANGELOG.md` 同步
+6. **文档一致**：`README.md`、`README.zh-CN.md` 与 `CHANGELOG.md` 同步；
+   `skills/attest/SKILL.md` 的改动**清单**已交付集成方（该文件由集成方统一改，本车道不编辑）——
+   清单内容：判据表 14→17 条、新判据的输出节、命令行的 `--lenient` / `--discriminating` / `--plan` / `--analysis-backend`、
+   以及 §12.2 里指出的那句过度声称。
 7. **fixture 退出码**：`fixtures/run_fixtures.sh` 5 个既有 + 5 个缺陷集 fixture 全命中（10 个）
 
 ---
 
 ## 附录 A：初始词表
 
+**匹配口径（三条都要守，否则词表会炸出噪音）**：
+
+1. **按 callee 的标识符整词匹配**，不是子串匹配
+   （`close` 要命中 `client.close()`，**不能**命中 `disclose()` / `closedAt`）。
+   TS 侧：`callee` 是标识符就按标识符切；是成员表达式就取**属性名**。
+2. **变体规则**：`snake_case` / `kebab-case` / `camelCase` 归一化后再比
+   （词表写 `teardown`，代码写 `tearDown` / `tear_down` 都要命中）。
+3. **排除项**：注释与字符串字面量里的词**不算**（L2 词法扫描必须跳过它们）。
+
 **资源动词**（`resource` 类触发）：
 `create, close, open, acquire, release, dispose, destroy, shutdown, free, unref, end, stop, init, setup, teardown`
 
 **I/O 词**（`boundary-io` 类触发）：
-`fetch, request, query, select, insert, update, delete, upsert, read, write, send, post, put, patch, connect, exec, query`
+`fetch, request, query, select, insert, update, delete, upsert, read, write, send, post, put, patch, connect, exec, commit, rollback`
 
 **状态词**（`state` 类触发）：
 `status, state, phase, stage, step, flag, mode`
 
 **并发词**（`concurrency` 类触发）：
-`lock, mutex, semaphore, wait, waitFor, acquire, promise, all, race, concurrent, atomic, transaction`
+`lock, unlock, mutex, semaphore, wait, waitFor, acquire, promise, allSettled, race, concurrent, atomic, transaction`
+
+> **词表里的坑（初稿已犯）**：`all` 不能进并发词表 ——
+> 它是 `Promise.all` 的一部分，但**整词匹配时 `all` 根本不是独立标识符**，
+> 而子串匹配又会把 `call` / `small` / `install` 全部误命中 ⇒ 噪音爆炸。
+> 同理 `query` 曾被写了两遍。**词表要按「真实出现的标识符形态」写，不是按英文词根写。**
 
 ---
 
 ## 附录 B：判定点推导的示例（以本次 5 处缺陷为例）
 
-| 缺陷 | 相关 DP | attest 怎么抓到 |
+| 缺陷 | 相关 DP（ID 格式见 §2.3，锚点取**实测的**所在函数/方法名） | attest 怎么抓到 |
 | --- | --- | --- |
-| ① 镜像静默丢行 | `mem0-vector-store.ts:128:drop` | DP 存在但无归属不变式 ⇒ 高危缺口 ⇒ 报红 |
-| ② 共享 client 被关 | `vector-store-milvus.ts:436:resource` | DP 存在但无归属 ⇒ 报红；`drop-call` 变异会杀死「不关 client」的实现 |
-| ③ 引擎缓存握死连接 | `mem0-engine.ts:173:resource` | 同上；`drop-call`（删 `engineCache.clear()`）不被任何钉杀死 ⇒ 钉无区分力 |
-| ④ 分类走原型链 | `classification.ts:70:branch` | `in-to-hasown` 变异存活 ⇒ 分类相关钉无区分力 |
-| ⑤「我是X」吞整句 | `slots.ts:415:branch` | 混合路径未单列 ⇒ 覆盖缺口；`predicate-negate` 存活 ⇒ 钉无区分力 |
+| ① 镜像静默丢行 | `service/src/agent-memory/mem0-vector-store.ts#createMem0VectorStore#drop` | DP 存在但无归属不变式 ⇒ 高危缺口 ⇒ 报红 |
+| ② 共享 client 被关 | `service/src/agent-memory/vector-store-milvus.ts#close#resource` | DP 存在但无归属 ⇒ 报红；`drop-call` 变异会杀死「不关 client」的实现 |
+| ③ 引擎缓存握死连接 | `service/src/agent-memory/mem0-engine.ts#closeMemoryEngine#resource` | 同上；`drop-call`（把 `engineCache.clear()` 替换成 `undefined`）不被任何钉杀死 ⇒ 钉无区分力 |
+| ④ 分类走原型链 | `service/src/agent-memory/classification.ts#resolveClassification#branch` | `in-to-hasown` 变异存活 ⇒ 分类相关钉无区分力 |
+| ⑤「我是X」吞整句 | `service/src/agent-memory/slots.ts#hasThirdPartySubject#branch` | 混合路径未单列 ⇒ 覆盖缺口；`predicate-negate` 存活 ⇒ 钉无区分力 |
+
+> **锚点名的实测来源**（2026-11-15，`service/src/agent-memory/`）：
+> `createMem0VectorStore`（`mem0-vector-store.ts:62`）、
+> `close`（`vector-store-milvus.ts:436`，类方法）、
+> `closeMemoryEngine`（`mem0-engine.ts:168`）、
+> `resolveClassification`（`classification.ts:42`）、
+> `hasThirdPartySubject`（`slots.ts:436`）。
+>
+> 这条实测也说明**锚点必须是真实存在的标识符** ⇒ 推导器要能取到「最近的具名外层函数」，
+> 拿不到就退 `<toplevel>`（并在报告里标注，避免两个 `<toplevel>` 撞成一条）。

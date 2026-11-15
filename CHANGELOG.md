@@ -11,6 +11,14 @@
 发布前置清单见 [docs/oss-release-review.md](docs/oss-release-review.md)（只读评测记录）
 与 [docs/testing-philosophy-review.md](docs/testing-philosophy-review.md)。
 
+### 改名：req-test-plan → attest
+
+工具的产出本身就是一份 **attestation**（证据清单），而它刻意**不做** certify / sign-off
+（裁定能不能交付）—— 名字直接把这层区分带出来。`attest` 与 SLSA 供应链里的
+*attestation* 同源，正是「出处证明」的意思。改动 72 处（frontmatter、安装脚本、
+打包器、评测器、两版 README、本文件与文档）；四份历史评测报告**正文不改**（那是当时的
+事实记录），只在开头加命名说明。
+
 ### 搬运
 
 - 搬成独立 git 仓库（原先只是 `~/.agents/skills/attest/` 下的一个目录，

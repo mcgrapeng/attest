@@ -79,6 +79,13 @@ never support a pass on its own, and the tool prints a fixed list of what it
 refuses to judge — requirement understanding, product behaviour, performance,
 security, availability, operational readiness.
 
+**Why the name.** *Attest* means to testify formally: to put a claim on the
+record as something you have checked. That is the whole job here. The words
+deliberately avoided are the tell — not *verify*, not *certify*, not
+*sign-off*. The tool does not approve anything; it says what it measured, and
+what it refused to judge. The name shares a root with SLSA's *attestation*,
+which is the same idea: a claim plus its provenance.
+
 ### How it is measured
 
 - **The threshold belongs to the repo.** If the repo has a coverage gate, the

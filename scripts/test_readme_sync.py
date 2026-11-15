@@ -97,10 +97,12 @@ def main() -> int:
     expect(f"{len(tests)} / {len(tests)}" in zh or f"{len(tests)}/{len(tests)}" in zh,
            f"中文 README 的回归套件数是 {len(tests)}")
     fixtures = len([d for d in (ROOT / "fixtures").iterdir() if d.is_dir()])
-    expect("5 / 5" in en and "5 / 5" in zh, f"README 写 5 / 5 fixture（实际 {fixtures}）")
+    expect(all(("5 / 5" in t or "5/5" in t) for t in (en, zh)),
+           f"README 写 5 / 5 fixture（实际 {fixtures}）")
     evals = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
     n_evals = len(evals if isinstance(evals, list) else evals.get("evals", []))
-    expect("6 / 6" in en and "6 / 6" in zh, f"README 写 6 / 6 eval（实际 {n_evals}）")
+    expect(all(("6 / 6" in t or "6/6" in t) for t in (en, zh)),
+           f"README 写 6 / 6 eval（实际 {n_evals}）")
 
     print("\n输出样例是逐字真实输出")
     run_out = subprocess.run(
@@ -133,6 +135,16 @@ def main() -> int:
             if not (ROOT / p).exists():
                 missing.append(tok)
         expect(not missing, f"{label} README 引用的仓库内文件都存在（缺：{missing}）")
+
+    print("\n安全扫描：allowlist 之外必须是 0")
+    scan = subprocess.run(["bash", str(ROOT / ".github" / "check-skillspector.sh")],
+                          capture_output=True, text=True, cwd=str(ROOT))
+    if scan.returncode == 2:
+        print("  跳过（本机没装 skillspector，扫描没跑）")
+    else:
+        outside = re.search(r"未放行\s*(\d+)\s*条", scan.stdout)
+        expect(outside is not None and outside.group(1) == "0",
+               f"allowlist 之外 0 条（实际 {outside.group(1) if outside else '读不出来'}）")
 
     print("\nREADME 的环境白名单描述与代码一致")
     code = (HERE / "readiness.py").read_text(encoding="utf-8")

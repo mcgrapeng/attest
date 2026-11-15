@@ -320,6 +320,35 @@ cross-model pass 因**宿主模型族未认证**被跳过（该步附加且不�
 回归：`test_readiness_r2.py` 新增 20 条断言（关键词成词匹配、候选排序、pytest 解析、
 凭据不进子进程），`test_readme_sync.py` 新增白名单前缀/拒绝名单/凭据前缀的校验。
 
+### README 按 readme-optimization 的评分表重写（2026-11-15）
+
+用 `samber/developer-relations-skills@readme-optimization` 的机械审计 + 评分表打分，
+再按它给的顺序修。审计前后的硬数据：
+
+| 项 | 之前 | 之后 |
+| --- | --- | --- |
+| 第一个可复制命令的位置 | 第 713 词 | **第 29 词**（评分表要求 ≤400 词） |
+| 章节数 | 21（参考中位数 7，50% 区间 5–12） | **12** |
+| 首屏 badge 数 | 8 | **4**（评分表上限 4） |
+| "状态/成熟度" 内容 | 缺失（A4 阻塞项） | 有独立的 `## Status` 段 |
+| 内容类别覆盖 | 缺 What / When / Contribution | **7 类全中** |
+
+具体改动：
+
+- **头部**：居中字标（`assets/attest-wordmark.png` + 深色版，`<picture>` 自动切）+
+  一句话定位 + 4 个 assessment badge；**紧接着就是 clone → install → 跑起来的三行命令**。
+- **logo 换风格**：原来的圆角方块 + 对勾整个不要了（对勾既丑，又与「本工具不判交付」
+  的立场矛盾）。改成 **JetBrains Mono 800 字标**，teal；用 Chrome headless 渲染成透明底
+  PNG（深浅两版），由 `svg-logo-designer` 的流程比选了 5 个字体、11 个概念后选定。
+- **新增 `CONTRIBUTING.md`**（评分表里唯一还缺的类别），并把 README 的一致性检查写进去。
+- **内部评审历史移出 README**：「已知缺口」从 7 行长表格压成 7 条短句 + 指向
+  CHANGELOG；14 条判据从 4 张表合成 1 张；16 行开关表压成 5 个最该先知道的 + 指向
+  SKILL.md。
+- **状态写实**：明说「在维护中，尚未发正式版本，判据与契约在打 tag 前仍可能变」。
+
+守卫 `test_readme_sync.py` 加了两条：两份 README 的章节数/层级/顺序必须一致；
+两份 README 引用的路径必须存在。
+
 ### 已知遗留（发布时仍开放）
 
 - **仍然开放**：

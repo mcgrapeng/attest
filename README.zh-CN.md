@@ -1,5 +1,8 @@
 <div align="center">
-  <img src="assets/logo.svg" width="96" height="96" alt="attest">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img alt="attest" src="assets/logo.svg" width="96" height="96">
+  </picture>
   <h1>attest</h1>
   <p><strong>把交付前提变成可机读、可核对、可审计的证据清单。</strong></p>
   <p><em>它不是「能不能交付」的裁判。它给证据，决策归人。</em></p>
@@ -11,6 +14,16 @@
     <a href="https://github.com/mcgrapeng/attest/blob/main/README.md"><img alt="English" src="https://img.shields.io/badge/English-0F766E?style=flat-square"></a>
   </p>
 </div>
+
+## 它给你什么
+
+- **实测，不是推断**。跑的是仓库自己的测试、覆盖率闸门、PG catalog 查询和对账脚本；没有一条判据是靠读源码得出的。
+- **四档证据分层**。已实测 / 静态信号 / 未实测 / 本工具不判定 —— 跑不了的判据会写「未实测」，不会写「通过」。
+- **钉得住的计划**。每条不变式都指向一个真实存在的用例；文件或用例不存在时 `check` 直接报红。
+- **跨存储漂移**。实跑仓库自己的对账脚本，点名漂移的租户与不一致的字段。
+- **测的是测试有没有劲，不只是覆盖率**。`--mutation-check` 会把源码改坏，看测试会不会红。
+- **结论诚实**。三档（阻塞项 / 待人工确认 / 无信号），外加一份固定的「本工具不判定」清单。
+- **它驱动你的仓库，不替代它**。零依赖：只用 Python 3.11+ 标准库。
 
 ## 60 秒上手
 

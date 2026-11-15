@@ -211,6 +211,19 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
 - 排版按 `tech-doc-style-chinese` / `md-table-formatter` / `humanizer` 过了一遍：
   破折号密度降到与旧版持平、表格列数一致、围栏配平、内部链接与锚点全部有效。
 
+### 视觉重做：换掉 logo，补「它给你什么」
+
+- **logo 换风格**：原来是「teal 圆角方块 + 白色对勾」。对勾这个形状被否掉了
+  （它也让工具看起来像在盖章批准，与「本工具不判交付」相矛盾）。
+  现在是**几何单线体小写 a**（圆碗 + 竖干），配 `assets/logo-dark.svg` 深色版，
+  README 里用 `<picture>` + `prefers-color-scheme` 自动切换 —— 线稿在 GitHub
+  深色主题下发暗，单版不够。
+- **头部按 `just` / `ruff` 的骨架重排**：一句话定位 → 亮点列表 → 真实输出 → 深入文档。
+  新增「What it gives you」七条亮点（实测优先 / 四档分层 / 钉得住的计划 / 跨存储漂移 /
+  测试强度 / 结论诚实 / 不替代你的仓库）。
+- 设计方向由 `ui-ux-pro-max` 的资料库给（Phosphor 线性图标语言、JetBrains Mono /
+  IBM Plex Sans 的开发者工具字体配对、深板岩 + 绿强调色），不是随手挑的。
+
 ### 已知遗留（发布时仍开放）
 
 - **仍然开放**：

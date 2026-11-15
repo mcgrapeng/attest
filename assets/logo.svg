@@ -1,6 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img" aria-label="attest">
   <title>attest</title>
-  <rect x="2" y="2" width="92" height="92" rx="22" fill="#0F766E"/>
-  <rect x="8.5" y="8.5" width="79" height="79" rx="16.5" fill="none" stroke="#99F6E4" stroke-opacity="0.32" stroke-width="1.5"/>
-  <path d="M29.5 50 L42 62.5 L67 35.5" fill="none" stroke="#F0FDFA" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="47" cy="48" r="25" fill="none" stroke="#0F766E" stroke-width="10"/>
+  <path d="M72 23 V73" fill="none" stroke="#0F766E" stroke-width="10" stroke-linecap="round"/>
 </svg>

@@ -1,5 +1,8 @@
 <div align="center">
-  <img src="assets/logo.svg" width="96" height="96" alt="attest">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo-dark.svg">
+    <img alt="attest" src="assets/logo.svg" width="96" height="96">
+  </picture>
   <h1>attest</h1>
   <p><strong>Turns delivery preconditions into a machine-checkable, auditable evidence list.</strong></p>
   <p><em>It is not a "can we ship" referee. It produces evidence; the decision stays yours.</em></p>
@@ -11,6 +14,16 @@
     <a href="https://github.com/mcgrapeng/attest/blob/main/README.zh-CN.md"><img alt="中文" src="https://img.shields.io/badge/中文-0F766E?style=flat-square"></a>
   </p>
 </div>
+
+## What it gives you
+
+- **Measurement, not inference.** It runs the repo's own tests, coverage gate, PostgreSQL catalog queries and reconciliation script. No criterion is judged from reading source alone.
+- **Four evidence tiers.** Measured, static signal, not measured, not judged. A criterion that could not run says so instead of passing.
+- **Pinned plans.** Every invariant points at a test case that really exists; `check` fails when the file or the case is missing.
+- **Cross-store drift.** It runs the repo's reconcile script and names the tenant that drifted, plus the field that differs.
+- **Test strength, not just coverage.** With `--mutation-check` it breaks the source and checks whether the tests notice.
+- **Honest verdicts.** Three tiers (blocking / needs a human / no signal) and a fixed list of what the tool does not judge.
+- **It drives your repo, it does not replace it.** Zero dependencies: the Python 3.11+ standard library is all it needs.
 
 ## 60 seconds
 

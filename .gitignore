@@ -21,3 +21,6 @@ dist/
 
 # IDE 的机器本地目录
 .idea/
+
+# superpowers 执行态（机器本地：账本与任务简报）
+.superpowers/

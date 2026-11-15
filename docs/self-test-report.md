@@ -157,3 +157,23 @@ distrust the whole report.
 Both halves are the tool's own standard: a false green is a defect, and a false
 alarm is a defect too. This page is the first entry of the false-alarm gallery
 the roadmap asks for.
+
+## After the fixes (v0.1.2)
+
+All three defects are fixed, and the same script reproduces the difference:
+
+| Repository | Before | After |
+| --- | --- | --- |
+| chalk/chalk | 0 test files found · 2 blocking · tests not measured | **7 test files found** · **tests measured green** · 1 blocking (the false derived store is gone) |
+| expressjs/express | 0 test files found · 12 no signal | **6 test files found** · **tests measured green** · 10 no signal |
+| sindresorhus/type-fest | 2 blocking (one of them false) | 1 blocking (the false one is gone) |
+| pallets/click | 2 blocking (one of them false) | 1 blocking (the false one is gone) |
+| pallets/itsdangerous | 1 blocking | unchanged — its coverage report path is still missing (the fourth finding, not filed) |
+
+Two things stayed the same, and both in the honest direction: type-fest's runner
+(`tsd`) is still a runner the tool cannot read, and itsdangerous' coverage
+report is still missing. Both are reported as *not measured* rather than as a
+failure.
+
+The regression assertions for the three fixes live in
+`skills/attest/scripts/test_repo_layout.py`.

@@ -179,12 +179,48 @@ def _walk(root: Path, exts: set[str]):
                 yield Path(dirpath) / fn
 
 
-def _looks_like_test_file(p: Path) -> bool:
-    """这个文件名像测试文件吗（仓库级测试目录里的判定）。"""
+def _looks_like_test_file(p: Path, rel_to_dir: Path | None = None) -> bool:
+    """这个文件名像测试文件吗。
+
+    在**测试目录**里（`test/` `tests/` `spec/`），js/ts 文件名**不必**带
+    `.test.`/`.spec.` 后缀 —— 目录名已经说明了。之前只认带后缀的，于是
+    chalk / express 这类把测试放在 `test/basic.js` 的仓库被当成"没有测试"，
+    于是「导出的逻辑都有测试」把每个导出都报成零引用 ⇒ **误报阻塞项**。
+
+    但测试目录里的**辅助子目录**（`support/` `fixtures/` …）与
+    setup/env/conftest 这类文件不是测试 —— 跑它们只会得到噪音。
+    Python 侧维持旧口径（`test_*.py` / `*_test.py`），那两个约定够用。
+    """
     name = p.name
     if re.search(r"\.(test|spec|itest)\.(ts|tsx|js|jsx|mjs|cjs|py)$", name):
         return True
-    return bool(re.search(r"^(test_[^/]+|[^/]+_test)\.py$", name))
+    if re.search(r"^(test_[^/]+|[^/]+_test)\.py$", name):
+        return True
+    if rel_to_dir is None:
+        return False
+    parts = rel_to_dir.parts
+    if parts and parts[0].lower() in _TEST_HELPER_DIRS:
+        return False
+    if name in _TEST_NON_TEST_NAMES:
+        return False
+    return bool(re.search(r"\.(ts|tsx|js|jsx|mjs|cjs)$", name))
+
+
+# 测试目录里的辅助子目录 —— 里面是 fixture/helper，不是测试
+_TEST_HELPER_DIRS = {
+    "support", "supports", "helper", "helpers", "fixture", "fixtures",
+    "__fixtures__", "mock", "mocks", "__mocks__", "util", "utils",
+    "shared", "common", "resource", "resources", "data", "sample", "samples",
+    "example", "examples", "asset", "assets", "snapshot", "snapshots",
+    "screenshot", "screenshots", "e2e", "integration",
+}
+# 测试目录里名字太通用、跑了只会得到噪音的文件
+_TEST_NON_TEST_NAMES = {
+    "conftest.py", "setup.py", "setup.js", "setup.ts", "setup.mjs",
+    "setup.jsx", "setup.tsx", "env.js", "env.ts", "helpers.js", "helpers.ts",
+    "setupTests.js", "setupTests.ts", "setuptest.js", "setuptest.ts",
+    "jest.setup.js", "vitest.setup.ts", "vitest.config.ts",
+}
 
 
 def _module_tokens(m: Module) -> list[str]:
@@ -255,7 +291,7 @@ def repo_level_tests(root: Path, m: Module,
         for p in sorted(d.rglob("*")):
             if not p.is_file() or p in seen:
                 continue
-            if not _looks_like_test_file(p):
+            if not _looks_like_test_file(p, p.relative_to(d)):
                 continue
             seen.add(p)
             all_files.append(p)
@@ -432,6 +468,13 @@ def project_test_cmd(m: Module) -> tuple[list[str], str]:
 
     必须用项目自己的 runner —— 有些项目用 tsx（解析 tsconfig 路径别名），
     裸 node --test 会让一堆测试假挂。
+
+    项目的 test 脚本常常是**复合**的（`xo && c8 node --test test/ && tsc --noEmit`）。
+    逐文件跑时必须落到**真正跑测试的那一段**上 —— 之前把文件追加到整条命令的
+    末尾，于是文件变成了 `tsc` 的参数，runner 根本没跑（chalk 实测）。
+
+    认不出 runner（`npm run test:unit` 这种）⇒ 返回空 ⇒ 逐文件车道诚实地说
+    "没认出 runner"，而不是瞎猜一条命令去跑。
     """
     import shlex
     if not m.workspace:
@@ -445,15 +488,98 @@ def project_test_cmd(m: Module) -> tuple[list[str], str]:
         cmd = scripts.get(key)
         if not cmd or not isinstance(cmd, str):
             continue
-        parts = shlex.split(cmd)
-        # 去掉文件 glob（末尾那个带 * 或 .test.* 的）
-        while parts and ("*" in parts[-1]
-                         or ".test." in parts[-1]
-                         or ".spec." in parts[-1]):
-            parts.pop()
-        if parts:
-            return parts, key
+        components = _split_script(cmd)
+        if not components:
+            continue
+        if len(components) == 1:
+            # 单条命令：保持旧行为（文件追加到末尾）——
+            # 有些仓库的 test 脚本是自写的 runner（node scripts/runner.js），
+            # 认不出它是不是测试 runner，那就照原样跑，别猜。
+            runner = list(components[0])
+        else:
+            runner = None
+            for comp in components:
+                r = _runner_component(comp)
+                if r:
+                    runner = list(r)
+                    break
+            if runner is None:
+                # 复合命令里认不出哪一段在跑测试 ⇒ 逐文件跑不了（空 = 跑不了）
+                return [], key
+        # 去掉文件 glob（末尾那个带 * 的、或以 / 结尾的目录）
+        while runner and ("*" in runner[-1] or runner[-1].endswith("/")
+                          or ".test." in runner[-1]
+                          or ".spec." in runner[-1]):
+            runner.pop()
+        if runner:
+            return runner, key
     return ["node", "--test"], "(默认)"
+
+
+# 覆盖率包装（c8 node --test …）—— 找 runner 时跳过它们
+_COVERAGE_WRAPPERS = {"c8", "nyc", "istanbul", "pirates"}
+# 认得出的测试 runner（node/tsx 还要带 --test 才是测试 runner）
+_JS_RUNNER_PROGS = {"node", "tsx", "vitest", "jest", "mocha", "ava", "tap",
+                    "bun", "deno"}
+
+
+def _split_script(cmd: str) -> list[list[str]]:
+    """把 `a && b && c` 拆成 `[['a'], ['b'], ['c']]` —— 引号里的 && 不算分隔符。"""
+    import shlex
+    parts: list[list[str]] = []
+    cur: list[str] = []
+    quote = ""
+    i, n = 0, len(cmd)
+    while i < n:
+        ch = cmd[i]
+        if quote:
+            cur.append(ch)
+            if ch == quote:
+                quote = ""
+            i += 1
+            continue
+        if ch in "'\"":
+            quote = ch
+            cur.append(ch)
+            i += 1
+            continue
+        if cmd.startswith("&&", i) or ch == ";":
+            if cur:
+                parts.append(shlex.split("".join(cur)))
+                cur = []
+            i += 2 if cmd.startswith("&&", i) else 1
+            continue
+        cur.append(ch)
+        i += 1
+    if cur:
+        parts.append(shlex.split("".join(cur)))
+    return [p for p in parts if p]
+
+
+def _runner_component(parts: list[str]) -> list[str] | None:
+    """这段命令是在跑测试吗？是的话返回它，不是返回 None。
+
+    认得：node --test / tsx --test / vitest / jest / mocha / ava / tap /
+    bun test，以及包着它们的覆盖率包装（c8 node --test …）。
+    """
+    if not parts:
+        return None
+    toks = list(parts)
+    while toks and Path(toks[0]).name in _COVERAGE_WRAPPERS:
+        toks = toks[1:]
+    if not toks:
+        return None
+    prog = Path(toks[0]).name
+    if prog in ("npx", "bunx", "pnpx"):
+        toks = toks[1:]
+        prog = Path(toks[0]).name if toks else ""
+    if prog not in _JS_RUNNER_PROGS:
+        return None
+    if prog in ("node", "tsx", "deno") and "--test" not in toks:
+        return None          # node build.js 之类，不是测试 runner
+    if prog == "bun" and "test" not in toks:
+        return None
+    return parts
 
 
 # 失败用例的识别 —— TAP 之外，jest / vitest / mocha 都不吐 TAP。
@@ -898,6 +1024,11 @@ def run_coverage(m: Module, timeout: int = 120,
     # 用仓库相对路径会永远匹配不到，per-file 覆盖率全丢
     inc = str(m.base.relative_to(m.workspace)) if m.workspace else m.path
     prefix, script_name = project_test_cmd(m)
+    if not prefix:
+        # 项目的 test 脚本是复合的，但认不出哪一段在跑测试 ⇒ 逐文件跑不了。
+        # 诚实地说，别拿猜出来的命令去跑用户的仓库。
+        return {}, [], [], ("项目的 test 命令里没认出测试 runner"
+                            "（逐文件跑不了 —— 它的 test 脚本是复合的）")
     runner = prefix[0] if prefix else "node"
     cmd = list(prefix)
     cmd += coverage_flags(m, inc, runner)
@@ -1631,13 +1762,20 @@ def compare_csv_fields(out_dir: Path,
 
 
 # 派生存储（权威在 PG、派生数据在别处 ⇒ 必须能校对）与旁路存储（缓存/队列）
+#
+# 「blob」这个词被去掉了：它太泛 —— chalk 的源码注释里有一个 GitHub 链接
+# `github.com/chalk/chalk/blob/main/readme.md`，而 Python 标准库 textwrap.py 里
+# 也有一句 "blob" ⇒ 两个仓库都被误判成"有派生存储却没有对账机制"（**误报阻塞项**）。
+# 对象存储由 S3Client / putObject / minio / objectStore 认，够用。
 _DERIVED_STORE_RE = re.compile(
-    r"milvus|MilvusClient|DataType\.|createCollection|upsert\(|"
-    r"qdrant|QdrantClient|weaviate|pinecone|chromadb|"
-    r"minio|S3Client|putObject|blob|objectStore", re.I)
+    r"\bmilvus\b|\bMilvusClient\b|\bDataType\.|\bcreateCollection\b|\bupsert\(|"
+    r"\bqdrant\b|\bQdrantClient\b|\bweaviate\b|\bpinecone\b|\bchromadb\b|"
+    r"\bminio\b|\bS3Client\b|\bputObject\b|\bobjectStore\b", re.I)
 _SIDE_STORE_RE = re.compile(
     r"\bredis\b|ioredis|memcached|Redis\(|"
     r"kafka|rabbitmq|amqp|sqs|bullmq", re.I)
+# 匹配存储线索前先把 URL 剔掉 —— 链接路径里的 blob/store 之类不是代码证据
+_URL_RE = re.compile(r"https?://\S+")
 
 
 def detect_stores(m: Module) -> tuple[list[str], list[str]]:
@@ -1649,6 +1787,7 @@ def detect_stores(m: Module) -> tuple[list[str], list[str]]:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        text = _URL_RE.sub(" ", text)
         head = "\n".join(text.splitlines()[:60])
         if _DERIVED_STORE_RE.search(text) or _DERIVED_STORE_RE.search(p.name):
             derived.append(p.name)

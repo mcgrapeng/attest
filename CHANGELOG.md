@@ -19,6 +19,10 @@
 打包器、评测器、两版 README、本文件与文档）；四份历史评测报告**正文不改**（那是当时的
 事实记录），只在开头加命名说明。
 
+仓库的 **description 也改成英文**（与英文默认的 README 对齐 —— 搜索结果里中英混排会
+削弱可信度），沿用同一套四段结构：
+`What: delivery-readiness evidence | Does: pins test plans to real cases, runs your own gates | Solves: 'looks green to me' | Use when: shipping`
+
 ### 搬运
 
 - 搬成独立 git 仓库（原先只是 `~/.agents/skills/attest/` 下的一个目录，

@@ -5,7 +5,11 @@
 
 ## [Unreleased]
 
-本轮目标：把 `attest` 从"本机一个 skill 目录"推进到"可发布的制品" ——
+（暂无）
+
+## [0.1.0] - 2026-11-15
+
+首个发布版。本轮目标：把 `attest` 从"本机一个 skill 目录"推进到"可发布的制品" ——
 工程缺口与哲学缺口逐条修完，并用**可复现证据**证明每一条已关闭。
 
 发布前置清单见 [docs/oss-release-review.md](docs/oss-release-review.md)（只读评测记录）
@@ -32,6 +36,11 @@ issue 模板（bug / feature）与 PR 模板。
 
 **路线图**：[docs/roadmap.md](docs/roadmap.md) —— 四个阶段（能被找到 → 能进 CI → 能对
 真实仓库举证 → 成为标准），每项写清「谁能帮上」。README 加「Get involved / 参与共建」段。
+
+**GitHub Action**：仓库根加 `action.yml`（composite action），把判据跑进 PR —— 报告写进
+job summary 与 PR 评论，**默认不拦合并**（`strict: false`）：工具给证据，仓库自己决定。
+输入：`module`（要检查的模块，`.` 表示整仓）/ `repo-path` / `plan` / `strict` / `comment`。
+守卫新增一条断言：action.yml 引用的脚本路径真实存在、输入名与两份 README 一致（防漂移）。
 
 ### 改名：req-test-plan → attest
 

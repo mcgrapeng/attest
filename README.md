@@ -53,6 +53,10 @@ Every number below comes from a command you can re-run.
 | Environment containment | Whether any production script inherits the whole `os.environ` | No |
 | Reverse verification | Whether a deliberately injected defect turns the criteria red | Passed |
 
+Run against five public repositories, attest's own verdicts — including the
+four defects that run found in the tool itself — are published in the
+[self-test report](docs/self-test-report.md).
+
 The trigger-accuracy figures (precision 1.0, recall 0.5) are in
 [evals/README.md](evals/README.md). They measure the competition on the machine
 where they were taken — 60+ installed skills — so they do not transfer to a
@@ -280,7 +284,7 @@ jobs:
 
 | Input | Default | What it does |
 | --- | --- | --- |
-| `module` | — | The module to check, relative to the repository root (`src/auth`, or `.` for the whole repository) |
+| `module` | — | The module to check, relative to the repository root (`src/auth`). Point it at the **module**, not at the repository root: with `.` the tool cannot see the repository's own `test/` directory |
 | `repo-path` | `.` | The repository root, when it is not the workspace root |
 | `plan` | — | The requirement test plan to check the module against |
 | `strict` | `false` | Fail the job when attest reports blocking items |

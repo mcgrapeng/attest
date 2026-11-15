@@ -18,8 +18,14 @@ The tool exists; almost nobody can find it. This phase is about distribution.
       expect. A skill at the repository root is invisible to both.
 - [ ] **Tagged release** — `v0.1.0` with release notes, so that
       `mcgrapeng/attest@v0.1.0` is a thing other people can pin.
-- [ ] **Marketplace submissions** — skills.sh, Anthropic's official skills
-      marketplace, and the OpenCode and Codex plugin marketplaces.
+- [x] **Marketplace submissions** — skills.sh indexed (it needs the skill in a
+      subdirectory, which is why the layout moved); Anthropic's official skills
+      repository carries a Partner Skills entry (PR
+      <https://github.com/anthropics/skills/pull/2224>); `.claude-plugin/marketplace.json`
+      makes the repository a marketplace for **Claude Code and Codex** — both
+      verified by installing the plugin from it. OpenCode has no skill
+      marketplace; it reads `.agents/skills/`, which the one-line install
+      already populates.
 - [ ] **A curl one-liner** for people who are not on npm and do not want the
       Node CLI either.
 
@@ -43,8 +49,9 @@ The criteria are only as good as the repositories they have been run against.
 Public reports are the evidence, and they are also what makes a new user trust
 the tool enough to try it.
 
-- [ ] **Dogfooding reports** — run attest on 5–10 public repositories and
-      publish the reports verbatim, including the ones where it found nothing.
+- [x] **Dogfooding reports** — five public repositories, published verbatim in
+      [docs/self-test-report.md](self-test-report.md), including the four
+      defects that run found in the tool itself (three filed as issues).
 - [ ] **A false-green gallery** — real cases where the tool said *not measured*
       and a human found the defect anyway. Each one becomes a criterion or a
       documented limit.

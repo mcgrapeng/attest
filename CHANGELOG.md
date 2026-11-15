@@ -15,6 +15,24 @@
 发布前置清单见 [docs/oss-release-review.md](docs/oss-release-review.md)（只读评测记录）
 与 [docs/testing-philosophy-review.md](docs/testing-philosophy-review.md)。
 
+### 自测报告与市场收录（2026-11-15 追加）
+
+**自测报告**：拿 5 个公开仓库（chalk / express / type-fest / click / itsdangerous，
+外加一条负对照）跑判据，把**原样输出**与结论公开在
+[docs/self-test-report.md](docs/self-test-report.md)。这一轮在工具自身发现 4 个缺陷：
+测试文件无后缀不被发现（→ #1，误报阻塞项）、逐文件测试命令追加到复合命令末尾（→ #2）、
+`.d.ts` + `.js` 被当成派生存储（→ #3）、Python 覆盖率报告路径找不到（未立案，待诊断）。
+
+**市场收录**：仓库加 `.claude-plugin/marketplace.json`（Claude Code 与 Codex 认同同一份
+清单 ✓ 两端都实测装得上、skill 路径能解析 ✓）与 `skills.sh.json`（仓库页分组）。
+Anthropic 官方 skills 仓库的 **Partner Skills** 段已提 PR（anthropics/skills#2224）。
+OpenCode 没有 skill 市场 —— 它读 `.agents/skills/`，一行安装已经覆盖 ✓。
+
+**topics / description**：topics 扩到 12 个（加 attestation / ci / github-actions /
+mutation-testing / requirements）；description 改成
+"An evidence list for delivery readiness, built from your repo's own tests, coverage
+gates and reconciliation scripts — in CI or as an agent skill."（146 字符）。
+
 ### 分发与共建：让工具能被找到、被一起建
 
 工具存在，但几乎没人找得到它 —— 这一轮补的是「被找到」与「能一起建」两件事。

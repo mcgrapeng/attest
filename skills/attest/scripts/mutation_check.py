@@ -11,12 +11,18 @@
     测试红了 ⇒ 变异被杀死 ⇒ 这套测试能发现这类缺陷（证据）
     测试还绿 ⇒ **杀不死**   ⇒ 测试套件有洞（报出来）
 
-只改这四种运算符：
+七类算子（规格 §6.3）：
 
-    == → !=    != → ==    >= → >    <= → <
+    L2 词法：cmp-negate（== → !=）、cmp-tighten（>= → >）、
+             in-to-hasown（x in Y → Object.hasOwn(Y, x)）
+    L3 结构：drop-throw（throw E → void E）、drop-call（f(a) → undefined）、
+             predicate-negate（filter(P) → filter(x => !P(x))）、
+             catch-drop（catch(e){BODY} → catch(e){}）
 
-改完仍是同类语义、不会造成死循环，也不改常量/字符串/控制流 ——
-那些变异容易变成"编译错误"或"改了无关的语义"，测出来的结论不可靠。
+L2 只认比较运算符与 `in`，不碰语句边界；L3 需要 AST 后端
+（`decision_points` 的 TypeScript 后端），结构算子只在 L3 路径下存在。
+所有变异都是**表达式替换**，不删语句 —— 删语句多半变成编译错误，
+测出来的结论不可靠。
 
 判定口径（故意不设阈值）：
 
@@ -43,7 +49,21 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
-#: 变异算子：原运算符 → (改后, 叫什么)
+#: 变异算子全集（规格 §6.3 的表，顺序即报告里的展示顺序）
+OPERATORS: tuple[str, ...] = (
+    "cmp-negate", "cmp-tighten", "in-to-hasown",
+    "drop-throw", "drop-call", "predicate-negate", "catch-drop",
+)
+
+#: 词法算子（L2）：不碰语句边界，任何机器上都能跑
+L2_OPERATORS: frozenset[str] = frozenset(
+    {"cmp-negate", "cmp-tighten", "in-to-hasown"})
+
+#: 结构算子（L3）：需要 AST 后端
+L3_OPERATORS: frozenset[str] = frozenset(
+    {"drop-throw", "drop-call", "predicate-negate", "catch-drop"})
+
+#: 原运算符 → (改后, 叫什么)
 _OP_MAP: dict[str, tuple[str, str]] = {
     "==": ("!=", "等号取反"),
     "!=": ("==", "不等号取反"),
@@ -51,6 +71,21 @@ _OP_MAP: dict[str, tuple[str, str]] = {
     "!==": ("===", "严格不等号取反"),
     ">=": (">", "下界收紧"),
     "<=": ("<", "上界收紧"),
+}
+
+#: 原运算符 → 算子名（比较运算符分两类：取反 / 收紧）
+_OP_NAMES: dict[str, str] = {
+    "==": "cmp-negate", "!=": "cmp-negate",
+    "===": "cmp-negate", "!==": "cmp-negate",
+    ">=": "cmp-tighten", "<=": "cmp-tighten",
+}
+
+#: 结构算子的中文说明
+_STRUCT_KIND: dict[str, str] = {
+    "drop-throw": "抛错换成空表达式",
+    "drop-call": "调用换成 undefined",
+    "predicate-negate": "谓词取反",
+    "catch-drop": "catch 体清空",
 }
 
 #: 找运算符出现的位置。

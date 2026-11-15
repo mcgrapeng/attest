@@ -47,6 +47,9 @@ python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项�
 | 环境收口 | 有没有生产脚本整份继承 `os.environ` | 没有 |
 | 反向验证 | 故意注入缺陷后判据会不会翻红 | 通过 |
 
+拿五个公开仓库跑一遍，attest 自己的结论——**包括这一轮在工具自身发现的四个缺陷**——公开在
+[自测报告](docs/self-test-report.md)里。
+
 触发准确度（精确率 1.0、召回率 0.5）见 [evals/README.md](evals/README.md)。它测的是
 **当时那台机器上的竞争环境**（装了 60 多个 skill），换个 skill 集合这两个数不可迁移。
 
@@ -236,7 +239,7 @@ jobs:
 
 | 输入 | 默认 | 干什么 |
 | --- | --- | --- |
-| `module` | — | 要检查的模块路径，相对仓库根（`src/auth`，整仓则填 `.`） |
+| `module` | — | 要检查的模块路径，相对仓库根（`src/auth`）。要指向**模块**而不是仓库根：填 `.` 时工具看不见仓库自己的 `test/` 目录 |
 | `repo-path` | `.` | 仓库根（不在 workspace 根时用） |
 | `plan` | — | 要核对的需求测试计划 |
 | `strict` | `false` | attest 报出阻塞项时是否让 job 失败 |

@@ -11,6 +11,10 @@
   <p><strong>Turns a module's delivery preconditions into a machine-checkable, auditable evidence list.</strong></p>
 </div>
 
+<div align="center">
+  <img alt="attest 的报告：分「已实测 / 静态信号 / 未实测」三段，最后一行是结论（0 项阻塞 · 1 项待人工确认 · 7 项无信号）" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/assets/hero.png" width="1000">
+</div>
+
 ```bash
 git clone https://github.com/mcgrapeng/attest.git && cd attest
 python3 install.py

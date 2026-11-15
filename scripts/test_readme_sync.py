@@ -115,6 +115,11 @@ def main() -> int:
                f"{label} README 的输出样例与真实运行逐字一致"
                "（样例被删节过就会失败）")
 
+    print("\nREADME 用到的资源文件都存在")
+    for asset in ("assets/hero.png", "assets/attest-wordmark.png",
+                  "assets/attest-wordmark-dark.png"):
+        expect((ROOT / asset).is_file(), f"{asset} 存在")
+
     print("\nREADME 引用的路径都存在")
     for label, text in (("英文", en), ("中文", zh)):
         missing = []

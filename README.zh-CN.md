@@ -74,10 +74,10 @@ git clone https://github.com/mcgrapeng/attest.git && cd attest
 python3 install.py
 ```
 
-安装脚本把仓库里的 skill 目录（`skills/attest/`）软链到 `~/.agents/skills/attest`，
-再软链到 `~/.claude/skills/`、`~/.codex/skills/` 和 `~/.config/opencode/skills/`。
-已存在的同名软链会被覆盖（会打印提示）；目标位置若是**真实目录**则跳过，不删用户数据。
-卸载：`python3 install.py --uninstall`，只删软链。Windows 上 `os.symlink` 可能需要
+安装脚本把仓库里的 skill 目录（`skills/attest/`）软链到 `~/. agents/skills/attest`，
+再软链到 `~/. claude/skills/`、`~/. codex/skills/` 和 `~/. config/opencode/skills/`。 已存在的同名软链会被覆盖（会打印提示）； 目标位置若是**真实目录**则跳过，不删用户数据。 卸载：`python3 install. py --uninstall`，只删软链。
+
+Windows 上 `os. symlink` 可能需要
 管理员权限或开发者模式。
 
 只需要 Python 3.11+，**没有任何第三方依赖** —— 它驱动的是**你仓库自己的**工具链
@@ -130,7 +130,7 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 ```
 将执行的仓库脚本：测试车道（逐个测试文件跑 $ node --test <测试文件>）
 
-交付就绪度分析 — src
+交付就绪度分析: src
 仓库：<repo root>
 源码 1 文件（+0 个测试支撑） / 单测 1 个 / itest 0 个
 ```

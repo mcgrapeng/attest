@@ -26,12 +26,14 @@ npx skills add mcgrapeng/attest
 
 A coverage number tells you the code ran. It does not tell you that an
 assertion would fail, that the plan's pins point at files that exist, or that
-two stores have not drifted apart. `attest` answers the delivery question with
+two stores have not drifted apart.
+
+`attest` answers the delivery question with
 **evidence**, sorted into four kinds:
 
 | Evidence kind | What it means |
 | --- | --- |
-| **Measured** | Something ran — the command, its exit code and its output are in the report |
+| **Measured** | Something ran: the command, its exit code and its output are in the report |
 | **Static signal** | Read out of the source, not run. **Can never support a pass on its own** |
 | **Not measured** | Could not be measured, and the report names the precondition that was missing |
 | **Not judged** | Out of scope by design: requirement understanding, product behaviour, performance, security, availability, operational readiness |
@@ -44,7 +46,9 @@ rather than reporting on a module it cannot read.
 
 The measurement is real, not inferred. `attest` runs the target repo's **own**
 test command, its **own** coverage gate, its **own** reconciliation script, and
-queries the PostgreSQL catalog for the actual schema. Where it cannot measure
+queries the PostgreSQL catalog for the actual schema.
+
+Where it cannot measure
 something, it says so instead of passing it.
 
 **What it is not.** It is not a "can we ship" referee, and it does not replace
@@ -52,13 +56,13 @@ the tools you already have:
 
 | You already know | Where attest differs |
 | --- | --- |
-| A coverage badge (Codecov, SonarCloud) | attest **drives your repo's own coverage gate** and reads the number your CI already produces — it does not report coverage itself |
+| A coverage badge (Codecov, SonarCloud) | attest **drives your repo's own coverage gate** and reads the number your CI already produces: it does not report coverage itself |
 | An AI-written test plan | attest pins every invariant to a test case **that really exists in your repo**, and refuses to generate a plan when it cannot recognise your conventions |
-| "I asked a chatbot whether this looks done" | attest **runs** the checks and prints the commands it ran — every verdict is re-runnable by you |
+| "I asked a chatbot whether this looks done" | attest **runs** the checks and prints the commands it ran: every verdict is re-runnable by you |
 | A checklist in a PR comment | attest's report is reproducible: one command, same input, same output |
 
 It reports evidence; the decision stays with whoever owns the delivery. The
-name avoids *verify*, *certify* and *sign-off* on purpose — those promise an
+name avoids *verify*, *certify* and *sign-off* on purpose: those promise an
 approval this tool refuses to fake.
 
 ## Install
@@ -71,8 +75,8 @@ Three ways in, pick the one that matches you:
 
 | You want to… | Do this |
 | --- | --- |
-| Use it inside your agent | `npx skills add mcgrapeng/attest` — the skills CLI copies the skill into `.agents/skills/attest/` and detects which agent you run (Claude Code, Codex, OpenCode, Cursor, Windsurf, Zed, Warp and 20 more). No clone, no Python |
-| Keep the repository | `git clone … && python3 install.py` — symlinks the skill into `~/.agents/skills/attest` and the agent directories |
+| Use it inside your agent | `npx skills add mcgrapeng/attest`: the skills CLI copies the skill into `.agents/skills/attest/` and detects which agent you run (Claude Code, Codex, OpenCode, Cursor, Windsurf, Zed, Warp and 20 more). No clone, no Python |
+| Keep the repository | `git clone … && python3 install.py`: symlinks the skill into `~/.agents/skills/attest` and the agent directories |
 | Just run it once | `python3 ~/.agents/skills/attest/scripts/readiness.py <module path> --repo <repo root>` |
 
 From a clone (this repository is the source of truth):
@@ -83,14 +87,18 @@ python3 install.py
 ```
 
 The installer symlinks the skill directory (`skills/attest/`) to
-`~/.agents/skills/attest`, then symlinks that entry into `~/.claude/skills/`,
-`~/.codex/skills/` and `~/.config/opencode/skills/`. An existing symlink with
+`~/. agents/skills/attest`, then symlinks that entry into `~/. claude/skills/`,
+`~/. codex/skills/` and `~/. config/opencode/skills/`.
+
+An existing symlink with
 the same name is replaced (the script says so); if the target path is a **real
 directory** the script skips it and never deletes user data. Uninstall with
-`python3 install.py --uninstall` — symlinks only. On Windows `os.symlink` may
+`python3 install. py --uninstall`: symlinks only. On Windows `os.
+
+symlink` may
 need administrator rights or developer mode.
 
-Python 3.11+ and nothing else — the tool has **no third-party dependencies**,
+Python 3.11+ and nothing else: the tool has **no third-party dependencies**,
 and it drives your repository's own toolchain (node, pytest, …) rather than
 installing one of its own.
 
@@ -129,22 +137,26 @@ jobs:
 | `comment` | `true` | Post the report as a pull request comment |
 
 It publishes the evidence list to the job summary and the PR comment, and
-**does not block the merge by default** (`strict: false`) — attest reports
-evidence, the repository decides. The job stays green even when attest exits 1
+**does not block the merge by default** (`strict: false`): attest reports
+evidence, the repository decides.
+
+The job stays green even when attest exits 1
 (blocking items or an unmeasurable key criterion); with `strict: true` that
-exit code fails the job instead. Install the repository's own dependencies
+exit code fails the job instead.
+
+Install the repository's own dependencies
 before the action runs: attest runs the repository's own test command.
 
 ## The report
 
 Real output from attest's own fixture (`fixtures/ts-colocated`). The tool prints
-in Chinese — the criterion names and the verdict are what you read in your
+in Chinese: the criterion names and the verdict are what you read in your
 terminal:
 
 ```
 将执行的仓库脚本：测试车道（逐个测试文件跑 $ node --test <测试文件>）
 
-交付就绪度分析 — src
+交付就绪度分析: src
 仓库：<repo root>
 源码 1 文件（+0 个测试支撑） / 单测 1 个 / itest 0 个
 ```
@@ -155,7 +167,7 @@ terminal:
 ```
 
 <div align="center">
-  <img alt="The full report: four sections (measured, static signals, not measured, not judged) and a three-tier verdict — rendered from a real run of attest's own fixture"
+  <img alt="The full report: four sections (measured, static signals, not measured, not judged) and a three-tier verdict: rendered from a real run of attest's own fixture"
        src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.svg"
        width="574">
 </div>
@@ -181,7 +193,7 @@ How each one is measured, the four evidence kinds and the language matrix are in
 ## Status
 
 **Actively developed. Released as `v0.1.7`.** The criteria and the skill
-contract may still change — but they will change with a changelog entry, not
+contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 
 Every number in this repository comes from a command you can re-run: **27 / 27** regression suites, **5 / 5** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
@@ -189,7 +201,7 @@ Every number in this repository comes from a command you can re-run: **27 / 27**
 Known gaps, in full: [CHANGELOG.md](CHANGELOG.md). The three that
 matter most:
 
-- **Trigger recall is 0.5** on the machine where it was measured — that number
+- **Trigger recall is 0.5** on the machine where it was measured: that number
   is about the competition on that machine, not about the description.
 - **Windows is not verified end to end.** The runtime and the installer are
   cross-platform; the repo's own dev scripts need bash.
@@ -212,5 +224,5 @@ follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 MIT.
 
 The last word belongs to the evidence: the verdicts attest produced on five
-public repositories — **including the ones that made the tool look wrong** —
+public repositories, **including the ones that made the tool look wrong** —
 are published in [docs/self-test-report.md](docs/self-test-report.md).

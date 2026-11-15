@@ -333,8 +333,10 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清「当前只实现�
    - **JS 仓（`package.json`）**：**显式白名单**（精确脚本名或白名单前缀），名字里只带关键词的脚本（例如 `reconcile:reset`）不会被自动执行。
    - **Python 仓（Makefile / tox.ini）**：按**目标名里的关键词**认（`cov` / `reconcile` / `integration` / `itest`），且必须**成词** —— `coverage`、`test-coverage`、`py-cov` 认，`recover`、`cover` 不认。覆盖率闸门额外接受「模块目录或其上层」的 Makefile（所以全仓一个 `make coverage` 仍然算数），对账与真后端两条车道还要求配方或命令提到本模块。
 
-   Python 那条更松。`--dry-run` 会把到底会跑哪些目标列出来。
-2. **子进程只拿到白名单环境变量**：`PATH`、`HOME`、`LANG`/`LANGUAGE`、`TZ`、`TMPDIR`/`TEMP`/`TMP`、`SHELL`、`USER`/`LOGNAME`、`TERM`、`CI`、`SYSTEMROOT`/`COMSPEC`（Windows），前缀 `LC_*`、`NODE_*`、`PYTHON*`、`NPM_*`、`PNPM_*`、`YARN_*`、`PIP_*`、`UV_*`，以及工具自己需要的 `POSTGRES_URL` / `DATABASE_URL` / `MEMORY_ITEST` / `MEMORY_RECONCILE_OUT_DIR` / `REQ_PLAN_RECONCILE_OUT_DIR`。**名单之外的一律不透传**：你的云厂商密钥（`AWS_*` / `GCP_*` / `AZURE_*`）不会进目标仓库的脚本。**但仓库凭据会** —— `NPM_TOKEN`、`NODE_AUTH_TOKEN`、`NPM_CONFIG_*`、`PIP_INDEX_URL`（常把密码写在 URL 里）、`UV_INDEX_SECRET_PASSWORD` 都命中上面的前缀，会被复制进子进程环境。拿不准就把它们从环境里 unset 掉，或改放 `.npmrc`。
+   Python 那条更松：名字像覆盖率闸门的目标会被跑起来。工具不会跑仓库自己没有声明的东西，`--dry-run` 会把到底会跑哪些目标列出来 —— 不想让它被认成闸门，就别给目标起像闸门的名字。
+2. **子进程只拿到白名单环境变量**：`PATH`、`HOME`、`LANG`/`LANGUAGE`、`TZ`、`TMPDIR`/`TEMP`/`TMP`、`SHELL`、`USER`/`LOGNAME`、`TERM`、`CI`、`SYSTEMROOT`/`COMSPEC`（Windows），前缀 `LC_*`、`NODE_*`、`PYTHON*`，以及工具自己需要的 `POSTGRES_URL` / `DATABASE_URL` / `MEMORY_ITEST` / `MEMORY_RECONCILE_OUT_DIR` / `REQ_PLAN_RECONCILE_OUT_DIR`。
+
+   **名单之外的一律不透传**：你的云厂商密钥（`AWS_*` / `GCP_*` / `AZURE_*`）与**仓库凭据**（`NPM_TOKEN`、`NODE_AUTH_TOKEN`、`PIP_INDEX_URL`（常把密码写在 URL 里）、`UV_INDEX_SECRET_PASSWORD`）都不会进目标仓库的脚本。`NPM_*` / `PNPM_*` / `YARN_*` / `PIP_*` / `UV_*` 这些前缀**根本不在白名单里**，而 `NODE_AUTH_TOKEN` 虽然落在 `NODE_*` 前缀里，也在**单独的拒绝名单**上。仓库的 test 命令需要 npm 或 pip 配置时，用配置文件（`.npmrc`、`pip.conf`），别放环境变量。
 
    那两个连接串**会**透传：仓库自己的集成车道要连库，这是刻意的取舍。真正能用的开关只有两个：把 `POSTGRES_URL` / `DATABASE_URL` 从环境里 unset 掉、改用 `--database-url` 传（它不读环境变量，所以不会进子进程环境）；或者设 `PGHOST` / `PGUSER` / `PGDATABASE`，口令让 `psql` 从 `.pgpass` 读 —— 只上 `.pgpass` 不够，schema 判定只读 `PG*` 变量，没有它们就判「未实测」。`psql` 的口令走 `PGPASSWORD` 环境变量，不出现在命令行参数里。
 3. **信任一个仓库的 `test` 脚本，就等于把它交给了你的环境变量**。这一层的风险等级 = 它所运行的每一个脚本的风险等级。带 `--self-check-deps` 时，副本里的 `node_modules` / `.venv` 是**指向真实目录的软链** —— 测试若往依赖目录里写东西，写的是真的那个。
@@ -351,7 +353,7 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清「当前只实现�
 | --- | --- |
 | SkillSpector 的 `E2`（Env Variable Harvesting）仍报 HIGH | **已缓解。** 子进程必须透传环境变量（白名单实现）。CI 用 `.github/skillspector-allowlist.yaml` 把**已复核的规则**显式放行，每条带理由，allowlist 之外的新 HIGH 仍然拦住。放行是**规则级、不是逐条 finding**：逐条基线按位置指纹匹配，改一行代码就失效 ⇒ 对贡献者是持续的假红。规则级放行不依赖位置，而**新规则**仍然会被拦。代价写在 allowlist 文件头，不藏着 |
 | `--exec` 显式执行开关没有采纳 | **未采纳。** 实现是**默认执行 + 执行前打印审计行** + `--dry-run` 可只看不做。工具的定位就是实测（不跑测试的交付判定没有意义），执行面已收敛到脚本白名单 + 环境变量白名单 |
-| Python 仓的真后端（itest）车道只跑不判 | **仍开放。** Makefile / tox 里的真后端目标能被找到，传 `--include-itest` 时**会真的执行**（会连 PG 与向量库），但 pytest 的输出既不是 TAP 也不是 vitest/jest/mocha 形态 ⇒ 解析不出结果，那条判据永远落在「未实测」，而不是一次「实测通过 / 不通过」 |
+| Python 仓的真后端（itest）车道 | **已修。** Makefile / tox 里的真后端目标能被找到，传 `--include-itest` 时**会真的执行**（会连 PG 与向量库）；pytest 的输出现在会被解析 ⇒ 那条判据给出「实测通过 / 不通过」，不再永远落在「未实测」 |
 | Windows 未端到端验证 | **仍开放。** skill **运行时**是纯 Python、**安装**走 `install.py`（跨平台），这两块与平台无关。但仓库自己的开发脚本依赖 bash，在 Windows 上要 WSL 或 Git Bash |
 | 触发准确度 | **已实测，有边界。** 精确率 1.0（近邻反例一条都没误触发）、召回率 0.5、F1 0.667。数据与解读见 [evals/README.md](evals/README.md)。**这个数测的是本机 60 多个 skill 的竞争环境**，OSS 用户 skill 集合不同、不可直接迁移 |
 | 自检副本默认不带 `node_modules` | **已缓解。** 多数仓库在副本里跑不动测试，`--self-check` 默认证明的是「静态判据抓得住东西」。报告里明说了这件事（`copy_runnable: false`）。加 `--self-check-deps` 会把依赖**软链**进副本，那时能验到实测类判据 |

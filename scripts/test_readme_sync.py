@@ -138,9 +138,26 @@ def main() -> int:
     code = (HERE / "readiness.py").read_text(encoding="utf-8")
     exact = set(re.findall(r'"([A-Z_]+)"',
                            re.search(r"ENV_ALLOW_EXACT = \{(.*?)\}", code, re.S).group(1)))
+    prefixes = set(re.findall(r'"([^"]+)"',
+                              re.search(r"ENV_ALLOW_PREFIX = \((.*?)\)", code, re.S).group(1)))
+    deny = set(re.findall(r'"([A-Z_]+)"',
+                          re.search(r"ENV_DENY = \{(.*?)\}", code, re.S).group(1)))
+    # 真不变量在代码侧：凭据类前缀不得进白名单
+    cred_prefixes = ("NPM_", "PNPM_", "YARN_", "PIP_", "UV_")
+    leaked = sorted(p for p in cred_prefixes if p in prefixes)
+    expect(not leaked, f"白名单里没有凭据前缀（代码侧，实际有：{leaked}）")
+    expect("NODE_AUTH_TOKEN" in deny,
+           "NODE_AUTH_TOKEN 在拒绝名单里（NODE_* 前缀内的 npm registry token）")
     for label, text in (("英文", en), ("中文", zh)):
         miss = sorted(x for x in exact if f"`{x}`" not in text)
         expect(not miss, f"{label} README 列全了环境白名单（缺：{miss}）")
+        missp = sorted(x for x in prefixes if f"{x}*" not in text and f"`{x}`" not in text)
+        expect(not missp, f"{label} README 列全了白名单前缀（缺：{missp}）")
+        missd = sorted(x for x in deny if f"`{x}`" not in text)
+        expect(not missd, f"{label} README 写明了拒绝名单（缺：{missd}）")
+        # 凭据必须在文档里点明（README 要说清哪些不外泄）
+        expect(any(k in text for k in ("NPM_TOKEN", "NODE_AUTH_TOKEN")),
+               f"{label} README 点明了哪些凭据不外泄")
 
     print()
     if FAILURES:

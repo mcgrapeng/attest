@@ -390,6 +390,53 @@ def main() -> int:
     expect(not readiness._name_has_keyword("cover", ("cov",)),
            "cover 不算命中（只差一个字母也不放过）")
 
+    print("\n子项 11b-2：Python 闸门候选里，提到本模块的目标排前面")
+    write(py2 / "Makefile",
+          "coverage:\n\tpython -m coverage report\n"
+          "src-coverage:\n\tpython -m coverage report --include=src\n")
+    gates_pref = readiness.find_gate_scripts(readiness.discover_module(py2, "src"), py2)
+    expect(gates_pref and "src-coverage" in gates_pref[0][1],
+           "提到本模块的闸门目标排在前面")
+
+    print("\n子项 11b-3：pytest 输出能解析出用例数与失败用例")
+    py_out = ("collected 3 items\n"
+              "=========================== short test summary info ==="
+              "===========================\n"
+              "FAILED tests/test_a.py::test_x - AssertionError: expected 1 got 2\n"
+              "========================= 1 failed, 2 passed in 0.45s ================\n")
+    summ_py = readiness._pytest_summary(py_out)
+    expect(summ_py["tests"] == 3 and summ_py["fail"] == 1 and summ_py["pass"] == 2,
+           f"pytest 汇总被解析出来（实际 {summ_py}）")
+    fails_py = readiness._failed_tests(py_out)
+    expect(any("test_x" in f for f in fails_py),
+           f"pytest 的失败用例被认出来（实际 {fails_py}）")
+
+    print("\n子项 11b-4：凭据类环境变量不进子进程（去掉前缀后的真不变量）")
+    import os as _os
+    _saved = {k: _os.environ.get(k) for k in
+              ("NPM_TOKEN", "NODE_AUTH_TOKEN", "PIP_INDEX_URL",
+               "UV_INDEX_SECRET_PASSWORD", "AWS_SECRET_ACCESS_KEY")}
+    for k, v in _saved.items():
+        if v is not None:
+            _os.environ[k] = "secret-value"
+    try:
+        child = readiness.child_env()
+    finally:
+        for k, v in _saved.items():
+            if v is None:
+                _os.environ.pop(k, None)
+            else:
+                _os.environ[k] = v
+    for k in ("NPM_TOKEN", "NODE_AUTH_TOKEN", "PIP_INDEX_URL",
+              "UV_INDEX_SECRET_PASSWORD", "AWS_SECRET_ACCESS_KEY"):
+        expect(k not in child, f"{k} 不进子进程环境")
+    _os.environ["NODE_ENV"] = "test"
+    try:
+        child2 = readiness.child_env()
+    finally:
+        _os.environ.pop("NODE_ENV", None)
+    expect("NODE_ENV" in child2, "NODE_ 前缀的非凭据变量仍放行（NODE_ENV）")
+
     print("\n子项 11c：审计行要列出仓库自己的 test 命令（工具跑得最多的一层）")
     ts_audit = mkdtemp()
     write(ts_audit / "package.json", json.dumps({"scripts": {"test": "node --test"}}))

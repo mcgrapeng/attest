@@ -425,22 +425,26 @@ Three things to know:
      reconcile and itest lanes additionally require the recipe or the command
      to mention this module.
 
-   The Python rule is the looser one. `--dry-run` shows exactly which targets
-   would run.
+   The Python rule is the looser one: a target whose name looks like a coverage
+   gate will be run. The tool never runs anything the repo has not declared
+   itself, and `--dry-run` shows exactly which targets would run — so if you do
+   not want a target picked up, do not give it a gate-like name.
 2. **Child processes get an allowlisted environment only**: `PATH`, `HOME`,
    `LANG`/`LANGUAGE`, `TZ`, `TMPDIR`/`TEMP`/`TMP`, `SHELL`, `USER`/`LOGNAME`,
    `TERM`, `CI`, `SYSTEMROOT`/`COMSPEC` (Windows), the prefixes `LC_*`,
-   `NODE_*`, `PYTHON*`, `NPM_*`, `PNPM_*`, `YARN_*`, `PIP_*`, `UV_*`, plus the
-   `POSTGRES_URL` / `DATABASE_URL` / `MEMORY_ITEST` /
+   `NODE_*`, `PYTHON*`, plus the `POSTGRES_URL` / `DATABASE_URL` / `MEMORY_ITEST` /
    `MEMORY_RECONCILE_OUT_DIR` / `REQ_PLAN_RECONCILE_OUT_DIR` variables the tool
-   itself needs. **Nothing outside that list is passed through**: your cloud
-   provider keys (`AWS_*` / `GCP_*` / `AZURE_*`) do not reach the target repo's
-   scripts. **Registry credentials do**: `NPM_TOKEN`, `NODE_AUTH_TOKEN`,
-   `NPM_CONFIG_*`, `PIP_INDEX_URL` (it often embeds a password) and
-   `UV_INDEX_SECRET_PASSWORD` all match the allowlisted prefixes and are copied
-   into the child environment. Unset them before pointing the tool at a repo you
-   do not fully control, or keep them in a config file (`.npmrc`) instead of the
-   environment.
+   itself needs.
+
+   **Nothing outside that list is passed through**: your cloud provider keys
+   (`AWS_*` / `GCP_*` / `AZURE_*`) and your registry credentials (`NPM_TOKEN`,
+   `NODE_AUTH_TOKEN`, `PIP_INDEX_URL` with a password in it,
+   `UV_INDEX_SECRET_PASSWORD`) do not reach the target repo's scripts. The
+   `NPM_*` / `PNPM_*` / `YARN_*` / `PIP_*` / `UV_*` prefixes are not on the
+   allowlist at all, and `NODE_AUTH_TOKEN` is on an explicit **deny** list even
+   though `NODE_*` is allowed. If a repo's test command needs npm or pip
+   configuration, put it in a config file (`.npmrc`, `pip.conf`) rather than in
+   the environment.
 
    The two connection strings *are* passed through: a repo's own integration
    lane has to reach its database, and that trade-off is deliberate. The levers
@@ -480,7 +484,7 @@ The honest list: the full version is in [CHANGELOG.md](CHANGELOG.md) under
 | --- | --- |
 | SkillSpector's `E2` (Env Variable Harvesting) still reports HIGH | **Mitigated.** Child processes must inherit environment variables (allowlist implementation). CI uses `.github/skillspector-allowlist.yaml` to allowlist the **reviewed rules** explicitly, each with a reason, and a new HIGH outside the allowlist still fails the build. The allowlist is **rule-level, not finding-level**: the old baseline matched by source location, so changing one line of code invalidated it, which is a permanent false red for contributors. Rule-level allowlisting does not depend on location, while a **new rule** is still blocked. The cost is written in the allowlist header rather than hidden |
 | The `--exec` explicit execution switch was not adopted | **Not adopted.** The implementation is **execute by default, print an audit line before executing**, plus `--dry-run` to look without doing. The tool's purpose is measurement (a delivery verdict that does not run the tests is meaningless), and the execution surface is already narrowed to a script allowlist plus an environment-variable allowlist |
-| Python repos' real-backend (itest) lane runs but is never judged | **Open.** The lane is discovered through Makefile / tox and is really executed when `--include-itest` is passed (it connects to PostgreSQL and the vector store), but pytest's output is not TAP-shaped, so its result is always reported as "not measured" rather than as a measured pass or fail |
+| Python repos' real-backend (itest) lane | **Fixed.** The lane is discovered through Makefile / tox and is really executed when `--include-itest` is passed (it connects to PostgreSQL and the vector store). pytest's output is now parsed, so the lane reports a measured pass or fail instead of always "not measured" |
 | Windows not verified end to end | **Open.** The skill's **runtime** is pure Python and its **install** goes through `install.py` (cross-platform), so neither depends on the platform. But the repo's own dev scripts need bash: on Windows that means WSL or Git Bash |
 | Trigger accuracy | **Measured, with a boundary.** Precision 1.0 (not one of the near-miss queries triggered it), recall 0.5, F1 0.667. Data and reading in [evals/README.md](evals/README.md). **The number measures the competition on this machine (60+ installed skills)** — an OSS user has a different skill set, so it does not transfer directly |
 | The self-check copy does not include `node_modules` by default | **Mitigated.** Most repos therefore cannot run their tests in the copy, so `--self-check` proves that "the static criteria catch things", not that "the whole criterion set (including the measured ones) catches things". The report says so explicitly (`copy_runnable: false`). Add `--self-check-deps` to symlink the dependencies into the copy (no copying) and the measured criteria get verified too |

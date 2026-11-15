@@ -585,12 +585,14 @@ python3 "$SKILL_DIR/scripts/req_plan.py check docs/<feature>-test-plan.md --repo
 - **执行前可以先看**：`--dry-run` 只列出将要执行的脚本与确切命令，然后退出。
   正常模式也会在报告头部回显一行「将执行的仓库脚本」，**包含仓库自己的 test 命令**
   （那是工具跑得最多的一层，逐个测试文件跑）。`--json` 时这行走 stderr，stdout 保持纯 JSON。
-- **子进程只拿到白名单环境变量**（PATH、HOME、LANG、TZ、TMPDIR、SHELL、CI、NODE_*、
-  PYTHON*、NPM_*、PNPM_*、YARN_*、PIP_*、UV_*、POSTGRES_URL 等）。
-  你 shell 里的**云厂商密钥**（`AWS_*` / `GCP_*` / `AZURE_*`）不会传下去；
-  但**仓库凭据会** —— `NPM_TOKEN`、`NODE_AUTH_TOKEN`、`NPM_CONFIG_*`、
-  `PIP_INDEX_URL`（常把密码写在 URL 里）、`UV_INDEX_SECRET_PASSWORD` 都命中上面的前缀，
-  会被复制进子进程环境。不放心就把它们从环境里 unset 掉，或改放 `.npmrc`。
+- **子进程只拿到白名单环境变量**（PATH、HOME、LANG、TZ、TMPDIR、SHELL、CI、
+  `LC_*`、`NODE_*`、`PYTHON*`、POSTGRES_URL 等）。
+  你 shell 里的**云厂商密钥**（`AWS_*` / `GCP_*` / `AZURE_*`）与**仓库凭据**
+  （`NPM_TOKEN`、`NODE_AUTH_TOKEN`、`PIP_INDEX_URL` 里的密码、
+  `UV_INDEX_SECRET_PASSWORD`）都**不会**传下去 ——
+  `NPM_*`/`PNPM_*`/`YARN_*`/`PIP_*`/`UV_*` 这些前缀根本不在白名单里，
+  `NODE_AUTH_TOKEN` 另外在拒绝名单上。仓库的 test 命令要 npm/pip 配置就用配置文件
+  （`.npmrc` / `pip.conf`），别放环境变量。
 - **PG 连接串不进命令行参数**：解析成 `PGHOST` / `PGPASSWORD` 等环境变量传给 `psql`，
   不出现在进程表里。注意 `POSTGRES_URL` 本身会透传给仓库自己的脚本（仓库的集成车道
   要连库）。真正能用的开关只有两个：把 `POSTGRES_URL` / `DATABASE_URL` 从环境里

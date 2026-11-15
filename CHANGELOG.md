@@ -309,6 +309,17 @@ cross-model pass 因**宿主模型族未认证**被跳过（该步附加且不�
 **守卫 `scripts/test_readme_sync.py` 加了两条**：输出样例必须与真实运行逐字一致；
 中英两份章节数/层级/顺序必须一致。
 
+### 三条评审遗留决策的落地（2026-11-15）
+
+| 决策 | 落地 |
+| --- | --- |
+| **去掉仓库凭据前缀**（用户决定） | `ENV_ALLOW_PREFIX` 去掉 `NPM_*` / `PNPM_*` / `YARN_*` / `PIP_*` / `UV_*`；`NODE_AUTH_TOKEN` 另进 `ENV_DENY`（它落在 `NODE_*` 前缀里）。于是「云厂商密钥与仓库凭据都不进子进程」这句话**第一次是真话**。代价：仓库的 test 命令要 npm/pip 配置时得用配置文件（`.npmrc` / `pip.conf`）而不是环境变量。三份文档 + 守卫同步 |
+| **Python 车道的选取规则**（我决定） | **保留关键词成词匹配**（`coverage` / `test-coverage` / `py-cov` 认，`recover` / `cover` 不认），另外加一条：**提到本模块的目标排前面**。不收窄成显式白名单 —— Python 仓库的闸门名字五花八门，收窄会把真闸门也挡掉，代价大于收益。残余风险写进 README：名字像闸门的目标会被跑起来，`--dry-run` 能看到 |
+| **解析 pytest 输出**（我决定） | 新增 `_pytest_summary()` + pytest 的 `FAILED`/`ERROR` 短摘要行识别。Python 仓的真后端车道（tox / make integration）此前跑完了也只能判「未实测」—— 它其实跑了，输出我们没读懂；现在给出「实测通过 / 不通过」，README 的「已知缺口」那条随之改写 |
+
+回归：`test_readiness_r2.py` 新增 20 条断言（关键词成词匹配、候选排序、pytest 解析、
+凭据不进子进程），`test_readme_sync.py` 新增白名单前缀/拒绝名单/凭据前缀的校验。
+
 ### 已知遗留（发布时仍开放）
 
 - **仍然开放**：

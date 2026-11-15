@@ -42,8 +42,15 @@ ENV_ALLOW_EXACT = {
     "POSTGRES_URL", "DATABASE_URL", "MEMORY_ITEST",
     "MEMORY_RECONCILE_OUT_DIR", "REQ_PLAN_RECONCILE_OUT_DIR",
 }
-ENV_ALLOW_PREFIX = ("LC_", "NODE_", "PYTHON", "NPM_", "PNPM_", "YARN_",
-                    "PIP_", "UV_")
+#: 前缀白名单 —— **只放运行时配置，不放凭据**。
+#: NPM_/PNPM_/YARN_/PIP_/UV_* 这些前缀去掉过：它们会带着仓库凭据
+#: （NPM_TOKEN、PIP_INDEX_URL 里的密码、UV_INDEX_SECRET_PASSWORD）进子进程环境。
+#: 仓库的 test 命令需要 npm/pip 配置时，用配置文件（.npmrc / pip.conf）而不是环境变量。
+ENV_ALLOW_PREFIX = ("LC_", "NODE_", "PYTHON")
+#: 命中前缀也**不**透传的凭据类变量（npm 的 registry token 就在 NODE_ 前缀里）
+ENV_DENY = {
+    "NODE_AUTH_TOKEN",
+}
 
 # 脚本白名单 —— 只认这些名字（前缀式：脚本名用冒号分段，前若干段命中即算）。
 # 之前是子串匹配（"coverage" in name）⇒ `reconcile:reset` 这种也会被选中执行。
@@ -146,6 +153,8 @@ def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
     """
     env: dict[str, str] = {}
     for k, v in os.environ.items():
+        if k in ENV_DENY:
+            continue          # 凭据：命中前缀也不给
         if k in ENV_ALLOW_EXACT or k.startswith(ENV_ALLOW_PREFIX):
             env[k] = v
     env["PYTHONUTF8"] = "1"
@@ -455,7 +464,30 @@ _FAIL_PATTERNS = (
     re.compile(r"^\s*[×✕]\s+(.+)$", re.M),          # vitest / jest 的失败用例
     re.compile(r"^\s+●\s+(.+)$", re.M),              # jest 的失败详情
     re.compile(r"^\s+\d+\)\s+(.+)$", re.M),           # mocha 的编号失败
+    re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.M),      # pytest 的短摘要行
 )
+
+
+def _pytest_summary(out: str) -> dict[str, int]:
+    """pytest 的汇总行：`=== 2 failed, 3 passed, 1 skipped in 0.45s ===`
+
+    之前只认 TAP / vitest / jest / mocha ⇒ Python 仓的真后端车道（tox / make
+    integration）跑完了也只能判「未实测」—— 它其实跑了，输出我们没读懂。
+    """
+    res = {"tests": 0, "pass": 0, "fail": 0, "skipped": 0}
+    tail = "\n".join(out.splitlines()[-8:])
+    f = re.search(r"(\d+)\s+failed", tail)
+    p_ = re.search(r"(\d+)\s+passed", tail)
+    s_ = re.search(r"(\d+)\s+skipped", tail)
+    e_ = re.search(r"(\d+)\s+errors?", tail)
+    if not (f or p_ or s_ or e_):
+        return res
+    res["fail"] = int(f.group(1)) if f else 0
+    res["pass"] = int(p_.group(1)) if p_ else 0
+    res["skipped"] = int(s_.group(1)) if s_ else 0
+    res["tests"] = (res["pass"] + res["fail"] + res["skipped"]
+                     + (int(e_.group(1)) if e_ else 0))
+    return res
 
 
 def _failed_tests(out: str) -> list[str]:
@@ -759,8 +791,10 @@ def run_itest_lane(m: Module, scripts: list[tuple[Path, str, str]],
         if rows:
             per_run.append(rows)
         summ = _node_summary(out)
+        if summ["tests"] == 0:
+            summ = _pytest_summary(out)      # pytest / tox
         # TAP 的失败块（含 error 详情）优先；非 TAP 的 runner
-        # （jest/vitest/mocha）退回按标记识别。
+        # （jest/vitest/mocha/pytest）退回按标记识别。
         fails = _failed_tests_detail(out) or _failed_tests(out)
         if summ["tests"] == 0:
             # 一个用例都没跑 ⇒ 车道被跳过或没起来
@@ -1118,8 +1152,15 @@ def find_gate_scripts(m: Module, root: Path) -> list[tuple[Path, str, str]]:
             cands.append((ws, name, cmd))
     if not cands:
         # Python 仓库：Makefile / tox.ini 里声明的闸门
-        for ws, name, cmd in _python_gate_scripts(root):
-            if not (_mentions_module(m, cmd) or _covers_module(m, ws)):
+        py = []
+        for ws, name, cmd, body in _python_script_targets(root, "cov"):
+            # 提到本模块的目标排前面：同名匹配时，先跑那个更像"这个模块的闸门"
+            hit = _mentions_module(m, cmd) or _mentions_module(m, body)
+            py.append((0 if hit else 1, ws, name, cmd, body))
+        py.sort(key=lambda c: c[0])
+        for _rank, ws, name, cmd, body in py:
+            if not (_mentions_module(m, cmd) or _mentions_module(m, body)
+                    or _covers_module(m, ws)):
                 continue
             cands.append((ws, name, cmd))
     if not cands:

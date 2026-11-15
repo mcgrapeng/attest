@@ -383,10 +383,11 @@ def _child_env() -> dict[str, str]:
         "POSTGRES_URL", "DATABASE_URL", "MEMORY_ITEST",
         "MEMORY_RECONCILE_OUT_DIR", "REQ_PLAN_RECONCILE_OUT_DIR",
     }
-    allow_prefix = ("LC_", "NODE_", "PYTHON", "NPM_", "PNPM_", "YARN_",
-                    "PIP_", "UV_")
+    allow_prefix = ("LC_", "NODE_", "PYTHON")
+    deny = {"NODE_AUTH_TOKEN"}      # 凭据：命中前缀也不给
     env = {k: v for k, v in os.environ.items()
-           if k in allow_exact or k.startswith(allow_prefix)}
+           if k not in deny
+           and (k in allow_exact or k.startswith(allow_prefix))}
     env["PYTHONUTF8"] = "1"
     env["PYTHONDONTWRITEBYTECODE"] = "1"
     env["POSTGRES_URL"] = ""

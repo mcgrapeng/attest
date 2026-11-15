@@ -34,7 +34,7 @@ from req_plan import (  # noqa: E402
     parse_plan,
     test_case_names,
 )
-from decision_points import HIGH_RISK_KINDS, normalize_dp_id  # noqa: E402
+from decision_points import HIGH_RISK_KINDS, dp_key, normalize_dp_id  # noqa: E402
 import discriminate  # noqa: E402
 import mutation_check  # noqa: E402
 
@@ -3340,6 +3340,18 @@ def _dpe_kind(dp_id: str) -> str:
     return parts[2] if len(parts) >= 3 else ""
 
 
+def _dpe_key(dp_id: str) -> tuple:
+    """判定点的可比键（规格 §2.3.2）。
+
+    ordinal 段可写可不写、缺省当 1 ⇒ 计划里的 `x#f#drop` 与机器推导出
+    的 `x#f#drop#1` 是同一个判定点。按字符串比会把这一条同时判成
+    「机器有、计划没有」和「计划有、机器没有」两条假账。
+    形态不合规的 ID 退回归一化字符串，永远配不上别的 ID（照旧进缺口清单）。
+    """
+    key = dp_key(dp_id)
+    return key if key is not None else ("!", normalize_dp_id(dp_id))
+
+
 def _dpe_gate(fmt: str, level: str, lenient: bool) -> tuple[str, str]:
     """新判据的门槛 ⇒ (模式, 要补进说明的话)。
 
@@ -3449,17 +3461,20 @@ def _dpe_alignment(dp, plan) -> dict:
     machine_only = 机器推导出、计划里没有（规格 §1.1 G2 ⇒ 报红）
     human_only  = 计划里有、机器没推导出（保留待人签，不报红）
     """
-    machine = ({normalize_dp_id(p.dp_id): p for p in dp.points if p.dp_id}
-               if dp is not None else {})
-    planned = set()
+    machine: dict[tuple, str] = {}
+    if dp is not None:
+        for p in dp.points:
+            if p.dp_id:
+                machine[_dpe_key(p.dp_id)] = p.dp_id
+    planned: dict[tuple, str] = {}
     if plan is not None:
         for row in parse_detail_rows(plan):
             did = (row.dp_id or "").strip()
             if did:
-                planned.add(normalize_dp_id(did))
+                planned[_dpe_key(did)] = did
     return {
-        "machine_only": [k for k in sorted(machine) if k not in planned],
-        "human_only": [k for k in sorted(planned) if k not in machine],
+        "machine_only": [machine[k] for k in sorted(machine) if k not in planned],
+        "human_only": [planned[k] for k in sorted(planned) if k not in machine],
     }
 
 
@@ -3523,7 +3538,7 @@ def check_plan_alignment(m: Module, plan_path: str | None, dp, *,
                   "（计划的判定点列整列失效就会这样）")
     missing_file: list[str] = []
     for did in human_only:
-        f = did.split("#")[0]
+        f = normalize_dp_id(did).split("#")[0]
         if f and not (m.root / f).exists():
             missing_file.append(did)
             ev.append(f"{did} —— DP ID 指向的文件 {f} 在仓库里不存在")
@@ -3666,13 +3681,17 @@ def _dpe_accounting(dp, plan) -> dict:
                 "gaps_high_risk": [], "analysis_level": "L1",
                 "analysis_backend": "none", "analysis_backend_source": "none",
                 "analysis_note": "没给计划 ⇒ 没推导判定点"}
-    machine = {normalize_dp_id(p.dp_id): p for p in dp.points if p.dp_id}
-    planned: dict[str, object] = {}
+    machine: dict[tuple, object] = {}
+    if dp is not None:
+        for p in dp.points:
+            if p.dp_id:
+                machine[_dpe_key(p.dp_id)] = p
+    planned: dict[tuple, object] = {}
     if plan is not None:
         for row in parse_detail_rows(plan):
             did = (row.dp_id or "").strip()
             if did:
-                planned[normalize_dp_id(did)] = row
+                planned[_dpe_key(did)] = row
     attributed = 0
     waived = 0
     gaps: list = []
@@ -3683,7 +3702,7 @@ def _dpe_accounting(dp, plan) -> dict:
             continue
         if (row.invariant or "").strip():
             attributed += 1
-        elif (row.waiver or "").strip() or _waiver_for(plan, key):
+        elif (row.waiver or "").strip() or _waiver_for(plan, p.dp_id):
             waived += 1
         else:
             gaps.append((key, p, "既没有归属不变式，也没有豁免理由"))

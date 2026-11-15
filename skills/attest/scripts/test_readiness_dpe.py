@@ -45,6 +45,15 @@ def test_divide():
     assert divide(6, 3) == 2
 '''
 
+#: 同一个函数里有两个同类判定点（两个 if）⇒ 机器的 DP ID 带 ordinal
+PY_SRC_TWO_BRANCH = '''def divide(a, b):
+    if b == 0:
+        raise ValueError("zero")
+    if a < 0:
+        raise ValueError("negative")
+    return a / b
+'''
+
 PYPROJECT = """[project]
 name = "dpe-fixture"
 version = "0.0.0"
@@ -90,6 +99,24 @@ V2_PLAN = """# 测试计划
 
 #: 只列了一条判定点 ⇒ 机器推导出的另外两条在计划里没有
 V2_PLAN_PARTIAL = """# 测试计划
+
+目标模块：`src`
+
+## 不变式清单
+
+| # | 不变式 | 钉在哪 |
+| --- | --- | --- |
+| I1 | 除数为零必须报错 | tests/test_core.py::test_divide |
+
+## 核心逻辑细节
+
+| 维度 | DP ID | 判定点 | 归属的不变式 | 落点（文件::用例名） | 豁免理由 |
+| --- | --- | --- | --- | --- | --- |
+| 分支 | src/pkg/core.py#divide#branch | if b == 0 | I1 | tests/test_core.py::test_divide | |
+"""
+
+#: 计划里写的是不带 ordinal 的 `...#branch` —— 它就是机器的 branch#1
+V2_PLAN_ORDINAL = """# 测试计划
 
 目标模块：`src`
 
@@ -259,6 +286,40 @@ def test_v2_plan_missing_machine_dps_fails_alignment():
            "缺口只报在对的那条判据上")
 
 
+def test_dp_ordinal_is_identity_not_string():
+    """计划写 `x#f#branch`、机器推导出 `x#f#branch#1` —— 同一个判定点。
+
+    规格 §2.3.2：ordinal 段可写可不写，缺省当 1。两边按字符串比会把这
+    一条判成「机器有、计划没有」＋「计划有、机器没有」两条假账。
+    """
+    root = mkdtemp()
+    write(root / "pyproject.toml", PYPROJECT)
+    write(root / "src" / "pkg" / "__init__.py", "")
+    write(root / "src" / "pkg" / "core.py", PY_SRC_TWO_BRANCH)
+    write(root / "tests" / "test_core.py", PY_TEST)
+    plan_path = write(root / "docs" / "plan.md", V2_PLAN_ORDINAL)
+    m = readiness.discover_module(root, "src", None)
+    dp = req_plan.derive_plan_analysis(root, ["src"])
+    ids = {p.dp_id for p in dp.points}
+    expect("src/pkg/core.py#divide#branch#1" in ids,
+           "机器推导出的是带 ordinal 的 branch#1")
+    parsed = req_plan.parse_plan(plan_path)
+    align = readiness._dpe_alignment(dp, parsed)
+    expect(align["human_only"] == [],
+           f"计划里的 #branch 就是机器的 branch#1，不该算「机器没推导出」"
+           f"（实得 {align['human_only']}）")
+    expect("src/pkg/core.py#divide#branch#1" not in align["machine_only"],
+           f"branch#1 已被计划覆盖，不该算「机器推导出但计划里没有」"
+           f"（实得 {align['machine_only']}）")
+    acc = readiness._dpe_accounting(dp, parsed)
+    expect(acc["attributed"] == 1 and acc["gaps"] == 5,
+           f"branch#1 归到计划那一行，账上 1 条已归属、5 条缺口"
+           f"（实得 attributed={acc['attributed']} gaps={acc['gaps']}）")
+    c = readiness.check_plan_alignment(m, str(plan_path), dp)
+    expect(not any("机器没推导出" in e for e in c.evidence),
+           "对齐判据的证据里不再说「机器没推导出」")
+
+
 def test_lenient_downgrades_fail_to_warn():
     root, m = py_repo()
     plan = write(root / "docs" / "plan.md", V2_PLAN_PARTIAL)
@@ -379,6 +440,7 @@ def main() -> int:
     test_no_plan_means_new_criteria_skipped_not_fail()
     test_v1_plan_downgrades_new_criteria_to_warn()
     test_v2_plan_missing_machine_dps_fails_alignment()
+    test_dp_ordinal_is_identity_not_string()
     test_lenient_downgrades_fail_to_warn()
     test_l2_level_never_hard_fails()
     test_pin_not_touching_module_is_reported()

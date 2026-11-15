@@ -15,7 +15,7 @@ set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(dirname "$SCRIPT_DIR")"
-READYNESS="$REPO_ROOT/scripts/readiness.py"
+READYNESS="$REPO_ROOT/skills/attest/scripts/readiness.py"
 
 if [ ! -f "$READYNESS" ]; then
   echo "找不到 readiness.py：$READYNESS" >&2

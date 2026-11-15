@@ -9,7 +9,7 @@ Windows 上 `os.symlink` 可能需要管理员/开发者模式 —— 失败时�
 不删用户数据。
 
 布局：
-    ~/.agents/skills/attest          ← 稳定入口，指向本仓库
+    ~/.agents/skills/attest          ← 稳定入口，指向本仓库里的 skill 目录
     ~/.claude/skills/attest          → 指向上面那个
     ~/.codex/skills/attest           → 指向上面那个
     ~/.config/opencode/skills/attest → 指向上面那个
@@ -23,7 +23,10 @@ import os
 import sys
 from pathlib import Path
 
-SRC = Path(__file__).resolve().parent
+REPO = Path(__file__).resolve().parent
+# skill 本体在 skills/attest/ 下 —— skill 必须住在仓库的**子目录**里，
+# 否则 skills.sh / anthropics 官方 marketplace 的索引器扫不到它。
+SRC = REPO / "skills" / "attest"
 PRIMARY = Path.home() / ".agents" / "skills" / "attest"
 LINK_TARGETS = [
     Path.home() / ".claude" / "skills" / "attest",
@@ -75,7 +78,7 @@ def install() -> int:
         print(f"!! 自检失败：{script} --help", file=sys.stderr)
         return 1
     print(f"自检通过：{script}")
-    print(f"完成。用法见 {PRIMARY / 'README.md'}")
+    print(f"完成。用法见 {REPO / 'README.md'}")
     return 1 if problems else 0
 
 

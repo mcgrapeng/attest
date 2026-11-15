@@ -1,23 +1,23 @@
 [![CI](https://github.com/mcgrapeng/attest/actions/workflows/ci.yml/badge.svg)](https://github.com/mcgrapeng/attest/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-0F766E?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square)](https://www.python.org/)
+[![skills.sh](https://skills.sh/b/mcgrapeng/attest)](https://skills.sh/mcgrapeng/attest)
 [![Stars](https://img.shields.io/github/stars/mcgrapeng/attest?style=flat-square&label=stars&color=0F766E)](https://github.com/mcgrapeng/attest/stargazers)
 
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mcgrapeng/attest/main/assets/attest-wordmark-dark.png">
-    <img alt="attest" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/assets/attest-wordmark.png" height="56">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-wordmark-dark.png">
+    <img alt="attest" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-wordmark.png" height="56">
   </picture>
   <p><strong>把一个模块的交付前提，变成可机读、可核对、可审计的证据清单。</strong></p>
 </div>
 
 <div align="center">
-  <img alt="attest 的报告：分「已实测 / 静态信号 / 未实测」三段，最后一行是结论（0 项阻塞 · 1 项待人工确认 · 7 项无信号）" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/assets/hero.png" width="1000">
+  <img alt="attest 的报告：分「已实测 / 静态信号 / 未实测」三段，最后一行是结论（0 项阻塞 · 1 项待人工确认 · 7 项无信号）" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.png" width="1000">
 </div>
 
 ```bash
-git clone https://github.com/mcgrapeng/attest.git && cd attest
-python3 install.py
+npx skills add mcgrapeng/attest        # 安装 —— 不用 clone，不用 Python
 python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项目根>
 ```
 
@@ -162,20 +162,39 @@ python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项�
 
 ## 安装与使用
 
-安装脚本把本仓库软链到 `~/.agents/skills/attest`，再软链到 `~/.claude/skills/`、
-`~/.codex/skills/` 和 `~/.config/opencode/skills/`，于是 **Claude Code、Codex、OpenCode**
-都能加载。已存在的同名软链会被覆盖（会打印提示）；目标位置若是**真实目录**则跳过，
-不删用户数据。卸载：`python3 install.py --uninstall`（或 `bash uninstall.sh`），只删软链。
-Windows 上 `os.symlink` 可能需要管理员权限或开发者模式；失败时会打印等价的手工命令。
+**一条命令 —— 不用 clone，不用装 Python：**
 
-skill 契约（什么时候触发、必须做什么）在 [SKILL.md](SKILL.md)。装好之后，agent 跑的就是
-CLI 那一条命令：
+```bash
+npx skills add mcgrapeng/attest
+```
+
+这是 [skills CLI](https://skills.sh)。它把 skill 复制到当前项目的
+`.agents/skills/attest/`（或全局目录），并自动识别你用的 agent：Claude Code、
+Codex、OpenCode、Cursor、Windsurf、Zed、Warp 等 20 多个。skill 是自包含的 ——
+`SKILL.md`、脚本与资源一起走。
+
+**从 clone 装**（本仓库是源头）：
+
+```bash
+git clone https://github.com/mcgrapeng/attest.git && cd attest
+python3 install.py
+```
+
+安装脚本把仓库里的 skill 目录（`skills/attest/`）软链到 `~/.agents/skills/attest`，
+再软链到 `~/.claude/skills/`、`~/.codex/skills/` 和 `~/.config/opencode/skills/`，
+于是 **Claude Code、Codex、OpenCode** 都能加载。已存在的同名软链会被覆盖（会打印提示）；
+目标位置若是**真实目录**则跳过，不删用户数据。卸载：`python3 install.py --uninstall`
+（或 `bash uninstall.sh`），只删软链。Windows 上 `os.symlink` 可能需要管理员权限或
+开发者模式；失败时会打印等价的手工命令。
+
+skill 契约（什么时候触发、必须做什么）在 [SKILL.md](skills/attest/SKILL.md)。装好之后，
+agent 跑的就是 CLI 那一条命令：
 
 ```bash
 python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <项目根>
 ```
 
-四条命令与全部开关见 [SKILL.md](SKILL.md)。最该先知道的几个：
+四条命令与全部开关见 [SKILL.md](skills/attest/SKILL.md)。最该先知道的几个：
 
 | 开关 | 干什么 |
 | --- | --- |
@@ -274,16 +293,27 @@ python3 package.py --check    # 只看会打进包的内容，不写文件
 
 | 闸门 | 命令 |
 | --- | --- |
-| 回归套件 | `for t in scripts/test_*.py; do python3 "$t"; done` |
+| 回归套件 | `for t in skills/attest/scripts/test_*.py; do python3 "$t"; done` |
 | 黄金 fixture | `bash fixtures/run_fixtures.sh` |
 | 行为 eval | `python3 evals/run_evals.py` |
 | 安全扫描 | `bash .github/check-skillspector.sh`（需要 `skillspector`） |
-| 环境收口 | `python3 scripts/check_env_inheritance.py` |
-| 反向验证 | `python3 scripts/selfcheck.py src --repo fixtures/ts-colocated` |
-| README 一致性 | `python3 scripts/test_readme_sync.py` |
+| 环境收口 | `python3 skills/attest/scripts/check_env_inheritance.py` |
+| 反向验证 | `python3 skills/attest/scripts/selfcheck.py src --repo fixtures/ts-colocated` |
+| README 一致性 | `python3 skills/attest/scripts/test_readme_sync.py` |
 
 环境准备与 PR 约定见 [CONTRIBUTING.md](CONTRIBUTING.md) —— 其中包括能抓到中英两份 README
 漂移的那道一致性检查。
+
+## 参与共建
+
+attest 才一天大，它本来就该由不止一个人来建。[路线图](docs/roadmap.md) 写了接下来
+做什么、以及外部帮忙在哪一块最值钱。
+
+- **拿你自己的仓库跑一遍**，然后报告它哪里判错了 —— 两个方向都算：漏判（假绿）
+  和误判（假红）都是 bug。
+- **跟某条判据吵一架**。一条经不起质疑的判据，本身就是 bug。
+- **从 issue 里挑一个 *good first issue***。
+- **移植它** —— 换一个 agent、换一门语言、换一套 CI。
 
 ## License
 

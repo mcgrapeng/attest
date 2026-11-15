@@ -28,6 +28,7 @@ import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
+SKILL_DIR = ROOT / "skills" / "attest"
 EVALS = ROOT / "evals" / "evals.json"
 FIXTURES = ROOT / "fixtures"
 EVAL_FILES = ROOT / "evals" / "files"
@@ -59,7 +60,7 @@ def materialize(eval_spec: dict, work: Path) -> tuple[Path, Path]:
 def fill(cmd: list[str], repo: Path, plan: Path) -> list[str]:
     out = []
     for a in cmd:
-        a = a.replace("$SKILL_DIR", str(ROOT))
+        a = a.replace("$SKILL_DIR", str(SKILL_DIR))
         a = a.replace("$REPO", str(repo))
         a = a.replace("$PLAN", str(plan))
         out.append(a)

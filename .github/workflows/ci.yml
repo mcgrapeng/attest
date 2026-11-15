@@ -58,7 +58,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check pytest pytest-cov
       - name: 跑全部回归脚本（任一失败即失败）
         run: |
-          for t in scripts/test_*.py; do
+          for t in skills/attest/scripts/test_*.py; do
             echo "--- $t"
             python3 "$t" || { echo "::error::FAIL $t"; exit 1; }
           done
@@ -87,8 +87,8 @@ jobs:
         run: |
           set -euo pipefail
           TMP="$(mktemp -d)"
-          cp -R scripts "$TMP/"
-          cp SKILL.md README.md "$TMP/"
+          cp -R skills/attest/scripts "$TMP/"
+          cp skills/attest/SKILL.md README.md "$TMP/"
           REPO="$(mktemp -d)"
           cp -R fixtures/ts-colocated/. "$REPO/"
 
@@ -142,7 +142,7 @@ jobs:
         # 所以这里用一条精确的检查替它把关：生产脚本不得整份继承环境变量，
         # 子进程环境必须走白名单（readiness.py 的 child_env /
         # selfcheck.py 的 _child_env）。这条不依赖位置 ⇒ 改代码不会误红。
-        run: python3 scripts/check_env_inheritance.py
+        run: python3 skills/attest/scripts/check_env_inheritance.py
       - name: 扫描发布物（allowlist 之外不得有 HIGH / CRITICAL）
         # 扫的是**发布物**（干净副本），不是工作树 —— 工作树里有 .git/、.claude/
         # （agent 的机器本地设置）、__pycache__/ 这些不进包的东西，扫它们得到的是

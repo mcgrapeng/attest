@@ -1,0 +1,46 @@
+name: Feature or criterion request
+description: propose a criterion, a language, an integration, or a change to an existing one
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        attest's criteria are the product. A proposal is strongest when it says
+        **what would be measured**, not only what should be flagged.
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What should attest do that it does not do now?
+      description: |
+        If it is a criterion: what is the evidence, how is it measured, and
+        what does "not measured" look like for it?
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: What kind of change is this?
+      options:
+        - A new criterion
+        - A new language support
+        - An integration (CI, agent, IDE, MCP)
+        - Better output or wording
+        - A bug in an existing criterion
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Why does it matter?
+      description: A case you have seen, ideally in a repository you can name.
+    validations:
+      required: false
+  - type: checkboxes
+    id: contribution
+    attributes:
+      label: Can you help implement it?
+      options:
+        - label: I can implement this
+        - label: I can test it against a real repository
+        - label: I can only discuss it

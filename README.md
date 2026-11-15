@@ -1,23 +1,23 @@
 [![CI](https://github.com/mcgrapeng/attest/actions/workflows/ci.yml/badge.svg)](https://github.com/mcgrapeng/attest/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-0F766E?style=flat-square)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square)](https://www.python.org/)
+[![skills.sh](https://skills.sh/b/mcgrapeng/attest)](https://skills.sh/mcgrapeng/attest)
 [![Stars](https://img.shields.io/github/stars/mcgrapeng/attest?style=flat-square&label=stars&color=0F766E)](https://github.com/mcgrapeng/attest/stargazers)
 
 <div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mcgrapeng/attest/main/assets/attest-wordmark-dark.png">
-    <img alt="attest" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/assets/attest-wordmark.png" height="56">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-wordmark-dark.png">
+    <img alt="attest" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-wordmark.png" height="56">
   </picture>
   <p><strong>Turns a module's delivery preconditions into a machine-checkable, auditable evidence list.</strong></p>
 </div>
 
 <div align="center">
-  <img alt="attest 的报告：分「已实测 / 静态信号 / 未实测」三段，最后一行是结论（0 项阻塞 · 1 项待人工确认 · 7 项无信号）" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/assets/hero.png" width="1000">
+  <img alt="attest 的报告：分「已实测 / 静态信号 / 未实测」三段，最后一行是结论（0 项阻塞 · 1 项待人工确认 · 7 项无信号）" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.png" width="1000">
 </div>
 
 ```bash
-git clone https://github.com/mcgrapeng/attest.git && cd attest
-python3 install.py
+npx skills add mcgrapeng/attest        # install — no clone, no Python
 python3 ~/.agents/skills/attest/scripts/readiness.py <module path> --repo <repo root>
 ```
 
@@ -198,25 +198,45 @@ instead of giving a false verdict.
 
 ## Install and use
 
-The installer symlinks this repository to `~/.agents/skills/attest`, then
-symlinks that entry into `~/.claude/skills/`, `~/.codex/skills/` and
-`~/.config/opencode/skills/`, so **Claude Code, Codex and OpenCode** pick it
-up. An existing symlink with the same name is replaced (the script says so);
-if the target path is a **real directory** the script skips it and never
-deletes user data. Uninstall with `python3 install.py --uninstall` (or `bash
-uninstall.sh`) — symlinks only. On Windows `os.symlink` may need administrator
-rights or developer mode; on failure the script prints the equivalent manual
-commands.
+**One command — no clone, no Python:**
+
+```bash
+npx skills add mcgrapeng/attest
+```
+
+That is the [skills CLI](https://skills.sh). It copies the skill into
+`.agents/skills/attest/` of the current project (or your global scope) and
+detects which agent you run: Claude Code, Codex, OpenCode, Cursor, Windsurf,
+Zed, Warp and 20 more. The skill is self-contained — `SKILL.md`, the scripts
+and the assets travel with it.
+
+**From a clone** (this repository is the source of truth):
+
+```bash
+git clone https://github.com/mcgrapeng/attest.git && cd attest
+python3 install.py
+```
+
+The installer symlinks the skill directory (`skills/attest/`) to
+`~/.agents/skills/attest`, then symlinks that entry into `~/.claude/skills/`,
+`~/.codex/skills/` and `~/.config/opencode/skills/`, so **Claude Code, Codex
+and OpenCode** pick it up. An existing symlink with the same name is replaced
+(the script says so); if the target path is a **real directory** the script
+skips it and never deletes user data. Uninstall with `python3 install.py
+--uninstall` (or `bash uninstall.sh`) — symlinks only. On Windows `os.symlink`
+may need administrator rights or developer mode; on failure the script prints
+the equivalent manual commands.
 
 The skill contract — when the skill fires and what it must do — lives in
-[SKILL.md](SKILL.md). Once installed, the agent runs the same one command the
-CLI does:
+[SKILL.md](skills/attest/SKILL.md). Once installed, the agent runs the same one
+command the CLI does:
 
 ```bash
 python3 "$SKILL_DIR/scripts/readiness.py" <module path> --repo <repo root>
 ```
 
-The four commands, and every switch, are documented in [SKILL.md](SKILL.md).
+The four commands, and every switch, are documented in
+[SKILL.md](skills/attest/SKILL.md).
 The ones worth knowing first:
 
 | Switch | What it does |
@@ -349,17 +369,29 @@ This repo runs its own tool on itself.
 
 | Gate | Command |
 | --- | --- |
-| Regression suite | `for t in scripts/test_*.py; do python3 "$t"; done` |
+| Regression suite | `for t in skills/attest/scripts/test_*.py; do python3 "$t"; done` |
 | Golden fixtures | `bash fixtures/run_fixtures.sh` |
 | Behaviour evals | `python3 evals/run_evals.py` |
 | Security scan | `bash .github/check-skillspector.sh` (needs `skillspector`) |
-| Environment containment | `python3 scripts/check_env_inheritance.py` |
-| Reverse verification | `python3 scripts/selfcheck.py src --repo fixtures/ts-colocated` |
-| README consistency | `python3 scripts/test_readme_sync.py` |
+| Environment containment | `python3 skills/attest/scripts/check_env_inheritance.py` |
+| Reverse verification | `python3 skills/attest/scripts/selfcheck.py src --repo fixtures/ts-colocated` |
+| README consistency | `python3 skills/attest/scripts/test_readme_sync.py` |
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the setup and the conventions a
 pull request is expected to follow — including the README consistency check
 that catches drift between the two languages.
+
+## Get involved
+
+attest is one day old, and it is meant to be built by more than one person. The
+[roadmap](docs/roadmap.md) says what is being built next and where outside help
+is worth the most.
+
+- **Run it on a repository you own** and report what it got wrong — in either
+  direction. A false green and a false alarm are both bugs.
+- **Argue with a criterion.** A criterion that cannot be argued with is a bug.
+- **Take a *good first issue*** from the issue tracker.
+- **Port it** — another agent, another language, another CI.
 
 ## License
 

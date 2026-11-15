@@ -16,7 +16,9 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
+# skill 在 skills/attest/ 下，仓库根再往上两级
+ROOT = HERE.parents[2]
+SKILL_DIR = ROOT / "skills" / "attest"
 INSTALL = ROOT / "install.py"
 FAILURES: list[str] = []
 TMPDIRS: list[Path] = []
@@ -57,8 +59,8 @@ def test_install_and_uninstall() -> None:
     for p in links(home):
         expect(p.is_symlink(), f"{p.relative_to(home)} 是软链")
     primary = home / ".agents" / "skills" / "attest"
-    expect(primary.resolve() == ROOT.resolve(),
-           "稳定入口指向本仓库")
+    expect(primary.resolve() == SKILL_DIR.resolve(),
+           "稳定入口指向仓库里的 skill 目录")
     for p in links(home)[1:]:
         expect(p.resolve() == primary.resolve(),
                f"{p.relative_to(home)} 指向稳定入口")

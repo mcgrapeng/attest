@@ -20,7 +20,9 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-ROOT = HERE.parent
+# skill 在 skills/attest/ 下，仓库根再往上两级
+ROOT = HERE.parents[2]
+SKILL_DIR = ROOT / "skills" / "attest"
 FAILURES: list[str] = []
 
 
@@ -91,7 +93,7 @@ def main() -> int:
            f"中文 README 判据表 {code_n} 行（实际 {criteria_rows(zh)}）")
 
     print("\nREADME 里的数字与仓库实况一致")
-    tests = sorted(p.name for p in (ROOT / "scripts").glob("test_*.py"))
+    tests = sorted(p.name for p in SKILL_DIR.joinpath("scripts").glob("test_*.py"))
     expect(f"{len(tests)} / {len(tests)}" in en or f"{len(tests)}/{len(tests)}" in en,
            f"英文 README 的回归套件数是 {len(tests)}")
     expect(f"{len(tests)} / {len(tests)}" in zh or f"{len(tests)}/{len(tests)}" in zh,
@@ -116,8 +118,9 @@ def main() -> int:
                "（样例被删节过就会失败）")
 
     print("\nREADME 用到的资源文件都存在")
-    for asset in ("assets/hero.png", "assets/attest-wordmark.png",
-                  "assets/attest-wordmark-dark.png"):
+    for asset in ("skills/attest/assets/hero.png",
+                  "skills/attest/assets/attest-wordmark.png",
+                  "skills/attest/assets/attest-wordmark-dark.png"):
         expect((ROOT / asset).is_file(), f"{asset} 存在")
 
     print("\nREADME 引用的路径都存在")
@@ -125,18 +128,21 @@ def main() -> int:
         missing = []
         for tok in set(re.findall(r"(?:[\w./~-]+/)*[\w.-]+\.(?:py|md|sh|svg|yml|yaml)\b", text)):
             if tok.startswith(("http", "//", "dist/", "<", "-", "~/.agents/testkit",
-                               "SKILL_DIR")):
+                               "SKILL_DIR", "skills.sh")):
                 continue
             if "*" in tok:
                 continue
-            p = tok.replace("~/.agents/skills/attest/", "").lstrip("~/")
+            # 装完的 skill 在 ~/.agents/skills/attest/ —— 它就是仓库里的 skills/attest/
+            p = tok.replace("~/.agents/skills/attest/", "skills/attest/").lstrip("~/")
+            if p == "SKILL.md":
+                p = "skills/attest/SKILL.md"
             if p.startswith(("github.com", "img.shields")):
                 continue
             if "/" not in p and p.endswith(".py"):
-                # 正文里提到的裸文件名：仓库根与 scripts/ 都可能
+                # 正文里提到的裸文件名：仓库根与 skill 的 scripts/ 都可能
                 if (ROOT / p).exists():
                     continue
-                p = f"scripts/{p}"
+                p = f"skills/attest/scripts/{p}"
             if not (ROOT / p).exists():
                 missing.append(tok)
         expect(not missing, f"{label} README 引用的仓库内文件都存在（缺：{missing}）")

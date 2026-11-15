@@ -18,7 +18,7 @@
 #    改了代码就失效 —— 对开源贡献者是持续的假红（每次改代码都要先"重新生成基线"，
 #    久而久之就没人看红灯了）。规则级不依赖位置：改代码不会误红，而**新规则**仍然
 #    会被拦。真正的不变量由另一条精确检查守着：
-#    `python3 scripts/check_env_inheritance.py`（生产代码不得整份继承 os.environ）。
+#    `python3 skills/attest/scripts/check_env_inheritance.py`（生产代码不得整份继承 os.environ）。
 set -uo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"

@@ -11,6 +11,28 @@
 发布前置清单见 [docs/oss-release-review.md](docs/oss-release-review.md)（只读评测记录）
 与 [docs/testing-philosophy-review.md](docs/testing-philosophy-review.md)。
 
+### 分发与共建：让工具能被找到、被一起建
+
+工具存在，但几乎没人找得到它 —— 这一轮补的是「被找到」与「能一起建」两件事。
+
+**布局下沉**：`SKILL.md` + `scripts/` + `assets/` 整体搬进 `skills/attest/`。这不是审美
+选择：skills.sh 的索引器与 Anthropic 官方 marketplace 的模板都只扫**子目录**里的
+`SKILL.md` —— 实测首页收录的 18 个仓库**无一例外**，仓库根的 `SKILL.md` 一个都搜不到，
+而 `skills.sh.json` 的 schema 明写「the CLI ignores … the repository root」。
+放在根目录等于工具存在但无人能发现。仓库根保留 GitHub 门面：README、docs、fixtures、
+evals、CI；`install.py` 的稳定入口改指 `skills/attest/`，`.skill` 打包的第一层仍是
+skill 目录本身。
+
+**一行安装**：`npx skills add mcgrapeng/attest` —— 不用 clone、不用装 Python，skills CLI
+自动识别 20+ 个 agent（Claude Code / Codex / OpenCode / Cursor / Windsurf / Zed / …）。
+
+**社区健康信号**（新人第一眼找的东西，也是「长期维护」该有的样子）：`SECURITY.md`
+（GitHub 私有漏洞报告已开启）、`CODE_OF_CONDUCT.md`（Contributor Covenant 2.1 原文）、
+issue 模板（bug / feature）与 PR 模板。
+
+**路线图**：[docs/roadmap.md](docs/roadmap.md) —— 四个阶段（能被找到 → 能进 CI → 能对
+真实仓库举证 → 成为标准），每项写清「谁能帮上」。README 加「Get involved / 参与共建」段。
+
 ### 改名：req-test-plan → attest
 
 工具的产出本身就是一份 **attestation**（证据清单）。它做的是这件事里**机械的那一半**，

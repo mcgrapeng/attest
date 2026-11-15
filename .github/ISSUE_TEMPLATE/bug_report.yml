@@ -1,0 +1,57 @@
+name: Bug report
+description: attest got something wrong — a false green, a false alarm, or a crash
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The two cases that matter most are a **false
+        green** (attest said "measured / passed" and the truth was otherwise)
+        and a **false alarm** (attest blocked on something that was fine).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What attest said, and what was actually true.
+      placeholder: |
+        attest reported: 测试全绿 — 没有失败用例
+        Actually: the assertion is tautological, the suite cannot fail
+    validations:
+      required: true
+  - type: dropdown
+    id: direction
+    attributes:
+      label: Which direction was it wrong in?
+      options:
+        - False green — attest passed something that was not true
+        - False alarm — attest blocked or flagged something that was fine
+        - Crash or unhandled error
+        - Output or wording is misleading
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The command, the repository layout, the relevant file.
+      placeholder: |
+        python3 skills/attest/scripts/readiness.py src --repo /path/to/repo
+        Module: src/auth/session.ts
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Language and version, test framework, whether the repo has a coverage gate.
+      render: text
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: attest version or commit
+      placeholder: v0.1.0 or the commit SHA
+    validations:
+      required: false

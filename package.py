@@ -25,6 +25,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 SKILL_NAME = "attest"
+# skill 本体在 skills/attest/ —— 打包的第一层就是这个目录（社区通行的 .skill 格式）
+SKILL_DIR = ROOT / "skills" / SKILL_NAME
 
 EXCLUDE_DIRS = {"__pycache__", "node_modules", ".git", ".github", ".omx",
                 "dist", "fixtures", "evals", ".venv", "venv", ".pytest_cache",
@@ -34,8 +36,6 @@ EXCLUDE_GLOBS = ("*.pyc", "*.pyo", ".DS_Store", "*.identity.json")
 # 回归套件是**仓库**的开发资产（21 个文件、约 3000 行），不是 skill 的运行时 ——
 # 不打进包；仓库里照旧有。
 EXCLUDE_PREFIXES = ("scripts/test_",)
-# 打包前必须存在的文件（少了就不该发）
-REQUIRED = ("SKILL.md", "LICENSE", "README.md")
 
 
 def excluded(rel: Path) -> bool:
@@ -46,16 +46,24 @@ def excluded(rel: Path) -> bool:
     return any(fnmatch.fnmatch(rel.name, pat) for pat in EXCLUDE_GLOBS)
 
 
-def collect() -> list[Path]:
-    files = []
-    for p in sorted(ROOT.rglob("*")):
+def collect() -> list[tuple[Path, Path]]:
+    """要打进包的文件：(磁盘路径, 包内相对路径)。
+
+    skill 本体来自 skills/attest/；README 从仓库根取 —— 仓库根是 GitHub 的门面，
+    仓库里只有一份 README，skill 目录里不重复放（避免两份漂移）。
+    """
+    out: list[tuple[Path, Path]] = []
+    for p in sorted(SKILL_DIR.rglob("*")):
         if not p.is_file():
             continue
-        rel = p.relative_to(ROOT)
+        rel = p.relative_to(SKILL_DIR)
         if excluded(rel):
             continue
-        files.append(p)
-    return files
+        out.append((p, rel))
+    readme = ROOT / "README.md"
+    if readme.is_file():
+        out.append((readme, Path("README.md")))
+    return out
 
 
 def main() -> int:
@@ -65,19 +73,21 @@ def main() -> int:
                     help="只列出会打进包的内容，不写文件")
     args = ap.parse_args()
 
-    missing = [r for r in REQUIRED if not (ROOT / r).is_file()]
+    missing = [r for r in ("SKILL.md", "LICENSE") if not (SKILL_DIR / r).is_file()]
+    if not (ROOT / "README.md").is_file():
+        missing.append("README.md")
     if missing:
         print(f"缺少必需文件，打包中止：{', '.join(missing)}", file=sys.stderr)
         return 1
 
     files = collect()
-    total = sum(p.stat().st_size for p in files)
+    total = sum(p.stat().st_size for p, _ in files)
     print(f"会打进包的文件：{len(files)} 个，{total / 1024:.0f} KB")
-    for p in files:
-        print(f"  {p.relative_to(ROOT)}")
+    for _, rel in files:
+        print(f"  {SKILL_NAME}/{rel}")
 
     # 字节码绝不能进包（既泄漏作者环境，又让用户拿到不可读的产物）
-    bad = [p for p in files if p.suffix in (".pyc", ".pyo")
+    bad = [p for p, _ in files if p.suffix in (".pyc", ".pyo")
            or "__pycache__" in p.parts]
     if bad:
         print("\n有字节码要进包 —— 中止：", file=sys.stderr)
@@ -92,9 +102,9 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     target = out_dir / f"{SKILL_NAME}.skill"
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
-        for p in files:
+        for p, rel in files:
             # 第一层是 skill 目录本身 —— 与社区通行的 .skill 格式一致
-            zf.write(p, p.relative_to(ROOT.parent))
+            zf.write(p, Path(SKILL_NAME) / rel)
     print(f"\n已打包：{target}（{target.stat().st_size / 1024:.0f} KB）")
     print(f"装法：解开到 <agent>/skills/ 下，或直接用 install.sh 建软链。")
     return 0

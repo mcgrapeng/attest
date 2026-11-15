@@ -179,6 +179,70 @@ def test_in_to_hasown_skips_for_in():
            "for...in 不会被当成 in 运算符")
 
 
+def test_mutation_line_number_survives_multiline_comments():
+    """多行注释/字符串不能把后面变异点的行号顶掉。
+
+    词法算子靠「在剥离后的代码里数换行」算行号 ⇒ 剥离字符串与注释时
+    必须**保留换行**。早期实现把整段匹配替换成等长空格 ⇒ 多行注释里的
+    换行被吃掉 ⇒ 该行之后的每个变异点都报错的行号（实测 lumen 的 7 个
+    脚本：71 个词法变异点行号全错）。
+    """
+    print("\ntest_mutation_line_number_survives_multiline_comments")
+    sys.path.insert(0, str(HERE))
+    from mutation_check import find_mutations  # noqa: E402
+    root = mkdtemp()
+    src = ("/**\n"
+           " * 多行文档注释。\n"
+           " * 第二行。\n"
+           " */\n"
+           "function f(a, b) {\n"
+           "  return a === b;\n"
+           "}\n"
+           "module.exports = { f };\n")
+    p = write(root / "a.js", src)
+    muts = [m for m in find_mutations(p, limit=None) if m.op == "cmp-negate"]
+    expect(len(muts) == 1, f"找到 1 个 cmp-negate 变异点，实际 {len(muts)}")
+    if not muts:
+        return
+    idx = src.index("===")
+    want_line = src.count("\n", 0, idx) + 1
+    want_col = idx - (src.rfind("\n", 0, idx) + 1) + 1
+    expect(muts[0].line == want_line,
+           f"行号是原文件里的真行号（{want_line}），实际 {muts[0].line}")
+    expect(muts[0].col == want_col,
+           f"列号是原文件里的真列号（{want_col}），实际 {muts[0].col}")
+
+
+def test_mutation_symbol_is_enclosing_function():
+    """变异点归属它所在的那个函数（作用域过滤按这个符号筛）。
+
+    这条**不是**行号那条的附庸：行号被顶掉时作用域仍然是对的（实测 7 个
+    真实脚本 71 个词法变异点，修复前后 symbol 零变化 —— 压缩多行注释后，
+    变异点与所属函数的相对距离只会变短，不会跨出函数）。它钉的是另一件事：
+    剥离字符串与注释不能把作用域结构改坏。
+    """
+    print("\ntest_mutation_symbol_is_enclosing_function")
+    sys.path.insert(0, str(HERE))
+    from mutation_check import find_mutations  # noqa: E402
+    root = mkdtemp()
+    src = ("/*\n"
+           " * 多行注释\n"
+           " */\n"
+           "function alpha() {\n"
+           "  return 0;\n"
+           "}\n"
+           "function beta(a, b) {\n"
+           "  return a === b;\n"
+           "}\n")
+    p = write(root / "a.js", src)
+    muts = [m for m in find_mutations(p, limit=None) if m.op == "cmp-negate"]
+    expect(len(muts) == 1, f"找到 1 个 cmp-negate 变异点，实际 {len(muts)}")
+    if not muts:
+        return
+    expect(muts[0].symbol == "beta",
+           f"变异点归属 beta，实际 {muts[0].symbol!r}")
+
+
 # --------------------------------------------------------------- L3 算子
 
 
@@ -351,6 +415,8 @@ def main() -> int:
     test_parse_check_failure_is_unknown_not_killed()
     test_scope_symbols_limits_points()
     test_case_name_judges_only_that_case()
+    test_mutation_line_number_survives_multiline_comments()
+    test_mutation_symbol_is_enclosing_function()
 
     print()
     for d in TMPDIRS:

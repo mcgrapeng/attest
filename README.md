@@ -13,15 +13,14 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-0F766E?style=flat-square)](LICENSE)
 
+[中文版](README.zh-CN.md) · [English](README.md)
+
 </div>
 
 ```bash
 npx skills add mcgrapeng/attest
 ```
 
-<div align="center">
-  <img alt="attest 的报告：分「已实测 / 静态信号 / 未实测」三段，最后一行是结论（0 项阻塞 · 1 项待人工确认 · 7 项无信号）" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.png" width="880">
-</div>
 
 ## What it does
 
@@ -30,12 +29,16 @@ assertion would fail, that the plan's pins point at files that exist, or that
 two stores have not drifted apart. `attest` answers the delivery question with
 **evidence**, sorted into four kinds:
 
-| | What it means |
+| Evidence kind | What it means |
 | --- | --- |
 | **Measured** (已实测) | Something ran — the command, its exit code and its output are in the report |
 | **Static signal** (静态信号) | Read out of the source, not run. **Can never support a pass on its own** |
 | **Not measured** (未实测) | Could not be measured, and the report names the precondition that was missing |
 | **Not judged** (本工具不判定) | Out of scope by design: requirement understanding, product behaviour, performance, security, availability, operational readiness |
+
+**Supported today:** TypeScript / JavaScript and Python. Rust and Go are recognised
+by the plan generator, but the readiness checker exits with code 2 and says so
+rather than reporting on a module it cannot read.
 
 The measurement is real, not inferred. `attest` runs the target repo's **own**
 test command, its **own** coverage gate, its **own** reconciliation script, and
@@ -62,9 +65,13 @@ approval this tool refuses to fake.
 npx skills add mcgrapeng/attest
 ```
 
-The skills CLI copies the skill into `.agents/skills/attest/` and detects which
-agent you run — Claude Code, Codex, OpenCode, Cursor, Windsurf, Zed, Warp and
-20 more. No clone, no Python, nothing to uninstall but the directory.
+Three ways in, pick the one that matches you:
+
+| You want to… | Do this |
+| --- | --- |
+| Use it inside your agent | `npx skills add mcgrapeng/attest` — the skills CLI copies the skill into `.agents/skills/attest/` and detects which agent you run (Claude Code, Codex, OpenCode, Cursor, Windsurf, Zed, Warp and 20 more). No clone, no Python |
+| Keep the repository | `git clone … && python3 install.py` — symlinks the skill into `~/.agents/skills/attest` and the agent directories |
+| Just run it once | `python3 ~/.agents/skills/attest/scripts/readiness.py <module path> --repo <repo root>` |
 
 From a clone (this repository is the source of truth):
 
@@ -107,7 +114,13 @@ jobs:
           module: src/auth
 ```
 
-Inputs: `module` (required — the module to check, relative to the repository root), `repo-path`, `plan` (a requirement test plan to check against), `strict` (fail the job on blocking items), `comment` (post the report as a PR comment).
+| Input | Default | What it does |
+| --- | --- | --- |
+| `module` | — | **Required.** The module to check, relative to the repository root (`src/auth`) |
+| `repo-path` | `.` | The repository root, when it is not the workspace root |
+| `plan` | — | A requirement test plan to check the module against |
+| `strict` | `false` | Fail the job when attest reports blocking items |
+| `comment` | `true` | Post the report as a pull request comment |
 
 It publishes the evidence list to the job summary and the PR comment, and
 **does not block the merge by default** (`strict: false`) — attest reports
@@ -155,7 +168,7 @@ silently. MIT licensed.
 
 Every number in this repository comes from a command you can re-run: **27 / 27** regression suites, **5 / 5** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
 
-Known gaps, in full: [CHANGELOG.md](CHANGELOG.md) (已知遗留). The three that
+Known gaps, in full: [CHANGELOG.md](CHANGELOG.md). The three that
 matter most:
 
 - **Trigger recall is 0.5** on the machine where it was measured — that number
@@ -178,4 +191,8 @@ follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 
-MIT
+MIT.
+
+The last word belongs to the evidence: the verdicts attest produced on five
+public repositories — **including the ones that made the tool look wrong** —
+are published in [docs/self-test-report.md](docs/self-test-report.md).

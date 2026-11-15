@@ -7,39 +7,26 @@
 
 （暂无）
 
-## [0.1.4] - 2026-11-15
+## [0.1.5] - 2026-11-15
 
-**README 整体重写。** 旧版 14 段、3526 词，是一份"文档"而不是门面 —— 读者要滚过
-badge 墙、两张图、14 行判据表和一整段报告样例，才看到安装命令。新版 8 段、约 1100 词，
-按"读者什么时候能下决心放弃"排序：
+**README 按设计评审的结论修。** 用 impeccable 的 critique 流程做了两路独立评估（设计评审 +
+浏览器取证），逐条修了发现的问题：
 
-- 首屏：字标 → 一句话定位 → 命令 → 图（badge 收到 4 个，去掉 Stars 这个虚荣项）
-- **点名替代品**：覆盖率徽章、AI 写的测试计划、聊天里问一句、PR 里的 checklist ——
-  逐个说清 attest 补的是哪一块（这是最稀缺的一类内容，也是旧版最缺的）
-- 判据表搬进 [docs/criteria.md](docs/criteria.md)；安全须知（71 行）搬进
-  [SECURITY.md](SECURITY.md)；开发闸门与参与共建搬进 [CONTRIBUTING.md](CONTRIBUTING.md)
-  —— 内容没删，只是搬家；社区健康内容不再占首页篇幅
-- 一句话定位改成从读者的问题起手：
-  *Turns "is this module ready to ship?" from a coverage percentage into an auditable
-  evidence list.*
+- **首屏的 hero 图撤掉了**。它是真实运行，但按 GitHub 的 838px 列宽渲染后字高只有
+  9.9px（390px 屏上 3.8px），而且裁剪正好停在 `── 本工具不判定 ──` 那一段之前 ——
+  报告里最有产品身份的一段被切在了外面，alt 又与画面对不上（三段 / 两段 / 正文四档，
+  三方矛盾）。资产仍留在 `skills/attest/assets/hero.png`；demo 改由**文字摘录**承担
+  （逐字、可读、终端与读屏用户同样能拿到）。
+- **语言适用范围写进页面**：TypeScript / JavaScript 与 Python；Rust / Go 计划生成器认得
+  出来，但就绪度检查退出码 2 并说清原因 —— 以前只在链接里。
+- **安装路径改成选路表**（agent 里用 / 留仓库 / 只跑一次），不再是五条并列。
+- **Action 的 5 个入参改成带默认值与必填标记的表**。
+- **修掉首表的空表头**（渲染成一个 179px 的空格）、英文页里混入的镜像残留
+  `(已知遗留)`、中英页面互相不可达。
+- **页面最后一句留给证据**：五个公开仓库的结论（包括让工具显得难看的那些）而不是 MIT。
 
-守卫跟着搬家：判据表校验指向 `docs/criteria.md`，输出摘录改成**逐行比对**真实运行
-（比"整段输出逐字出现"更能抓漂移 ✓），环境白名单校验指向 `SECURITY.md`。
-
-## [0.1.3] - 2026-11-15
-
-**Python 覆盖率车道说清原因**（自测报告里的第四个发现）。pytest 自己没跑起来时
-（收集错误 / 缺依赖 / 参数用错），工具报的是「覆盖率报告没解析出来（No such file or
-directory: .../cov.json）」—— 读者只知道有个文件找不到，不知道**仓库缺依赖**。
-实测复现：`pallets/itsdangerous` 的测试要 `freezegun`（仓库没声明）⇒ pytest 收集失败
-⇒ pytest-cov 根本没写 cov.json。现在报「pytest 没跑起来（No module named
-'freezegun'）」，并点名缺哪个模块。
-
-**Action 真机冒烟**：加 `.github/workflows/action-smoke.yml`，用 `uses: ./` 在真实
-ubuntu runner 上跑一遍 action（strict: true）—— 本地逐步模拟过 composite 的每一步，
-但「composite action 在 GitHub 上真的能跑」只有真跑一次才算数。
-
-回归断言：`skills/attest/scripts/test_python_coverage_lane.py`。
+新仓库文件：`PRODUCT.md`（已确认的产品事实：读者、定位、必须守住的底线、品牌承诺）、
+`.impeccable/config.json`。
 
 ## [0.1.2] - 2026-11-15
 

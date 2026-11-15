@@ -46,7 +46,7 @@ Every number below comes from a command you can re-run.
 
 | Gate | What it measures | Result |
 | --- | --- | --- |
-| Regression suite | The tool's own behaviour, including every false green it has been known to produce | 25/25 green |
+| Regression suite | The tool's own behaviour, including every false green it has been known to produce | 26/26 green |
 | Golden fixtures | Whether the tool reports the same verdict on small repos with pinned expectations | 5/5 hit, 0 mismatches |
 | Behaviour evals | Whether "the user says X ⇒ the tool answers Y" holds | 6/6 passed |
 | Security scan | SkillSpector findings against a rule-level allowlist | **0** findings outside the allowlist |

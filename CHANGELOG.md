@@ -7,6 +7,30 @@
 
 （暂无）
 
+## [0.1.2] - 2026-11-15
+
+**修三个在公开仓库上实测到的误报**（证据见
+[docs/self-test-report.md](docs/self-test-report.md)，issue #1 / #2 / #3）。这三个都是
+**误报阻塞项** —— 工具给出一个不存在的理由说"你不该交付"。判据不该说这种话。
+
+1. **测试目录里无后缀的文件不被发现**（#1）。之前只认 `.test.`/`.spec.` 后缀，于是
+   chalk / express 的 `test/basic.js` 这种文件一个都认不出 ⇒ 判成"没有测试" ⇒
+   「导出的逻辑都有测试」把每个导出都报成零引用 ⇒ 阻塞。现在：测试目录里的
+   js/ts 文件**不带后缀也算测试**；但 `support/` `fixtures/` `helpers/` 这类辅助子目录
+   与 `conftest.py` / `setup.js` 这类文件不算（跑它们只会得到噪音）。
+2. **逐文件命令追加到复合命令末尾**（#2）。chalk 的 test 脚本是
+   `xo && c8 node --test test/[!_]*.js && tsc --noEmit`，文件被追加到末尾 ⇒ 变成
+   `tsc` 的参数 ⇒ runner 根本没跑。现在：复合脚本会被拆开，文件追加到**真正跑测试的
+   那一段**（`c8 node --test`）；一条都认不出来 ⇒ 逐文件车道诚实地说"没认出 runner"，
+   不拿猜出来的命令去跑别人的仓库。单条命令保持旧行为（有些仓库的 test 脚本就是自写的
+   runner，认不出它是不是测试 runner，那就照原样跑）。
+3. **`.d.ts` / `.js` 被当成派生存储**（#3）。命中的是源码注释里 GitHub 链接的
+   `/blob/` 这个路径段，以及 Python 标准库 `textwrap.py` 里的一句 "blob" ⇒ 两个仓库
+   被误判成"有派生存储却没有对账机制"。现在：匹配存储线索前先把 URL 剔掉，"blob"
+   这个词本身不再算证据（对象存储由 S3Client / putObject / minio / objectStore 认）。
+
+回归断言：`skills/attest/scripts/test_repo_layout.py`（26 条套件之一）。
+
 ## [0.1.1] - 2026-11-15
 
 ### 自测报告与市场收录（2026-11-15 追加）

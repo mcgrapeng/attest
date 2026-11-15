@@ -90,6 +90,10 @@ directory** the script skips it and never deletes user data. Uninstall with
 `python3 install.py --uninstall` — symlinks only. On Windows `os.symlink` may
 need administrator rights or developer mode.
 
+Python 3.11+ and nothing else — the tool has **no third-party dependencies**,
+and it drives your repository's own toolchain (node, pytest, …) rather than
+installing one of its own.
+
 Then, against any repository:
 
 ```bash
@@ -111,7 +115,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.3
+      - uses: mcgrapeng/attest@v0.1.7
         with:
           module: src/auth
 ```
@@ -126,12 +130,16 @@ jobs:
 
 It publishes the evidence list to the job summary and the PR comment, and
 **does not block the merge by default** (`strict: false`) — attest reports
-evidence, the repository decides. Install the repository's own dependencies
+evidence, the repository decides. The job stays green even when attest exits 1
+(blocking items or an unmeasurable key criterion); with `strict: true` that
+exit code fails the job instead. Install the repository's own dependencies
 before the action runs: attest runs the repository's own test command.
 
 ## The report
 
-Real output from attest's own fixture (`fixtures/ts-colocated`):
+Real output from attest's own fixture (`fixtures/ts-colocated`). The tool prints
+in Chinese — the criterion names and the verdict are what you read in your
+terminal:
 
 ```
 将执行的仓库脚本：测试车道（逐个测试文件跑 $ node --test <测试文件>）
@@ -161,16 +169,18 @@ because a key criterion could not be measured at all.
 
 ## What it measures
 
-14 criteria. The full table, the four evidence kinds and the language matrix
-are in **[docs/criteria.md](docs/criteria.md)**. In one paragraph: the repo's
-own tests, its own coverage gate, whether its tests can actually fail, the PG
-schema, cross-store drift, baseline accuracy, plus static signals about
-hygiene, unused exports, over-abstraction, reinvented wheels, dependencies and
-assertion independence.
+The 14 criteria, by name: tests green · coverage reached · tests can actually
+fail · schema basically compliant · data agrees across stores · data matches the
+baseline · requirement covered · vector collection attributes agree · test
+hygiene · every export referenced by a test · not over-abstracted · no reinvented
+wheels · mainstream dependencies · assertion oracles independent.
+
+How each one is measured, the four evidence kinds and the language matrix are in
+**[docs/criteria.md](docs/criteria.md)**.
 
 ## Status
 
-**Actively developed. Released as `v0.1.3`.** The criteria and the skill
+**Actively developed. Released as `v0.1.7`.** The criteria and the skill
 contract may still change — but they will change with a changelog entry, not
 silently. MIT licensed.
 

@@ -185,6 +185,20 @@ def main() -> int:
             miss = sorted(n for n in names if n not in text)
             expect(not miss, f"{label} README 写全了 action 的输入（缺：{miss}）")
 
+    print("\nREADME 自称的版本与 CHANGELOG 最新版本一致")
+    ch = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    versions = re.findall(r"^## \[(\d+\.\d+\.\d+)\]", ch, re.M)
+    expect(not versions, "CHANGELOG 里没有版本段")
+    latest = versions[0] if versions else ""
+    for label, text in (("英文", en), ("中文", zh)):
+        claimed = re.findall(r"(?:Released as|已发)\s*`v(\d+\.\d+\.\d+)`", text)
+        expect(claimed == [latest],
+               f"{label} README 自称 v{claimed[0] if claimed else '?'} =="
+               f" CHANGELOG 最新 v{latest}")
+        pinned = set(re.findall(r"mcgrapeng/attest@v(\d+\.\d+\.\d+)", text))
+        expect(pinned <= {latest},
+               f"{label} README 的 Action pin 指向最新版本（实际 {sorted(pinned)}）")
+
     print("\nREADME 的环境白名单描述与代码一致")
     code = (HERE / "readiness.py").read_text(encoding="utf-8")
     exact = set(re.findall(r'"([A-Z_]+)"',

@@ -26,9 +26,7 @@ npx skills add mcgrapeng/attest
 
 A coverage number tells you the code ran. It does not tell you that an
 assertion would fail, that the plan's pins point at files that exist, or that
-two stores have not drifted apart.
-
-`attest` answers the delivery question with
+two stores have not drifted apart. `attest` answers the delivery question with
 **evidence**, sorted into four kinds:
 
 | Evidence kind | What it means |
@@ -46,9 +44,7 @@ rather than reporting on a module it cannot read.
 
 The measurement is real, not inferred. `attest` runs the target repo's **own**
 test command, its **own** coverage gate, its **own** reconciliation script, and
-queries the PostgreSQL catalog for the actual schema.
-
-Where it cannot measure
+queries the PostgreSQL catalog for the actual schema. Where it cannot measure
 something, it says so instead of passing it.
 
 **What it is not.** It is not a "can we ship" referee, and it does not replace
@@ -87,15 +83,11 @@ python3 install.py
 ```
 
 The installer symlinks the skill directory (`skills/attest/`) to
-`~/. agents/skills/attest`, then symlinks that entry into `~/. claude/skills/`,
-`~/. codex/skills/` and `~/. config/opencode/skills/`.
-
-An existing symlink with
+`~/.agents/skills/attest`, then symlinks that entry into `~/.claude/skills/`,
+`~/.codex/skills/` and `~/.config/opencode/skills/`. An existing symlink with
 the same name is replaced (the script says so); if the target path is a **real
 directory** the script skips it and never deletes user data. Uninstall with
-`python3 install. py --uninstall`: symlinks only. On Windows `os.
-
-symlink` may
+`python3 install.py --uninstall`: symlinks only. On Windows `os.symlink` may
 need administrator rights or developer mode.
 
 Python 3.11+ and nothing else: the tool has **no third-party dependencies**,
@@ -138,13 +130,9 @@ jobs:
 
 It publishes the evidence list to the job summary and the PR comment, and
 **does not block the merge by default** (`strict: false`): attest reports
-evidence, the repository decides.
-
-The job stays green even when attest exits 1
+evidence, the repository decides. The job stays green even when attest exits 1
 (blocking items or an unmeasurable key criterion); with `strict: true` that
-exit code fails the job instead.
-
-Install the repository's own dependencies
+exit code fails the job instead. Install the repository's own dependencies
 before the action runs: attest runs the repository's own test command.
 
 ## The report
@@ -156,7 +144,7 @@ terminal:
 ```
 将执行的仓库脚本：测试车道（逐个测试文件跑 $ node --test <测试文件>）
 
-交付就绪度分析: src
+交付就绪度分析 — src
 仓库：<repo root>
 源码 1 文件（+0 个测试支撑） / 单测 1 个 / itest 0 个
 ```

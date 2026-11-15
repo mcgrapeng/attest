@@ -102,11 +102,23 @@ def main() -> int:
     n_evals = len(evals if isinstance(evals, list) else evals.get("evals", []))
     expect("6 / 6" in en and "6 / 6" in zh, f"README 写 6 / 6 eval（实际 {n_evals}）")
 
+    print("\n输出样例是逐字真实输出")
+    run_out = subprocess.run(
+        [sys.executable, str(HERE / "readiness.py"), "src",
+         "--repo", str(ROOT / "fixtures" / "ts-colocated")],
+        capture_output=True, text=True, cwd=str(ROOT)).stdout
+    run_out = re.sub(r"/\S*/fixtures/ts-colocated", "<repo root>", run_out).rstrip("\n")
+    for label, text in (("英文", en), ("中文", zh)):
+        expect(run_out in text,
+               f"{label} README 的输出样例与真实运行逐字一致"
+               "（样例被删节过就会失败）")
+
     print("\nREADME 引用的路径都存在")
     for label, text in (("英文", en), ("中文", zh)):
         missing = []
         for tok in set(re.findall(r"(?:[\w./~-]+/)*[\w.-]+\.(?:py|md|sh|svg|yml|yaml)\b", text)):
-            if tok.startswith(("http", "//", "dist/", "<", "-", "~/.agents/testkit")):
+            if tok.startswith(("http", "//", "dist/", "<", "-", "~/.agents/testkit",
+                               "SKILL_DIR")):
                 continue
             if "*" in tok:
                 continue

@@ -269,6 +269,46 @@ security-lens（README 写了凭据透传与子进程执行）+ design-lens（RE
 它上线当场就抓到一处过期：回归套件数已经是 25（多了本次新增的这个脚本），
 两份 README 还写着 24 ⇒ 已更新，并写进 CI。
 
+### README 审计：四个视角的评审结果（2026-11-15）
+
+`ce-doc-review` 组队：coherence + feasibility（常驻）+ security-lens（README 写了
+凭据透传与子进程执行）+ design-lens（README 是渲染页，视觉与可读性就是它的功能）。
+cross-model pass 因**宿主模型族未认证**被跳过（该步附加且不阻塞，见 Coverage）。
+
+**代码侧（两条真缺陷，不是文档问题）：**
+
+1. **Python 车道按关键词子串匹配** ⇒ `make recover`（名字里含 "cov"）会被当成
+   覆盖率闸门**自动执行**。改成**成词匹配**：`coverage` / `test-coverage` / `py-cov`
+   认，`recover` / `cover` 不认。回归断言 6 条。
+2. **审计行与 `--dry-run` 漏掉仓库自己的 test 命令** —— 那是工具跑得最多的一层
+   （逐个测试文件跑），「跑之前先看它要干什么」却看不到它。现在两处都列，
+   且 `--json` 时审计行走 **stderr**，stdout 保持纯 JSON（回归断言 4 条）。
+
+**文档侧（六处不实或缺失）：**
+
+3. **「npm token 不会进目标仓库的脚本」是假的** —— `NPM_TOKEN` / `NODE_AUTH_TOKEN` /
+   `NPM_CONFIG_*` / `PIP_INDEX_URL` / `UV_INDEX_SECRET_PASSWORD` 都命中白名单前缀，
+   会被复制进子进程环境。三份文档（两份 README + SKILL.md）同一句一起改实。
+4. **「脚本选取走显式白名单」只对 JS 仓成立** —— Python 仓（Makefile / tox.ini）是
+   关键词成词匹配，规则更松。现在两份 README 与 SKILL.md 都写清两条规则。
+5. **「不想要就把连接串从白名单里去掉，或改用 .pgpass」——那两个开关不存在**。
+   真有的只有：unset 环境变量 + 用 `--database-url` 传（不读环境变量 ⇒ 不进子进程
+   环境），或设 `PGHOST`/`PGUSER`/`PGDATABASE` 让 `psql` 读 `.pgpass`；
+   **只上 .pgpass 不够**，schema 判定只读 `PG*` 变量。
+6. **输出样例是我删节过的** —— 块里只有 9 条判据，结论行却写着「7 项无信号 / 6 条
+   静态信号」，**块内自相矛盾**。两份 README 都换成**逐字真实输出**（34 行，14 条
+   判据全在），并把该一致性做成守卫。
+7. 另修：已知缺口的 CHANGELOG 只有六条（README 说七条）⇒ 补齐；「Python 没有真后端
+   车道」的说法与实现矛盾（车道**会被执行**，只是 pytest 输出不被解析 ⇒ 永远判
+   「未实测」）⇒ 改准；`--tenant-col` 默认值英文版漏了；`--csv-pair` 的自动配对默认
+   两份都漏了；安装前缺 clone 步骤；agent badge 宣传的用法在正文里没有入口；
+   已知缺口表的状态列没法扫读 ⇒ 每行给状态词；Python badge 指向本页自身；
+   语言表头首格是空的；闸门命令的前置工具（`pytest-cov` / `skillspector`）没写；
+   `doctor.sh` 是作者本机文件、不在仓库里 ⇒ 说清。
+
+**守卫 `scripts/test_readme_sync.py` 加了两条**：输出样例必须与真实运行逐字一致；
+中英两份章节数/层级/顺序必须一致。
+
 ### 已知遗留（发布时仍开放）
 
 - **仍然开放**：
@@ -301,6 +341,10 @@ security-lens（README 写了凭据透传与子进程执行）+ design-lens（RE
     报告里明说了这件事（`copy_runnable: false`）。
     加 `--self-check-deps` 会把依赖**软链**进副本（不复制体积），那时能验到实测类判据；
     默认不开，因为软链让副本里的测试连到真实依赖。
+  - **Python 仓的真后端（itest）车道只跑不判**：Makefile / tox 里的真后端目标**能被找到
+    并被 `--include-itest` 执行**（会连 PG 与向量库），但 pytest 的输出既不是 TAP 也不是
+    vitest/jest/mocha 形态 ⇒ 解析不出结果，那条判据永远落在「未实测」，
+    而不是一次「实测通过 / 不通过」。
   - **向量集合与线上真实租户是否一致**：不判。现在判的是**代码侧自洽**
     （同一集合的维度/度量/分区键在调用点之间是否一致、分区键是不是向量字段、
     写入与检索的集合是不是同一个）。要判线上一致性，得连活的向量库并用项目自己的

@@ -998,6 +998,25 @@ def script_allowed(kind: str, name: str, cmd: str) -> bool:
     return True
 
 
+def _name_has_keyword(name: str, keywords: tuple[str, ...]) -> bool:
+    """目标名里有没有**词**匹配上关键词。
+
+    之前是子串匹配 ⇒ `make recover`（含 "cov"）会被当成覆盖率闸门**跑起来**，
+    而它的配方体跟覆盖率毫无关系 —— 这是自动执行别人仓库脚本时最该防的一类误伤。
+
+    现在按非字母数字切词，命中规则：
+      - 某个词**正好等于**关键词（cov / coverage / reconcile / integration…）
+      - 或某个词以关键词开头且至少长 3 个字符（coverage ≥ cov+3 ✓，cover ✗）
+    于是 coverage / test-coverage / py-cov ✓，recover / cover ✗。
+    """
+    parts = [p for p in re.split(r"[^a-z0-9]+", name.lower()) if p]
+    for part in parts:
+        for k in keywords:
+            if part == k or (part.startswith(k) and len(part) >= len(k) + 3):
+                return True
+    return False
+
+
 def _python_script_targets(root: Path, *keywords: str
                            ) -> list[tuple[Path, str, str, str]]:
     """Python 仓库自己声明的脚本目标（Makefile 目标 / tox 环境）。
@@ -1018,8 +1037,7 @@ def _python_script_targets(root: Path, *keywords: str
             continue
         for mm in re.finditer(r"^([A-Za-z0-9_.-]+)\s*:(?!=)", text, re.M):
             target = mm.group(1)
-            low = target.lower()
-            if not any(k in low for k in keywords):
+            if not _name_has_keyword(target, keywords):
                 continue
             # 目标配方体：判"这个目标是不是这个模块的"要看它跑的是什么
             body = ""
@@ -1037,8 +1055,7 @@ def _python_script_targets(root: Path, *keywords: str
             continue
         for mm in re.finditer(r"^\[testenv:([A-Za-z0-9_.-]+)\]", text, re.M):
             env_name = mm.group(1)
-            low = env_name.lower()
-            if not any(k in low for k in keywords):
+            if not _name_has_keyword(env_name, keywords):
                 continue
             out.append((tox.parent, f"tox -e {env_name}",
                         f"tox -e {env_name}", text))
@@ -2789,8 +2806,26 @@ def check_vector_schema(m: Module) -> Check:
                  ev, evidence_kind="static")
 
 
-def _print_script_plan(gate_scripts, itest_scripts, reconcilers, baselines
-                        ) -> None:
+def _test_lane_desc(m: Module) -> str:
+    """仓库自己的 test 命令 —— 工具会**逐个测试文件**跑它。
+
+    这是工具跑得最多的一层，之前不在审计行里 ⇒ 「跑之前先看它要干什么」
+    漏掉了最大的一块。
+    """
+    try:
+        if m.lang == "py":
+            exe, tests = python_test_cmd(m, m.root)
+            if not exe:
+                return ""
+            return f"{exe} {' '.join(tests or ['.'])}"
+        prefix, _name = project_test_cmd(m)
+        return " ".join(prefix)
+    except Exception:
+        return ""
+
+
+def _print_script_plan(gate_scripts, itest_scripts, reconcilers, baselines,
+                        test_lane: str = "") -> None:
     """列出工具将要执行哪些仓库脚本（--dry-run 用）。"""
     groups = (("覆盖率闸门", gate_scripts), ("真后端车道", itest_scripts),
               ("跨存储对账", reconcilers), ("基线对拍", baselines))
@@ -2800,13 +2835,22 @@ def _print_script_plan(gate_scripts, itest_scripts, reconcilers, baselines
             any_script = True
             print(f"  [{label}] {name}（工作目录 {ws}）")
             print(f"      $ {cmd}")
+    if test_lane:
+        any_script = True
+        print("  [测试车道] 仓库自己的 test 命令（逐个测试文件跑）")
+        print(f"      $ {test_lane} <每个测试文件>")
     if not any_script:
         print("  （没有命中白名单的仓库脚本）")
 
 
 def _echo_script_plan(m: Module, gate_scripts, itest_scripts, reconcilers,
-                      baselines) -> None:
-    """正常模式下一行列出将执行的仓库脚本（审计入口）。"""
+                      baselines, to_stderr: bool = False) -> None:
+    """正常模式下一行列出将执行的仓库脚本（审计入口）。
+
+    含**仓库自己的 test 命令** —— 工具跑得最多的一层，不能不在审计行里。
+
+    `--json` 时走 **stderr**：stdout 必须是干净的 JSON，否则消费方解析不了。
+    """
     parts = []
     for label, scripts in (("覆盖率闸门", gate_scripts),
                            ("真后端车道", itest_scripts),
@@ -2814,8 +2858,12 @@ def _echo_script_plan(m: Module, gate_scripts, itest_scripts, reconcilers,
                            ("基线对拍", baselines)):
         for ws, name, cmd in scripts:
             parts.append(f"{label} {name}（$ {cmd}）")
+    test_lane = _test_lane_desc(m)
+    if test_lane:
+        parts.append(f"测试车道（逐个测试文件跑 $ {test_lane} <测试文件>）")
     if parts:
-        print("将执行的仓库脚本：" + "；".join(parts))
+        print("将执行的仓库脚本：" + "；".join(parts),
+              file=sys.stderr if to_stderr else sys.stdout)
 
 
 def check_oracle_independence(m: Module) -> Check:
@@ -3074,12 +3122,14 @@ def run_readiness(args) -> int:
         # 只列出会执行什么，不执行
         print(f"将要执行的仓库脚本 — {m.path}（--dry-run，不执行）")
         print(f"仓库：{root}")
-        _print_script_plan(gate_scripts, itest_scripts, reconcilers, baselines)
+        _print_script_plan(gate_scripts, itest_scripts, reconcilers, baselines,
+                           test_lane=_test_lane_desc(m))
         return 0
     # 正常模式也把"将执行哪些仓库脚本"说清楚 —— 工具会跑目标仓库自己的脚本，
     # 这行字是审计入口：白名单命中的脚本 + 确切命令，一眼可核对。
     _echo_script_plan(m, gate_scripts, itest_scripts if args.include_itest else [],
-                      reconcilers, baselines)
+                      reconcilers, baselines,
+                      to_stderr=bool(args.json))
     lane_notes: list[str] = []
     if gate_scripts:
         cov, failed, setup_errors, lane_notes = run_gates(m, gate_scripts)

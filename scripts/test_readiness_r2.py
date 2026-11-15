@@ -372,6 +372,44 @@ def main() -> int:
     r11c = run("src", "--repo", str(py2), "--dry-run")
     expect("make coverage" in r11c.stdout, "--dry-run 也列出 Python 闸门")
 
+    print("\n子项 11b：关键词按「词」认，`make recover` 不会被当成覆盖率闸门跑起来")
+    write(py2 / "Makefile",
+          "recover:\n\t@echo recovering > recovered.txt\n"
+          "coverage:\n\tpython -m coverage report\n")
+    gates3 = readiness._python_gate_scripts(py2)
+    expect(not any("recover" in g[1] for g in gates3),
+           "名字里含 cov 的 recover 目标不被认成闸门（子串匹配的老坑）")
+    expect(any("coverage" in g[1] for g in gates3),
+           "真正的 coverage 目标仍然被认出来")
+    expect(not readiness._name_has_keyword("recover", ("cov",)),
+           "recover 不算 cov 关键词命中")
+    expect(readiness._name_has_keyword("coverage", ("cov",)),
+           "coverage 算 cov 关键词命中")
+    expect(readiness._name_has_keyword("test-coverage", ("cov",)),
+           "test-coverage 算命中")
+    expect(not readiness._name_has_keyword("cover", ("cov",)),
+           "cover 不算命中（只差一个字母也不放过）")
+
+    print("\n子项 11c：审计行要列出仓库自己的 test 命令（工具跑得最多的一层）")
+    ts_audit = mkdtemp()
+    write(ts_audit / "package.json", json.dumps({"scripts": {"test": "node --test"}}))
+    write(ts_audit / "src" / "calc.ts", "export const a = 1;\n")
+    write(ts_audit / "src" / "calc.test.ts",
+          "import test from 'node:test';\ntest('t', () => {});\n")
+    r_audit = run("src", "--repo", str(ts_audit), "--dry-run")
+    expect("测试车道" in r_audit.stdout,
+           "--dry-run 列出仓库自己的 test 命令")
+    expect("node --test" in r_audit.stdout, "并给出确切命令")
+    r_audit2 = run("src", "--repo", str(ts_audit))
+    expect("测试车道" in r_audit2.stdout, "正常模式的审计行也含 test 车道")
+    r_audit3 = run("src", "--repo", str(ts_audit), "--json")
+    try:
+        data_audit = json.loads(r_audit3.stdout)
+        ok_json = isinstance(data_audit.get("checks"), list)
+    except Exception:
+        ok_json = False
+    expect(ok_json, "--json 时 stdout 仍是纯 JSON（审计行走 stderr）")
+
     print("\n子项 11：仓库自己的闸门红了要判红（TS 侧同一条）")
     ts_gate = mkdtemp()
     write(ts_gate / "package.json", json.dumps({"scripts": {

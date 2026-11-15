@@ -571,17 +571,32 @@ python3 "$SKILL_DIR/scripts/req_plan.py check docs/<feature>-test-plan.md --repo
 - **默认就是执行**。不跑测试的交付判定没有意义，所以没有"必须显式开关才跑"这一层
   （brief 里要求过，改了：每次调用多打一个开关，收益不大）。它的安全边界是下面这三件套：
   **脚本白名单 + 执行前的审计行 + `--dry-run` 可预览**。
-- **只会执行白名单里的脚本**：`coverage` / `test:coverage` / `cov` / `check:coverage`、
-  `itest` / `test:integration`、`reconcile` / `data:reconcile`、
-  `baseline:check` / `eval:baseline:check` 这些名字（精确名或冒号分段前缀）。
-  `reconcile:reset`、`coverage:whatever` 这种名字里带关键词的**不会**被自动执行。
+- **脚本选取分两种规则**（按生态不同，Python 那条更松）：
+  - **JS 仓（`package.json`）**：**显式白名单** —— `coverage` / `test:coverage` / `cov` /
+    `check:coverage`、`itest` / `test:integration`、`reconcile` / `data:reconcile`、
+    `baseline:check` / `eval:baseline:check` 这些名字（精确名或冒号分段前缀）。
+    `reconcile:reset`、`coverage:whatever` 这种名字里带关键词的**不会**被自动执行。
+  - **Python 仓（Makefile / tox.ini）**：按**目标名里的关键词**认（`cov` / `reconcile` /
+    `integration` / `itest`），且必须**成词** —— `coverage`、`test-coverage`、`py-cov`
+    认，`recover`、`cover` 不认（子串匹配会把 `recover` 当成覆盖率闸门跑起来）。
+    覆盖率闸门额外接受"模块目录或其上层"的 Makefile（所以全仓一个 `make coverage`
+    仍然算数），对账与真后端两条车道还要求配方或命令提到本模块。
+  - 不放心就用 `--dry-run` 看清楚到底会跑哪些目标。
 - **执行前可以先看**：`--dry-run` 只列出将要执行的脚本与确切命令，然后退出。
-  正常模式也会在报告头部回显一行「将执行的仓库脚本」。
-- **子进程只拿到白名单环境变量**（PATH、HOME、LANG、TMPDIR、NODE_*、PYTHON*、
-  POSTGRES_URL 等）。你 shell 里的其它变量（云厂商密钥、npm token 等）不会传下去。
+  正常模式也会在报告头部回显一行「将执行的仓库脚本」，**包含仓库自己的 test 命令**
+  （那是工具跑得最多的一层，逐个测试文件跑）。`--json` 时这行走 stderr，stdout 保持纯 JSON。
+- **子进程只拿到白名单环境变量**（PATH、HOME、LANG、TZ、TMPDIR、SHELL、CI、NODE_*、
+  PYTHON*、NPM_*、PNPM_*、YARN_*、PIP_*、UV_*、POSTGRES_URL 等）。
+  你 shell 里的**云厂商密钥**（`AWS_*` / `GCP_*` / `AZURE_*`）不会传下去；
+  但**仓库凭据会** —— `NPM_TOKEN`、`NODE_AUTH_TOKEN`、`NPM_CONFIG_*`、
+  `PIP_INDEX_URL`（常把密码写在 URL 里）、`UV_INDEX_SECRET_PASSWORD` 都命中上面的前缀，
+  会被复制进子进程环境。不放心就把它们从环境里 unset 掉，或改放 `.npmrc`。
 - **PG 连接串不进命令行参数**：解析成 `PGHOST` / `PGPASSWORD` 等环境变量传给 `psql`，
   不出现在进程表里。注意 `POSTGRES_URL` 本身会透传给仓库自己的脚本（仓库的集成车道
-  要连库）—— 不想要就把它从白名单里去掉，或改用 `.pgpass`。
+  要连库）。真正能用的开关只有两个：把 `POSTGRES_URL` / `DATABASE_URL` 从环境里
+  unset 掉、改用 `--database-url` 传（它不读环境变量，所以不会进子进程环境）；
+  或者设 `PGHOST` / `PGUSER` / `PGDATABASE`，口令让 `psql` 从 `.pgpass` 读 ——
+  只上 `.pgpass` 不够，schema 判定只读 `PG*` 变量，没有它们就判「未实测」。
 - **只读为主**：`readiness.py` 不改用户仓库的任何文件。`req_plan.py scaffold` 会写测试
   文件，但写入范围被限制在 `--out-dir` 与仓库根之内；钉里带 `..` 或绝对路径 ⇒ 拒绝并
   报红，不写盘。

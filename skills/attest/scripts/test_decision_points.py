@@ -13,7 +13,9 @@ DP 是「源码里一个会改变行为的选择」—— 机器从代码反向�
 """
 from __future__ import annotations
 
+import os
 import sys
+import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -23,6 +25,9 @@ import decision_points  # noqa: E402
 from decision_points import (  # noqa: E402
     DpAnalysis,
     DecisionPoint,
+    TsBackend,
+    ast_analyze,
+    detect_backend,
     dp_key,
     lexical_analyze,
     normalize_dp_id,
@@ -326,6 +331,160 @@ def test_anchor_at_reports_enclosing_scope() -> None:
     expect(top == "<toplevel>", f"函数之外是 <toplevel>（实际 {top}）")
 
 
+# ------------------------------------------------------------ TS AST 后端
+
+
+def _find_backend(prefer: str = "auto") -> TsBackend | None:
+    """本机能不能拿到可用的 TS 后端：当前目录 + `ATTEST_TS_ROOTS` 里的根。
+
+    环境变量用来在「attest 仓库自己没有 TypeScript」的机器上补一个搜索根
+    （CI 装全局 typescript@5 时不需要它）。
+    """
+    roots = [Path.cwd().resolve()]
+    for raw in os.environ.get("ATTEST_TS_ROOTS", "").split(os.pathsep):
+        if raw.strip():
+            roots.append(Path(raw.strip()).resolve())
+    for root in roots:
+        backend = detect_backend(root, prefer=prefer)
+        if backend is not None:
+            return backend
+    return None
+
+
+def _write_sample(root: Path, rel: str, src: str) -> None:
+    p = root / rel
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(src, encoding="utf-8")
+
+
+SAMPLE_SRC = (
+    "export async function insertRows(rows: any[], client: any, o: any) {\n"
+    "  if (rows.length >= 1) {\n"
+    "    throw new Error('empty');\n"
+    "  }\n"
+    "  o.status = 'done';\n"
+    "  const kept = rows.filter((row) => row.id !== '');\n"
+    "  try {\n"
+    "    await client.query('select 1');\n"
+    "  } catch (e) {\n"
+    "    client.close();\n"
+    "  }\n"
+    "  return kept.slice(0, 10);\n"
+    "}\n"
+)
+
+
+def test_detect_backend_returns_none_without_typescript() -> None:
+    print("\n后端探测：目标里没有 TypeScript ⇒ None")
+    with tempfile.TemporaryDirectory() as td:
+        got = detect_backend(Path(td))
+    expect(got is None, f"空目录 ⇒ None（实际 {got}）")
+
+
+def test_detect_backend_l2_preference_skips_probing() -> None:
+    print("\n后端探测：prefer=l2 ⇒ 不探测，直接 None")
+    with tempfile.TemporaryDirectory() as td:
+        expect(detect_backend(Path(td), prefer="l2") is None, "prefer=l2 ⇒ None")
+    expect(detect_backend(HERE, prefer="l2") is None, "prefer=l2 ⇒ 永远 None")
+
+
+def test_detect_backend_reports_a_usable_backend() -> None:
+    print("\n后端探测：找到能真解析的 TypeScript（不是只看路径/版本）")
+    backend = _find_backend()
+    if backend is None:
+        print("  skip 本机没有可用的 TypeScript 后端")
+        return
+    expect(backend.kind in ("B1", "B2"), f"kind 是 B1/B2（实际 {backend.kind}）")
+    expect(backend.source in ("repo-local", "global-npm"),
+           f"source 是 repo-local/global-npm（实际 {backend.source}）")
+    expect(Path(backend.package_dir).is_absolute(),
+           f"package_dir 是绝对路径（实际 {backend.package_dir}）")
+
+
+def test_l3_finds_more_kinds_than_l2_on_same_file() -> None:
+    print("\nL3 AST：锚点与种类都对得上")
+    src = ("export function f(x: number) {\n"
+           "  if (x >= 1) { throw new Error('e'); }\n"
+           "  return x;\n"
+           "}\n")
+    l2 = {p.kind for p in lexical_analyze("src/a.ts", src)}
+    expect("boundary" in l2, f"L2 也能看见 >=（实际 {sorted(l2)}）")
+    backend = _find_backend()
+    if backend is None:
+        print("  skip 本机没有可用的 TypeScript 后端")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _write_sample(root, "src/a.ts", src)
+        an = ast_analyze(root, ["src/a.ts"], backend)
+    kinds = {p.kind for p in an.points}
+    expect(an.level == "L3", f"level 是 L3（实际 {an.level}）")
+    expect("boundary" in kinds, f"L3 看见 >=（实际 {sorted(kinds)}）")
+    expect("branch" in kinds, f"L3 看见 if（实际 {sorted(kinds)}）")
+    expect("error-path" in kinds, f"L3 看见 throw（实际 {sorted(kinds)}）")
+    anchors = {p.anchor for p in an.points}
+    expect(anchors == {"f"}, f"锚点是函数名 f（实际 {sorted(anchors)}）")
+
+
+def test_cross_backend_l2_subset_of_l3() -> None:
+    print("\nL2 ⊆ L3：L2 报出的每个种类，L3 也必须报得出")
+    backend = _find_backend()
+    if backend is None:
+        print("  skip 本机没有可用的 TypeScript 后端")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _write_sample(root, "src/a.ts", SAMPLE_SRC)
+        l2 = lexical_analyze("src/a.ts", SAMPLE_SRC)
+        an = ast_analyze(root, ["src/a.ts"], backend)
+    l3_kinds = {p.kind for p in an.points}
+    missing = sorted({p.kind for p in l2} - l3_kinds)
+    expect(not missing, f"L3 覆盖 L2 的全部种类（缺 {missing}）")
+    expect("drop" in l3_kinds, f"L3 看见 filter/slice（实际 {sorted(l3_kinds)}）")
+    expect("state" in l3_kinds, f"L3 看见 o.status（实际 {sorted(l3_kinds)}）")
+
+
+def test_l3_and_l2_agree_on_dp_ids() -> None:
+    print("\nDP ID 稳定：同一段代码，L2 与 L3 给出同一组 ID")
+    backend = _find_backend()
+    if backend is None:
+        print("  skip 本机没有可用的 TypeScript 后端")
+        return
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        _write_sample(root, "src/a.ts", SAMPLE_SRC)
+        l2 = lexical_analyze("src/a.ts", SAMPLE_SRC)
+        an = ast_analyze(root, ["src/a.ts"], backend)
+    l2_an = DpAnalysis(level="L2", backend="B3-lexical", backend_source="none",
+                       points=l2)
+    l2_an.assign_ids()
+    # 按**可比键**比，不按字符串比：组里只有一个时 ID 不带 ordinal
+    # （`x#f#drop`），两个以上才带（`x#f#drop#1`）—— 同一个键的两种写法。
+    l2_keys = {dp_key(p.dp_id) for p in l2_an.points}
+    l3_keys = {dp_key(p.dp_id) for p in an.points}
+    only_l2 = sorted(k for k in l2_keys - l3_keys if k is not None)
+    expect(not only_l2, f"L2 的判定点在 L3 里都找得到（L2 独有 {only_l2}）")
+
+
+def test_both_backends_agree_on_the_same_points() -> None:
+    print("\n跨后端：B1（TS5）与 B2（TS7）给出同一组判定点")
+    b1 = _find_backend(prefer="b1")
+    b2 = _find_backend(prefer="b2")
+    if b1 is None or b2 is None:
+        print(f"  skip 本机只有一种后端（B1={b1 is not None}, B2={b2 is not None}）")
+        return
+    keys = []
+    for backend in (b1, b2):
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            _write_sample(root, "src/a.ts", SAMPLE_SRC)
+            an = ast_analyze(root, ["src/a.ts"], backend)
+        keys.append({dp_key(p.dp_id) for p in an.points})
+    expect(keys[0] == keys[1],
+           f"两个后端结果一致（B1 独有 {sorted(keys[0] - keys[1])}，"
+           f"B2 独有 {sorted(keys[1] - keys[0])}）")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -354,6 +513,13 @@ def main() -> int:
     test_type_literal_return_scope_keeps_function_name()
     test_state_and_error_path()
     test_concurrency_and_io()
+    test_detect_backend_returns_none_without_typescript()
+    test_detect_backend_l2_preference_skips_probing()
+    test_detect_backend_reports_a_usable_backend()
+    test_l3_finds_more_kinds_than_l2_on_same_file()
+    test_cross_backend_l2_subset_of_l3()
+    test_l3_and_l2_agree_on_dp_ids()
+    test_both_backends_agree_on_the_same_points()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} 项失败:")

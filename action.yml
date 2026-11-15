@@ -1,0 +1,124 @@
+name: attest
+description: >-
+  Run attest's delivery-readiness criteria on a module and publish the evidence
+  list as a job summary and a pull request comment.
+author: attest contributors
+branding:
+  icon: check-square
+  color: teal
+
+inputs:
+  module:
+    description: "Module path to check, relative to the repository root (e.g. src/auth)"
+    required: true
+  repo-path:
+    description: "Repository root. Default: the workspace checkout."
+    required: false
+    default: "."
+  plan:
+    description: "Path to the requirement test plan to check the module against (optional)."
+    required: false
+  strict:
+    description: >-
+      Fail the job when attest reports blocking items. Default false: attest
+      reports evidence, the repository decides what to do about it.
+    required: false
+    default: "false"
+  comment:
+    description: "Post the report as a pull request comment. Default true."
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Run attest
+      id: attest
+      shell: bash
+      env:
+        ATTEST_MODULE: ${{ inputs.module }}
+        ATTEST_PLAN: ${{ inputs.plan }}
+      run: |
+        set -uo pipefail
+        REPO="$GITHUB_WORKSPACE/${{ inputs.repo-path }}"
+        REPORT="$RUNNER_TEMP/attest-report.txt"
+
+        ARGS=("$ATTEST_MODULE" --repo "$REPO")
+        if [ -n "$ATTEST_PLAN" ]; then
+          ARGS+=(--plan "$ATTEST_PLAN")
+        fi
+
+        # 没有 set -e：要拿到退出码（0 / 1 / 2）自己决定要不要让 job 失败。
+        python "$GITHUB_ACTION_PATH/skills/attest/scripts/readiness.py" "${ARGS[@]}" \
+          | tee "$REPORT"
+        STATUS="${PIPESTATUS[0]}"
+
+        {
+          echo "exit_code=${STATUS}"
+          echo "report_path=${REPORT}"
+        } >> "$GITHUB_OUTPUT"
+
+        case "$STATUS" in
+          0|1) ;;
+          2) echo "::error::attest could not recognise the module — see the report above"; exit 2 ;;
+        esac
+
+        if [ "$STATUS" = "1" ] && [ "${{ inputs.strict }}" = "true" ]; then
+          echo "::error::attest reported blocking items (strict mode)"
+          exit 1
+        fi
+
+    - name: Publish the report to the job summary
+      if: always()
+      shell: bash
+      run: |
+        REPORT="${{ steps.attest.outputs.report_path }}"
+        if [ -f "$REPORT" ]; then
+          {
+            echo "## attest"
+            echo
+            echo '```'
+            cat "$REPORT"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+
+    - name: Comment on the pull request
+      if: ${{ inputs.comment == 'true' && github.event_name == 'pull_request' }}
+      uses: actions/github-script@v7
+      env:
+        REPORT_PATH: ${{ steps.attest.outputs.report_path }}
+      with:
+        script: |
+          const fs = require('fs');
+          const report = fs.readFileSync(process.env.REPORT_PATH, 'utf8');
+          const marker = '<!-- attest-report -->';
+          const body = `${marker}\n### attest\n\n\`\`\`\n${report}\n\`\`\`\n`;
+
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          const existing = comments.find((c) => c.body && c.body.includes(marker));
+
+          if (existing) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: existing.id,
+              body,
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+          }

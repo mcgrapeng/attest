@@ -38,9 +38,9 @@ with whoever owns the delivery.
 
 ## Status
 
-**Actively developed, pre-1.0.** The tool runs on real repositories every day,
-but the criteria and the skill contract may still change before a tagged
-release. MIT licensed.
+**Actively developed.** Released as `v0.1.0`. The criteria and the skill
+contract may still change — but they will change with a changelog entry, not
+silently. MIT licensed.
 
 Every number below comes from a command you can re-run.
 
@@ -253,6 +253,42 @@ Distribute it as a `.skill` bundle:
 python3 package.py            # → dist/attest.skill
 python3 package.py --check    # list what would be packaged, write nothing
 ```
+
+### Run it in CI
+
+The same tool, as a GitHub Action. It publishes the evidence list to the job
+summary and to a pull request comment, and **does not block the merge by
+default** — attest reports evidence, the repository decides what to do with it.
+
+```yaml
+name: attest
+on: [pull_request]
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - uses: mcgrapeng/attest@v0.1.0
+        with:
+          module: src/auth
+```
+
+| Input | Default | What it does |
+| --- | --- | --- |
+| `module` | — | The module to check, relative to the repository root (`src/auth`, or `.` for the whole repository) |
+| `repo-path` | `.` | The repository root, when it is not the workspace root |
+| `plan` | — | The requirement test plan to check the module against |
+| `strict` | `false` | Fail the job when attest reports blocking items |
+| `comment` | `true` | Post the report as a pull request comment |
+
+Install the repository's own dependencies before the action runs — the action
+runs the repository's own test command. Without them attest reports *not
+measured* rather than failing, which is the honest answer but not a useful one.
 
 ## Language support
 

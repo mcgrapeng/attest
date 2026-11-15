@@ -157,6 +157,20 @@ def main() -> int:
         expect(outside is not None and outside.group(1) == "0",
                f"allowlist 之外 0 条（实际 {outside.group(1) if outside else '读不出来'}）")
 
+    print("\nGitHub Action 的入口路径与输入名不漂移")
+    action = ROOT / "action.yml"
+    expect(action.is_file(), "action.yml 存在")
+    if action.is_file():
+        atext = action.read_text(encoding="utf-8")
+        for p in set(re.findall(r"\$GITHUB_ACTION_PATH/([\w./-]+)", atext)):
+            expect((ROOT / p).is_file(), f"action.yml 引用的 {p} 真实存在")
+        block = re.search(r"^inputs:\n((?:  .*\n|\n)+)", atext, re.M)
+        names = set(re.findall(r"^  ([a-z][a-z0-9-]*):$", block.group(1), re.M)) if block else set()
+        expect(bool(names), f"action.yml 的 inputs 段解析得到 {len(names)} 个输入")
+        for label, text in (("英文", en), ("中文", zh)):
+            miss = sorted(n for n in names if f"`{n}`" not in text)
+            expect(not miss, f"{label} README 写全了 action 的输入（缺：{miss}）")
+
     print("\nREADME 的环境白名单描述与代码一致")
     code = (HERE / "readiness.py").read_text(encoding="utf-8")
     exact = set(re.findall(r'"([A-Z_]+)"',

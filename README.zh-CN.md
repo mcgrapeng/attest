@@ -33,8 +33,8 @@ python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项�
 
 ## 状态
 
-**在维护中，尚未发正式版本。** 工具每天在真实仓库上跑，但判据与 skill 契约在打 tag
-之前仍可能变。MIT 许可。
+**在维护中，已发 `v0.1.0`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
+不会悄悄变。MIT 许可。
 
 下面每个数字都来自一条你可以重跑的命令。
 
@@ -210,6 +210,40 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <项目根>
 python3 package.py            # → dist/attest.skill
 python3 package.py --check    # 只看会打进包的内容，不写文件
 ```
+
+### 在 CI 里跑
+
+同一个工具，做成 GitHub Action。它把证据清单写进 job summary 和 PR 评论，
+**默认不拦合并** —— attest 给证据，仓库自己决定拿它怎么办。
+
+```yaml
+name: attest
+on: [pull_request]
+
+jobs:
+  attest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci
+      - uses: mcgrapeng/attest@v0.1.0
+        with:
+          module: src/auth
+```
+
+| 输入 | 默认 | 干什么 |
+| --- | --- | --- |
+| `module` | — | 要检查的模块路径，相对仓库根（`src/auth`，整仓则填 `.`） |
+| `repo-path` | `.` | 仓库根（不在 workspace 根时用） |
+| `plan` | — | 要核对的需求测试计划 |
+| `strict` | `false` | attest 报出阻塞项时是否让 job 失败 |
+| `comment` | `true` | 是否把报告发成 PR 评论 |
+
+跑 action 之前先装好仓库自己的依赖 —— action 会跑仓库自己的 test 命令。依赖没装时
+attest 报的是「未实测」而不是失败：那是诚实的答案，但没什么用。
 
 ## 语言支持
 

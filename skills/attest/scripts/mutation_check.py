@@ -112,6 +112,10 @@ _IN_EXPR_RE = re.compile(
 #: `in` 关键字（词边界）—— 用来认出 `for (x in y)` 头里那个**不是运算符**的 in
 _IN_KW_RE = re.compile(r"(?<![A-Za-z0-9_$])in(?![A-Za-z0-9_$])")
 
+#: 变异生效标记：副本里被改坏的文件会打出 `__ATTEST_MUTANT__:<相对路径>`，
+#: 子进程输出里没有它 ⇒ 这次变异压根没生效（文件没被加载 / 函数没被调用）。
+MUTANT_MARKER = "__ATTEST_MUTANT__"
+
 #: 复制副本时跳过的目录
 SKIP_DIRS = (
     "node_modules", ".git", "dist", "build", "coverage", ".next", "out",
@@ -517,7 +521,7 @@ def run_mutation_check(repo: Path, ws_rel: str,
                        case_name: str | None = None,
                        scope_symbols: set[str] | None = None,
                        ops: tuple[str, ...] | None = None,
-                       parse_check=None) -> dict:
+                       parse_check=None, inject=None) -> dict:
     """对目标模块跑一轮变异检查。
 
     返回：
@@ -539,8 +543,12 @@ def run_mutation_check(repo: Path, ws_rel: str,
     `case_name` 只让**这个用例**的失败算数（钉的用例有没有区分力）。
     `parse_check(path, text) -> bool` 判断变异后的代码还解析不解析得过；
     解析不过 ⇒ 记"判不了"，**不进分母**（跑了也测不出东西）。
+    `inject(rel, text, mut) -> text` 可选：在副本里给改坏的文件打标记
+    （`__ATTEST_MUTANT__:<rel>`）；跑完输出里没有标记 ⇒ 这次变异没生效 ⇒
+    记**不适用**（不是存活），同样不进分母。
     """
     res: dict = {"attempted": 0, "killed": 0, "timeouts": 0, "unknown": 0,
+                 "not_applicable": 0,
                  "survivors": [], "notes": [], "scanned": 0}
     if not source_rels:
         res["notes"].append("没有可改的源码")
@@ -612,6 +620,13 @@ def run_mutation_check(repo: Path, ws_rel: str,
                 continue
             original = target.read_text(encoding="utf-8", errors="replace")
             mutated_text = _apply(original, mut)
+            if inject is not None:
+                try:
+                    mutated_text = inject(rel, mutated_text, mut)
+                except Exception:      # noqa: BLE001 —— 注入器自己炸了也算判不了
+                    res["unknown"] += 1
+                    res["notes"].append(f"{rel}:{mut.line} 标记注入失败 ⇒ 判不了")
+                    continue
             if parse_check is not None:
                 try:
                     parses = bool(parse_check(target, mutated_text))
@@ -630,6 +645,12 @@ def run_mutation_check(repo: Path, ws_rel: str,
             if code == 127:
                 res["notes"].append(out.strip()[:200] or "测试命令跑不起来")
                 return res
+            if inject is not None and f"{MUTANT_MARKER}:{rel}" not in out:
+                # 标记没出现 ⇒ 改坏的那段压根没跑到 ⇒ 不适用（不是存活）
+                res["not_applicable"] += 1
+                res["notes"].append(
+                    f"{rel}:{mut.line} 变异没生效（标记没出现）⇒ 不适用")
+                continue
             res["attempted"] += 1
             if code == 124:
                 res["timeouts"] += 1

@@ -14,7 +14,7 @@ bash fixtures/run_fixtures.sh
 
 | 码 | 含义 |
 | --- | --- |
-| 0 | 5 个 fixture 的期望判定全部命中 |
+| 0 | 10 个 fixture 的期望判定全部命中 |
 | 1 | 有 fixture 与期望不符（输出里会列出**期望 vs 实际**） |
 | 3 | 没有不符，但有 fixture 因环境缺失未判定（例如没装 `pytest-cov`） |
 
@@ -33,6 +33,27 @@ bash fixtures/run_fixtures.sh
 
 每个 fixture 目录里还有一份 `README.md`，写明**为什么有它** ——
 它挡的是评审里的哪一条质疑。
+
+## 缺陷集 fixture（判定点引擎）
+
+上面五条钉的是"仓库长什么样"。下面五条钉的是**判定点引擎有没有真的判出东西**：
+每一条都自带一份 `plan.md`（判定点粒度的测试计划）和一处**刻意留下的缺陷**，
+期望工具能指认它 —— 并且**不**误报别的地方。
+
+| fixture | 缺陷形态 | 期望报出 |
+| --- | --- | --- |
+| `defect-silent-drop` | `filter` 静默丢掉缺 id / 缺正文的行 | `plan-alignment` 红：「机器推导出、计划里没有：1 条」（计划漏了第一道过滤） |
+| `defect-shared-client` | 进程内共享的 client 被关掉 | `decision-coverage` 红：高危 `resource` 判定点「既没有归属不变式，也没有豁免理由」 |
+| `defect-stale-cache` | 连接关了、缓存没清 | 需求覆盖红（钉指向的文件不存在）＋ DPSP **untested** 档：「1 条判不了（环境没就绪 / 输出认不出）」 |
+| `defect-prototype-class` | `x in MAP` 放行原型链上的键 | DPSP **fail** 档：「1 条不变式的钉发现不了这类缺陷」，JSON 里报出存活的算子 `in-to-hasown` |
+| `defect-mixed-subject` | 不变式的钉指向一个跟目标模块无关的测试文件 | `plan-alignment` 零覆盖：「1 条钉不直接引用目标模块」＋ DPSP **not-applicable** 档：「没有可判的变异点」 |
+
+DPSP 的**四档**（`pass` / `fail` / `untested` / `not-applicable`）各自都被至少一个 fixture 覆盖 ——
+四档退化成一档就说明这套判定只会说一句话。
+
+这五条 fixture 的结论**依赖 TypeScript 后端（L3）**：L2（词法回退）下三条新判据
+一律不硬判（缺能力绝不报绿），期望退出码会从 1 变成 0。缺 TS 时按 `have_ts_backend`
+跳过 ⇒ 退出码 3（跳过，不是"不符"）。
 
 ## 断言的写法
 
@@ -56,11 +77,13 @@ bash fixtures/run_fixtures.sh
 | `rust-repo` | 无 |
 | `english-reconciler` | `node`（跑 colocated 测试 + 跑对账脚本） |
 | `no-tests` | 无 |
+| 五条 `defect-*` | `node` ＋ **TypeScript 后端**（仓库内 `node_modules/typescript` 或全局 `npm i -g typescript`） |
 
 缺依赖时 fixture 报「环境不满足（未判定）」，**不算不符** ——
 "跑不起来"和"不达标"是两回事（同一条规矩）。
 
-CI 里会 `pip install pytest pytest-cov` 并带上 Node 22，所以 CI 上全部都会被判定。
+CI 里会 `pip install pytest pytest-cov`、`npm i -g typescript@5` 并带上 Node 22，
+所以 CI 上全部都会被判定。
 本地要判 `python-repo`，把一个装了 `pytest-cov` 的 venv 放进 PATH 即可：
 
 ```bash

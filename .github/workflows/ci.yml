@@ -56,13 +56,17 @@ jobs:
           python-version: '${{ matrix.python }}'
       - name: 装测试依赖
         run: python -m pip install --disable-pip-version-check pytest pytest-cov
+      # 只影响 fixture 车道：缺陷集 fixture 的判定点推导需要 TS 后端（L3）。
+      # attest 运行时仍然不联网、不加依赖。
+      - name: 装 TS 5.x（缺陷集 fixture 的 L3 后端）
+        run: npm install -g typescript@5
       - name: 跑全部回归脚本（任一失败即失败）
         run: |
           for t in skills/attest/scripts/test_*.py; do
             echo "--- $t"
             python3 "$t" || { echo "::error::FAIL $t"; exit 1; }
           done
-      - name: 跑黄金 fixture（5 个期望判定）
+      - name: 跑黄金 fixture（10 个期望判定）
         run: bash fixtures/run_fixtures.sh
       - name: 跑 evals（6 条「用户这么说 ⇒ 工具这样回」）
         run: python3 evals/run_evals.py

@@ -2,6 +2,7 @@
 """round-15 回归测试：判定点粒度的计划格式（v2）、格式识别与豁免。"""
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -203,6 +204,20 @@ def main() -> int:
     expect(len(p.detail_rows) > 0, "新表的数据行被解析到")
     expect(all(len(r_) >= 5 for r_ in p.detail_rows),
            "旧表的数据行没混进新表")
+
+    print("\ntest_module_path_outside_repo_is_ignored")
+    outside = mkdtemp()
+    write(outside / "leak.ts",
+          "export function leak() { if (x === 1) return 1; return 2; }\n")
+    repo3 = mkdtemp()
+    write(repo3 / "package.json", json.dumps({"scripts": {"test": "vitest"}}))
+    write(repo3 / "src" / "a.ts", SRC)
+    r = run("new", "esc", "--repo", str(repo3),
+            "--module", f"../{outside.name}")
+    expect(r.returncode == 0, "new 成功（模块路径越界不该崩）")
+    plan3 = repo3 / "docs" / "esc-test-plan.md"
+    text3 = plan3.read_text(encoding="utf-8") if plan3.exists() else ""
+    expect("leak" not in text3, "仓库外的模块不被读进计划")
 
     print()
     for d in TMPDIRS:

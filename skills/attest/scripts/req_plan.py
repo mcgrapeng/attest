@@ -143,6 +143,22 @@ _DIMENSION_TRIGGERS = (
 _CORE_DIMENSIONS = ("边界", "错误路径")
 
 
+def _module_inside(root: Path, mod: str) -> bool:
+    """模块路径是不是落在仓库根内。
+
+    绝对路径、`..`、软链逃逸都算越界 —— 目标模块是计划里写的字符串，
+    不能让它把仓库外的文件读进来。
+    """
+    if not mod:
+        return False
+    try:
+        root_real = root.resolve()
+        (root_real / mod).resolve().relative_to(root_real)
+    except (ValueError, OSError):
+        return False
+    return True
+
+
 def derive_dimensions(root: Path, modules: list[str]) -> dict[str, list[str]]:
     """从目标模块的代码特征推导适用的维度：{维度: [证据]}。
 
@@ -151,6 +167,8 @@ def derive_dimensions(root: Path, modules: list[str]) -> dict[str, list[str]]:
     code_exts = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rs", ".go"}
     found: dict[str, list[str]] = {}
     for mod in modules:
+        if not _module_inside(root, mod):
+            continue
         base = root / mod
         if not base.exists():
             continue
@@ -237,6 +255,8 @@ def scan_stores(root: Path, modules: list[str]) -> dict[str, list[str]]:
     code_exts = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py", ".rs", ".go"}
     found: dict[str, list[str]] = {}
     for mod in modules:
+        if not _module_inside(root, mod):
+            continue
         base = root / mod
         if not base.is_dir():
             continue
@@ -420,6 +440,8 @@ def module_helpers(root: Path, modules: list[str]) -> dict[str, list[str]]:
     out: dict[str, list[str]] = {}
     code_exts = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".py", ".rs", ".go"}
     for mod in modules:
+        if not _module_inside(root, mod):
+            continue
         base = root / mod
         if not base.exists():
             continue
@@ -2755,6 +2777,8 @@ def _module_source_files(root: Path, modules: list[str]) -> list[str]:
     out: list[str] = []
     exts = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py"}
     for mod in modules:
+        if not _module_inside(root, mod):
+            continue          # 模块路径越出仓库根（含软链逃逸）⇒ 不看它
         base = root / mod
         if not base.exists():
             continue

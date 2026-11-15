@@ -108,10 +108,17 @@ _CONTROL_KEYWORDS = frozenset({
 
 
 def _parse_clause(clause: str) -> tuple[tuple[str, ...], bool, bool]:
-    """解析 import 子句 ⇒ (符号名, 命名空间级, 纯类型)。"""
+    """解析 import 子句 ⇒ (运行时符号名, 命名空间级, 纯类型)。
+
+    类型位置的 specifier（`import { type Row }`）在运行时不存在 ⇒ 不进
+    运行时符号；整条都是类型 specifier 时 ⇒ 整条是纯类型 import
+    （运行时被擦除，规格 §5.1.1）。
+    """
     symbols: list[str] = []
     namespace = False
     type_only = False
+    type_specs = 0
+    value_specs = 0
     clause = clause.strip()
     if clause.startswith("type ") or clause.startswith("type{"):
         type_only = True
@@ -120,6 +127,7 @@ def _parse_clause(clause: str) -> tuple[tuple[str, ...], bool, bool]:
     if m:
         namespace = True
         symbols.append(m.group(1))
+        value_specs += 1
         clause = clause[m.end():].strip().lstrip(",").strip()
     m = re.search(r"\{([^}]*)\}", clause)
     if m:
@@ -127,11 +135,16 @@ def _parse_clause(clause: str) -> tuple[tuple[str, ...], bool, bool]:
             item = item.strip()
             if not item:
                 continue
-            if item.startswith("type "):
+            is_type = item.startswith("type ")
+            if is_type:
                 item = item[5:].strip()
             if not item:
                 continue
             parts = [p.strip() for p in item.split(" as ")]
+            if is_type:
+                type_specs += 1
+                continue
+            value_specs += 1
             symbols.append(parts[-1])
             if len(parts) == 2:
                 symbols.append(parts[0])   # `a as b` ⇒ 原名也算（改名导入的锚点）
@@ -139,7 +152,38 @@ def _parse_clause(clause: str) -> tuple[tuple[str, ...], bool, bool]:
         clause = clause.lstrip(",").strip()
     if clause and re.fullmatch(r"[A-Za-z_$][\w$]*", clause):
         symbols.append(clause)
+        value_specs += 1
+    if not type_only and value_specs == 0 and type_specs:
+        type_only = True
     return tuple(symbols), namespace, type_only
+
+
+#: 类型别名：`type X = ...`（类型参数允许一层）
+_TYPE_ALIAS_HEAD_RE = re.compile(
+    r"^[ \t]*(?:export[ \t]+)?type[ \t]+[A-Za-z_$][\w$]*"
+    r"[ \t]*(?:<[^<>=]*>)?[ \t]*=")
+#: 接口继承：`interface X extends ...`
+_INTERFACE_EXTENDS_RE = re.compile(
+    r"^[ \t]*(?:export[ \t]+)?interface[ \t]+[A-Za-z_$][\w$]*"
+    r"[ \t]*(?:<[^<>=]*>)?[ \t]*extends[ \t]")
+
+
+def _in_type_position(source: str, pos: int) -> bool:
+    """`import('...')` 在不在类型位置（运行时被擦除，规格 §5.1.1）。
+
+    两种形态：`typeof import('...')`（类型查询）与 `type X = import('...').Y`
+    （类型别名，可跨行）。类型位置里不会出现 `await` / `return` / `=>` ——
+    借这一点把「上一行的 type 语句」和「本行的运行时 import」分开。
+    """
+    head = source[:pos]
+    if re.search(r"typeof[ \t]*$", head):
+        return True
+    cut = max(head.rfind(";"), head.rfind("{"), head.rfind("}"))
+    stmt = head[cut + 1:]
+    if not (_TYPE_ALIAS_HEAD_RE.match(stmt) or _INTERFACE_EXTENDS_RE.match(stmt)):
+        return False
+    between = stmt[stmt.index("=") + 1:] if "=" in stmt else stmt
+    return not re.search(r"\bawait\b|\breturn\b|=>", between)
 
 
 def parse_imports(source: str, file: str, root: Path) -> list[ImportRef]:
@@ -185,6 +229,9 @@ def parse_imports(source: str, file: str, root: Path) -> list[ImportRef]:
         emit(m.group("spec"), (), False, False)
     for m in _DYNAMIC_RE.finditer(source):
         if not usable(m):
+            continue
+        if _in_type_position(source, m.start("kw")):
+            emit(m.group("spec"), (), False, True)
             continue
         prefix = source[:m.start()]
         dm = _DESTRUCTURE_RE.search(prefix)

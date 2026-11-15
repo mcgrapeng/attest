@@ -195,6 +195,13 @@ TS_V2_PLAN = """# 测试计划
 | 分支 | src/calc.ts#divide#branch | if b === 0 | I1 | src/calc.test.ts::divides | |
 """
 
+#: 钉只做**类型位置**引用目标模块 ⇒ 运行时没加载它 ⇒ 零覆盖
+TS_TYPE_ONLY_TEST = """import { test } from 'node:test';
+import assert from 'node:assert';
+type Divide = typeof import('./calc.ts').divide;
+test('divides', () => { assert.equal(1, 1); });
+"""
+
 
 def expect(cond: bool, label: str) -> None:
     print(f"  {'ok  ' if cond else 'FAIL'} {label}")
@@ -320,6 +327,22 @@ def test_dp_ordinal_is_identity_not_string():
            "对齐判据的证据里不再说「机器没推导出」")
 
 
+def test_type_position_import_is_not_a_runtime_reference():
+    """钉只做类型位置引用目标模块 ⇒ 不算直接引用（规格 §5.1.1 / §5.2）。"""
+    root = mkdtemp()
+    write(root / "package.json", json.dumps(
+        {"scripts": {"test": "node --test 'src/**/*.test.ts'"}}))
+    write(root / "src" / "calc.ts", TS_SRC)
+    write(root / "src" / "calc.test.ts", TS_TYPE_ONLY_TEST)
+    plan = write(root / "docs" / "plan.md", TS_V2_PLAN)
+    m = readiness.discover_module(root, "src", None)
+    dp = req_plan.derive_plan_analysis(root, ["src"])
+    c = readiness.check_plan_alignment(m, str(plan), dp)
+    expect(c.status == "fail", "钉只做类型位置引用 ⇒ 报红（对目标模块零覆盖）")
+    expect(any("不直接引用目标模块" in e for e in c.evidence),
+           "证据里写明「不直接引用目标模块」")
+
+
 def test_lenient_downgrades_fail_to_warn():
     root, m = py_repo()
     plan = write(root / "docs" / "plan.md", V2_PLAN_PARTIAL)
@@ -441,6 +464,7 @@ def main() -> int:
     test_v1_plan_downgrades_new_criteria_to_warn()
     test_v2_plan_missing_machine_dps_fails_alignment()
     test_dp_ordinal_is_identity_not_string()
+    test_type_position_import_is_not_a_runtime_reference()
     test_lenient_downgrades_fail_to_warn()
     test_l2_level_never_hard_fails()
     test_pin_not_touching_module_is_reported()

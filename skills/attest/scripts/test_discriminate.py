@@ -144,6 +144,39 @@ def test_import_parser_marks_type_only() -> None:
     expect(runtime_symbols(refs) == set(), "纯类型 import 不算运行时覆盖")
 
 
+def test_inline_import_type_is_not_a_runtime_reference() -> None:
+    """`type X = import('./a.ts').Y` 是类型位置 ⇒ 运行时被擦除（规格 §5.1.1）。"""
+    root = node_repo({"src/mem0-engine.ts": ENGINE_TS})
+    src = "type Mem0Api = import('./mem0-engine.ts').Row;\n"
+    refs = parse_imports(src, "src/x.test.ts", root)
+    expect(bool(refs) and refs[0].type_only,
+           "类型位置的 import() 标成 type_only")
+    expect(runtime_symbols(refs) == set(),
+           "类型位置的 import() 不算运行时引用")
+
+
+def test_type_only_specifier_is_not_a_runtime_symbol() -> None:
+    """`import { type Row } from './a.ts'` 整条都是类型位置 ⇒ 不算引用。"""
+    root = node_repo({"src/mem0-engine.ts": ENGINE_TS})
+    src = "import { type Row } from './mem0-engine.ts';\n"
+    refs = parse_imports(src, "src/x.test.ts", root)
+    expect(bool(refs) and refs[0].type_only,
+           "全是 type specifier 的 import 标成 type_only")
+    expect(runtime_symbols(refs) == set(),
+           "全是 type specifier 的 import 不算运行时引用")
+
+
+def test_mixed_specifier_keeps_only_the_value_one() -> None:
+    """`import { type Row, insertRow }` ⇒ 模块是运行时加载的，但 Row 不是运行时符号。"""
+    root = node_repo({"src/mem0-engine.ts": ENGINE_TS})
+    src = "import { type Row, insertRow } from './mem0-engine.ts';\n"
+    refs = parse_imports(src, "src/x.test.ts", root)
+    expect(bool(refs) and not refs[0].type_only,
+           "混着值 specifier 的 import 不算纯类型")
+    expect(runtime_symbols(refs) == {"insertRow"},
+           f"只有值 specifier 算运行时符号（实得 {runtime_symbols(refs)}）")
+
+
 def test_import_parser_namespace_level() -> None:
     root = node_repo({"src/mem0-engine.ts": ENGINE_TS})
     src = "const mod = await import('./mem0-engine.ts');\n"
@@ -337,6 +370,9 @@ def main() -> int:
         pass
     test_import_parser_finds_dynamic_import()
     test_import_parser_marks_type_only()
+    test_inline_import_type_is_not_a_runtime_reference()
+    test_type_only_specifier_is_not_a_runtime_symbol()
+    test_mixed_specifier_keeps_only_the_value_one()
     test_import_parser_namespace_level()
     test_mock_module_counts_as_reference()
     test_import_parser_resolves_relative_and_alias()

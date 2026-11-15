@@ -7,6 +7,21 @@
 
 （暂无）
 
+## [0.1.3] - 2026-11-15
+
+**Python 覆盖率车道说清原因**（自测报告里的第四个发现）。pytest 自己没跑起来时
+（收集错误 / 缺依赖 / 参数用错），工具报的是「覆盖率报告没解析出来（No such file or
+directory: .../cov.json）」—— 读者只知道有个文件找不到，不知道**仓库缺依赖**。
+实测复现：`pallets/itsdangerous` 的测试要 `freezegun`（仓库没声明）⇒ pytest 收集失败
+⇒ pytest-cov 根本没写 cov.json。现在报「pytest 没跑起来（No module named
+'freezegun'）」，并点名缺哪个模块。
+
+**Action 真机冒烟**：加 `.github/workflows/action-smoke.yml`，用 `uses: ./` 在真实
+ubuntu runner 上跑一遍 action（strict: true）—— 本地逐步模拟过 composite 的每一步，
+但「composite action 在 GitHub 上真的能跑」只有真跑一次才算数。
+
+回归断言：`skills/attest/scripts/test_python_coverage_lane.py`。
+
 ## [0.1.2] - 2026-11-15
 
 **修三个在公开仓库上实测到的误报**（证据见

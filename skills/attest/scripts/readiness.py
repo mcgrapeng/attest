@@ -845,28 +845,96 @@ _ENV_ERROR_RE = re.compile(
     r"MilvusException|ServiceUnavailable", re.I)
 
 
+# node:test 的嵌套 TAP —— describe 里的用例是**缩进**输出的：
+#     # Subtest: outer group
+#         # Subtest: failing case
+#         not ok 2 - failing case
+#           ---
+#           error: 'connect ECONNREFUSED 127.0.0.1:19999'
+#           type: 'test'
+#           ---
+#     not ok 1 - outer group
+#       ---
+#       error: '1 subtest failed'
+#       type: 'suite'
+#       ---
+_TAP_SUBTEST_RE = re.compile(r"^(\s*)# Subtest: (.+)$")
+_TAP_NOT_OK_RE = re.compile(r"^(\s*)not ok \d+ - (.+)$")
+_TAP_TYPE_RE = re.compile(r"^\s*type:\s*'?(\w+)'?\s*$")
+_TAP_ERR_RE = re.compile(r"^(\s*)error:\s*(.*)$")
+_TAP_BLOCK_MARKERS = ("|", "|-", "|+", ">", ">-", ">+")
+
+
+def _tap_error_block(lines: list[str], i: int) -> tuple[str, bool]:
+    """`not ok` 行之后的 YAML 块 ⇒ (报错详情, 是不是套件聚合行)。
+
+    报错有两种写法：单行 `error: 'xxx'` 与块标量 `error: |-`（多行）。
+    """
+    detail = ""
+    is_suite = False
+    for j in range(i + 1, min(i + 60, len(lines))):
+        ln = lines[j]
+        if _TAP_NOT_OK_RE.match(ln) or _TAP_SUBTEST_RE.match(ln):
+            break
+        tm = _TAP_TYPE_RE.match(ln)
+        if tm:
+            is_suite = is_suite or tm.group(1) == "suite"
+            continue
+        em = _TAP_ERR_RE.match(ln)
+        if em and not detail:
+            val = em.group(2).strip()
+            if val in _TAP_BLOCK_MARKERS:
+                base = len(em.group(1))
+                block: list[str] = []
+                k = j + 1
+                while k < len(lines):
+                    nxt = lines[k]
+                    if nxt.strip() in ("---", "..."):
+                        break
+                    if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= base:
+                        break
+                    block.append(nxt.strip())
+                    k += 1
+                while block and not block[-1]:
+                    block.pop()
+                detail = " ".join(x for x in block if x)
+            else:
+                detail = val.strip("'\"")
+    return detail, is_suite
+
+
 def _failed_tests_detail(out: str) -> list[str]:
-    """失败用例：标题 **+ 紧随其后的 YAML 块里的 error 详情**。
+    """失败用例：全路径 **+ 紧随其后的 YAML 块里的 error 详情**。
 
     只看标题判不出"环境没就绪"—— 标题是用例名，报错细节在 `error:` 行
     （例：`14 UNAVAILABLE: ... connect ECONNREFUSED 127.0.0.1:19999`）。
+
+    node --test 把 describe 里的用例**缩进**输出。旧实现只认行首的
+    `not ok` ⇒ 嵌套用例一个都认不出来 ⇒ 只剩套件聚合行，报错文本被换成
+    '1 subtest failed' ⇒ 环境错误被当成产品缺陷（假红）。现在按缩进栈
+    重建全路径，并跳过 `type: 'suite'` 的聚合行。
     """
     res: list[str] = []
     lines = out.splitlines()
+    stack: list[tuple[int, str]] = []       # (缩进, 名字)
     for i, ln in enumerate(lines):
-        m = re.match(r"^not ok \d+ - (.+)$", ln)
+        sm = _TAP_SUBTEST_RE.match(ln)
+        if sm:
+            indent = len(sm.group(1))
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            stack.append((indent, sm.group(2).strip()))
+            continue
+        m = _TAP_NOT_OK_RE.match(ln)
         if not m:
             continue
-        title = m.group(1)
-        detail = ""
-        for j in range(i + 1, min(i + 40, len(lines))):
-            if re.match(r"^not ok \d+ - ", lines[j]):
-                break
-            em = re.match(r"^\s*error:\s*'?(.+?)'?\s*$", lines[j])
-            if em:
-                detail = em.group(1)
-                break
-        res.append(f"{title} | {detail}" if detail else title)
+        detail, is_suite = _tap_error_block(lines, i)
+        if is_suite:
+            continue                        # 套件聚合行：子用例已经报过了
+        indent = len(m.group(1))
+        title = m.group(2).strip()
+        path = " > ".join([n for (ind, n) in stack if ind < indent] + [title])
+        res.append(f"{path} | {detail}" if detail else path)
     return res
 
 
@@ -2165,6 +2233,28 @@ def python_test_cmd(m: Module, root: Path) -> tuple[str | None, list[str]]:
     return exe, tests
 
 
+# pytest 没跑起来的迹象（收集错误 / 缺依赖 / 内部错误）
+_PYTEST_DIDNT_RUN_RE = re.compile(
+    r"ERROR collecting|ModuleNotFoundError|ImportError while importing|"
+    r"INTERNALERROR|no tests ran|unrecognized arguments", re.M)
+
+
+def _first_pytest_error(out: str) -> str:
+    """pytest 输出里第一条能指路的错误（缺哪个模块、哪个文件挂了）。"""
+    lines = []
+    for ln in out.splitlines():
+        s = ln.strip()
+        if s.startswith("E "):
+            s = s[1:].strip()
+        if "ModuleNotFoundError" in s or "ImportError" in s or "No module named" in s:
+            lines.append(s[:200])
+    # "No module named X" 最能指路 —— 排前面
+    for s in lines:
+        if "No module named" in s:
+            return s
+    return lines[0] if lines else ""
+
+
 def run_python_coverage(m: Module, root: Path, timeout: int = 600
                         ) -> tuple[dict[str, dict], list[str], str]:
     """跑 pytest-cov ⇒ (逐文件覆盖率, 失败用例, 说明)。"""
@@ -2192,10 +2282,21 @@ def run_python_coverage(m: Module, root: Path, timeout: int = 600
               if ln.strip().startswith("FAILED")]
     errors = [ln.strip() for ln in out.splitlines()
               if ln.strip().startswith("ERROR")]
+    # pytest 自己没跑起来（收集错误 / 缺依赖 / 参数用错）⇒ 根本没有覆盖率报告。
+    # 之前只报「覆盖率报告没解析出来（No such file or directory）」—— 把"仓库缺一个
+    # 测试依赖"说成了"覆盖率解析不了"，读者完全不知道该做什么。
+    # 实测复现：pallets/itsdangerous 的测试要 freezegun（未声明）⇒ pytest 收集失败
+    # ⇒ pytest-cov 没写 cov.json。
+    if r.returncode not in (0, 1) or _PYTEST_DIDNT_RUN_RE.search(out):
+        reason = _first_pytest_error(out) or f"pytest 退出码 {r.returncode}"
+        return {}, failed, errors, f"pytest 没跑起来（{reason}）⇒ 没有覆盖率报告"
     import json as _json
     try:
         data = _json.loads((Path(out_dir) / "cov.json").read_text(
             encoding="utf-8"))
+    except FileNotFoundError:
+        return {}, failed, errors, ("pytest-cov 没产出覆盖率报告"
+                                    "（cov.json 不存在 —— 仓库可能没装 pytest-cov）")
     except (OSError, ValueError) as e:
         return {}, failed, errors, f"覆盖率报告没解析出来（{e}）"
     cov: dict[str, dict] = {}

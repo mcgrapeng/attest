@@ -1,0 +1,29 @@
+# Action 在**真实 runner**上跑一遍 —— 本地模拟过 composite 的每一步，
+# 但"composite action 在 GitHub 上真的能跑"这句话，只有真跑一次才算数。
+#
+# 用 `uses: ./` 测**当前 checkout**（不是某个 tag）⇒ 改了 action.yml 立刻能验。
+name: Action smoke test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  action:
+    name: Action 在 ubuntu runner 上跑一遍
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: 跑 action（严格模式：阻塞项应当让 job 失败）
+        uses: ./
+        with:
+          module: skills/attest/scripts
+          strict: 'true'

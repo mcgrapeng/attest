@@ -7,13 +7,7 @@
 
 （暂无）
 
-## [0.1.0] - 2026-11-15
-
-首个发布版。本轮目标：把 `attest` 从"本机一个 skill 目录"推进到"可发布的制品" ——
-工程缺口与哲学缺口逐条修完，并用**可复现证据**证明每一条已关闭。
-
-发布前置清单见 [docs/oss-release-review.md](docs/oss-release-review.md)（只读评测记录）
-与 [docs/testing-philosophy-review.md](docs/testing-philosophy-review.md)。
+## [0.1.1] - 2026-11-15
 
 ### 自测报告与市场收录（2026-11-15 追加）
 
@@ -32,6 +26,14 @@ OpenCode 没有 skill 市场 —— 它读 `.agents/skills/`，一行安装已�
 mutation-testing / requirements）；description 改成
 "An evidence list for delivery readiness, built from your repo's own tests, coverage
 gates and reconciliation scripts — in CI or as an agent skill."（146 字符）。
+
+## [0.1.0] - 2026-11-15
+
+首个发布版。本轮目标：把 `attest` 从"本机一个 skill 目录"推进到"可发布的制品" ——
+工程缺口与哲学缺口逐条修完，并用**可复现证据**证明每一条已关闭。
+
+发布前置清单见 [docs/oss-release-review.md](docs/oss-release-review.md)（只读评测记录）
+与 [docs/testing-philosophy-review.md](docs/testing-philosophy-review.md)。
 
 ### 分发与共建：让工具能被找到、被一起建
 

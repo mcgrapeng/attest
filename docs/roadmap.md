@@ -16,8 +16,8 @@ The tool exists; almost nobody can find it. This phase is about distribution.
 - [x] **Standard skill layout** — the skill lives in `skills/attest/`, which is
       what the skills.sh index and the Anthropic marketplace template both
       expect. A skill at the repository root is invisible to both.
-- [ ] **Tagged release** — `v0.1.0` with release notes, so that
-      `mcgrapeng/attest@v0.1.0` is a thing other people can pin.
+- [x] **Tagged release** — `v0.1.0` and `v0.1.1`, with release notes, so that
+      `mcgrapeng/attest@v0.1.1` is a thing other people can pin.
 - [x] **Marketplace submissions** — skills.sh indexed (it needs the skill in a
       subdirectory, which is why the layout moved); Anthropic's official skills
       repository carries a Partner Skills entry (PR

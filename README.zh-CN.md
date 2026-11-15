@@ -33,7 +33,7 @@ python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项�
 
 ## 状态
 
-**在维护中，已发 `v0.1.0`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
+**在维护中，已发 `v0.1.1`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
 不会悄悄变。MIT 许可。
 
 下面每个数字都来自一条你可以重跑的命令。
@@ -232,7 +232,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.0
+      - uses: mcgrapeng/attest@v0.1.1
         with:
           module: src/auth
 ```

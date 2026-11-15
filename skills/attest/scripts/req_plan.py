@@ -23,6 +23,12 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from decision_points import (  # noqa: E402
+    DpAnalysis, HIGH_RISK_KINDS, ast_analyze, detect_backend, dp_key,
+    lexical_analyze, python_ast_analyze,
+)
+
 # ---------------------------------------------------------------- 常量
 
 # 判定"这是条测试车道"的脚本名关键词。
@@ -178,6 +184,8 @@ _HEADER_WORDS = {
     "实际", "输入", "输出", "数量", "维度", "优先级", "顺序", "状态",
     "分类", "标识", "键", "值", "来源", "派生", "唯一", "校验方式", "一致性",
     "镜像", "权威", "落点或不适用理由", "不适用理由",
+    # 判定点粒度表（v2）的表头词 —— 少一个就可能把表头当数据行
+    "dp id", "判定点", "豁免理由", "归属", "归属的不变式",
 }
 
 # 解决一致性时"引入中间件"的做法 —— 用户明确不打算引入这些。
@@ -495,12 +503,117 @@ class Plan:
     extra_dimensions: list[str] = field(default_factory=list)
     unfilled: set[str] = field(default_factory=set)
     detail_rows: list[list[str]] = field(default_factory=list)
+    # 「核心逻辑细节」表的表头格 —— 新旧格式的判据靠它（规格 §4.3）
+    detail_header: list[str] = field(default_factory=list)
+    # 正文注释里的豁免：{DP ID: 理由}
+    waivers: dict[str, str] = field(default_factory=dict)
     newcap_rows: list[list[str]] = field(default_factory=list)
     # 「人工确认」节：谁读过这份计划、什么时候、对不对。需求理解对不对本工具判不了，
     # 但"没人签过字"是一条必须出现在报告里的事实。
     reviewed: bool = False
     review_note: str = ""
 
+
+# ---------------------------------------------------------------- 计划格式
+#
+# v1 = 旧的「模块级维度表」（| 维度 | 落点 / 不适用理由 |）
+# v2 = 判定点粒度（| 维度 | DP ID | 判定点 | 归属的不变式 | 落点 | 豁免理由 |）
+# 规格 §4.3：判据是**列语义**不是列数 —— 人加列就变。
+
+PLAN_FORMAT_V1 = "v1"
+PLAN_FORMAT_V2 = "v2"
+
+# 正文里的豁免注释：<!-- attest:waive <DP ID> reason="..." -->
+_WAIVE_RE = re.compile(
+    r"<!--\s*attest:waive\s+(?P<id>[^\s]+)\s+reason=\"(?P<reason>[^\"]*)\"\s*-->")
+
+# 豁免理由只有这几个字 ⇒ 没说明豁免了什么（规格 §4.2：提醒）
+_VAGUE_WAIVERS = ("不适用", "n/a", "na", "无", "none")
+
+
+@dataclass
+class DetailRow:
+    """「核心逻辑细节」表的一行（v1 只有 dim / pin 有值）。"""
+
+    dim: str = ""
+    dp_id: str = ""
+    dp_desc: str = ""
+    invariant: str = ""
+    pin: str = ""
+    waiver: str = ""
+
+
+def detail_dp_index(plan: Plan) -> int | None:
+    """DP ID 在第几列。表头说了算；表头没写就看数据行里哪一列像 DP ID。"""
+    for i, c in enumerate(plan.detail_header):
+        if re.sub(r"\s+", "", c).lower() == "dpid":
+            return i
+    for row in plan.detail_rows:
+        for i, c in enumerate(row):
+            if dp_key(c):
+                return i
+    return None
+
+
+def detect_plan_format(plan: Plan) -> str:
+    """这份计划是旧的模块级维度表（v1）还是判定点粒度表（v2）。
+
+    表头里有「DP ID」⇒ v2；表头没写但数据行有一列能解析成 DP ID ⇒ v2；
+    都没有 ⇒ v1。**不许靠列数猜**（规格 §4.3）。
+    """
+    if not plan.detail_rows:
+        return PLAN_FORMAT_V1
+    return PLAN_FORMAT_V2 if detail_dp_index(plan) is not None else PLAN_FORMAT_V1
+
+
+def detail_pin_index(plan: Plan) -> int:
+    """落点在第几列。v1 是第 2 列；v2 的落点列跟着 DP ID 列走。
+
+    相对索引而不是写死 4 —— 退化写法（表头没写 DP ID、DP ID 在第 1 列）
+    里落点列也会跟着挪；标准 6 列布局算出来正好是 4（规格 §4.5）。
+    """
+    if detect_plan_format(plan) == PLAN_FORMAT_V1:
+        return 1
+    idx = detail_dp_index(plan)
+    return 4 if idx is None else idx + 3
+
+
+def parse_detail_rows(plan: Plan) -> list[DetailRow]:
+    """把「核心逻辑细节」表按当前格式解析成结构化行。"""
+    if detect_plan_format(plan) == PLAN_FORMAT_V1:
+        return [DetailRow(dim=r[0] if r else "",
+                          pin=r[1] if len(r) > 1 else "")
+                for r in plan.detail_rows]
+    idx = detail_dp_index(plan) or 0
+
+    def cell(row: list[str], i: int) -> str:
+        return row[i] if 0 <= i < len(row) else ""
+
+    return [DetailRow(
+        dim=cell(row, idx - 1),
+        dp_id=cell(row, idx),
+        dp_desc=cell(row, idx + 1),
+        invariant=cell(row, idx + 2),
+        pin=cell(row, idx + 3),
+        waiver=cell(row, idx + 4),
+    ) for row in plan.detail_rows]
+
+
+def _waiver_for(plan: Plan, dp_id: str) -> str:
+    """这个判定点在正文注释里的豁免理由（理由为空的不算）。"""
+    key = dp_key(dp_id)
+    if key is None:
+        return ""
+    for raw, reason in plan.waivers.items():
+        if reason.strip() and dp_key(raw) == key:
+            return reason.strip()
+    return ""
+
+
+def _vague_waiver(reason: str) -> bool:
+    """豁免理由是不是只有「不适用」这种没内容的说法。"""
+    r = reason.strip().lower()
+    return r in _VAGUE_WAIVERS
 
 
 def _parse_review_section(plan: Plan) -> None:
@@ -549,6 +662,8 @@ def parse_plan(path: Path) -> Plan:
         plan.text = path.read_text(encoding="utf-8", errors="replace")
     except OSError as e:
         raise SystemExit(f"读不了计划文件: {e}")
+    for m in _WAIVE_RE.finditer(plan.text):
+        plan.waivers[m.group("id")] = m.group("reason")
 
     sections: list[str] = []
     table_kind: str | None = None
@@ -670,6 +785,8 @@ def parse_plan(path: Path) -> Plan:
                 sections[0] if sections else None)
             if table_kind:
                 plan.sections.add(table_kind)
+            if table_kind == "detail":
+                plan.detail_header = list(cells)
             continue            # 表块首行 + 下一行是分隔行 + ≥2 个标签格 ⇒ 表头
         prev_was_row = True
 
@@ -1226,10 +1343,13 @@ def _plan_pins(plan: Plan) -> list[tuple[str, str]]:
         for cell in row[1:]:
             for fpath, _case in parse_pins(cell):
                 add("覆盖矩阵", fpath)
+    # 核心逻辑细节：只从**落点列**抽钉 —— DP ID 列不参与（规格 §4.2），
+    # 否则机器推导出来的路径会被当成人写的钉去过越界闸。
+    pin_idx = detail_pin_index(plan)
     for row in plan.detail_rows:
-        if len(row) < 2:
+        if len(row) <= pin_idx:
             continue
-        for p in _PIN_RE.findall(row[1]):
+        for p in _PIN_RE.findall(row[pin_idx]):
             add("核心逻辑细节", p.split(":")[0])
     for row in plan.consistency_rows:
         if len(row) < 4:
@@ -1245,6 +1365,214 @@ def _plan_pins(plan: Plan) -> list[tuple[str, str]]:
         for p in _PIN_RE.findall(" ".join(row)):
             add("新建能力", p.split(":")[0])
     return out
+
+
+def _check_detail_v1(plan: Plan, repo: Repo, fs: list[Finding],
+                     bad_pins: dict[str, str]) -> set[str]:
+    """旧格式（模块级维度表）：每个维度都要有落点，或写「不适用」+理由。
+
+    行为与升级前逐字一致 —— 老计划不该因为格式升级被判得更严。
+    """
+    covered: set[str] = set()
+    for row in plan.detail_rows:
+        if len(row) < 2:
+            continue
+        dim = row[0]
+        cell = row[1]
+        # 一行可以覆盖多个维度（"重试/幂等"）⇒ 按子串记
+        for d in _DETAIL_DIMENSIONS:
+            if d in dim:
+                covered.add(d)
+        if "不适用" in cell:
+            if len(cell.strip()) <= len("不适用"):
+                fs.append(Finding(
+                    "error", "核心逻辑细节",
+                    f"维度 {dim!r} 写了「不适用」但没给理由",
+                    "写清楚为什么不适用（例如「不适用：纯计算，无外部输入」）",
+                ))
+            continue
+        pins = _PIN_RE.findall(cell)
+        if not pins:
+            fs.append(Finding(
+                "error", "核心逻辑细节",
+                f"维度 {dim!r} 没有测试落点",
+                "写具体测试文件，或写「不适用」+理由",
+            ))
+            continue
+        for p in pins:
+            fpath = p.split(":")[0]
+            if fpath in bad_pins:
+                continue      # 越界的钉已经在上面报红了，别去读它
+            if not (repo.root / fpath).exists():
+                fs.append(Finding(
+                    "error", "核心逻辑细节",
+                    f"维度 {dim!r} 的落点不存在: {fpath}",
+                    "测试文件还没写，或路径写错了",
+                ))
+    return covered
+
+
+def _check_detail_v2(plan: Plan, repo: Repo, fs: list[Finding],
+                     bad_pins: dict[str, str]) -> set[str]:
+    """新格式（判定点粒度）：DP ID / 归属 / 落点 / 豁免 四列各有各的判据。
+
+    规格 §4.2：高危档判定点没归属也没豁免 ⇒ 报红；常规档只计数。
+    """
+    covered: set[str] = set()
+    inv_ids = {ident for ident, _desc, _pin in plan.invariants}
+    normal_gaps = 0
+
+    for row in parse_detail_rows(plan):
+        # 维度格里带触发证据（"边界（触发证据：…）"）—— 认维度只看名字那一段
+        dim = row.dim.split("（")[0].strip()
+        for d in _DETAIL_DIMENSIONS:
+            if d in dim:
+                covered.add(d)
+
+        dp_id = row.dp_id.strip()
+        key = dp_key(dp_id) if dp_id else None
+        # 消息里点名到判定点 —— 一张表几十行，光说"维度"看不出是哪行
+        who = dp_id or f"维度 {dim!r}"
+        if dp_id:
+            if key is None:
+                fs.append(Finding(
+                    "error", "核心逻辑细节",
+                    f"判定点 {dp_id} 不是合法的 DP ID",
+                    "格式：文件#锚点#类型[#序号]（类型取 branch/boundary/error-path/…）",
+                ))
+            elif not (repo.root / key[0]).exists():
+                fs.append(Finding(
+                    "error", "核心逻辑细节",
+                    f"判定点 {dp_id} 指向的文件不存在: {key[0]}",
+                    "机器推导出来的 ID 指向不存在的文件 ⇒ 推导器有 bug",
+                ))
+
+        # 豁免：豁免理由列 或 正文注释（注释豁免由 _waiver_findings 单独查合法性）
+        waiver = row.waiver.strip()
+        if waiver and _vague_waiver(waiver):
+            fs.append(Finding(
+                "warn", "核心逻辑细节",
+                f"{who} 的豁免理由太笼统：{waiver!r}",
+                "写清楚豁免了什么、为什么这个判定点不用测",
+            ))
+        waived = bool(waiver) or bool(_waiver_for(plan, dp_id))
+
+        inv = row.invariant.strip()
+        if inv and inv not in inv_ids:
+            fs.append(Finding(
+                "error", "核心逻辑细节",
+                f"判定点 {dp_id or dim!r} 归属的不变式 {inv} 不在不变式清单里",
+                "填不变式清单里真实存在的编号",
+            ))
+
+        # 缺口：DP 有、没归属、没豁免
+        if dp_id and key and not inv and not waived:
+            if key[2] in HIGH_RISK_KINDS:
+                fs.append(Finding(
+                    "error", "核心逻辑细节",
+                    f"高危判定点 {dp_id} 既没归属不变式，也没写豁免理由",
+                    "高危判定点（错误路径/资源/状态/丢弃）必须钉到用例，"
+                    "或写明为什么它不用测",
+                ))
+            else:
+                normal_gaps += 1
+
+        # 落点
+        cell = row.pin.strip()
+        if waived:
+            continue
+        if not cell:
+            fs.append(Finding(
+                "error", "核心逻辑细节",
+                f"{who} 没有测试落点",
+                "写具体测试文件::用例名，或在豁免理由里写明为什么不用测",
+            ))
+        elif "不适用" in cell:
+            if len(cell) <= len("不适用"):
+                fs.append(Finding(
+                    "error", "核心逻辑细节",
+                    f"{who} 写了「不适用」但没给理由",
+                    "写清楚为什么不适用（例如「不适用：纯计算，无外部输入」）",
+                ))
+        else:
+            for fpath, case in parse_pins(cell):
+                if fpath in bad_pins:
+                    continue      # 越界的钉已经在上面报红了，别去读它
+                if not (repo.root / fpath).exists():
+                    fs.append(Finding(
+                        "error", "核心逻辑细节",
+                        f"{who} 的落点不存在: {fpath}",
+                        "测试文件还没写，或路径写错了",
+                    ))
+                    continue
+                if case is None:
+                    fs.append(Finding(
+                        "warn", "核心逻辑细节",
+                        f"{who} 的落点只到文件、没有用例名: {fpath}",
+                        "钉到具体用例（文件::用例名）才看得出测的是哪条路径",
+                    ))
+                    continue
+                names = test_case_names(repo.root, fpath)
+                if not names:
+                    fs.append(Finding(
+                        "error", "核心逻辑细节",
+                        f"{who} 的落点 {fpath} 里没解析出任何用例",
+                        "确认文件名对不对，或用例写法是不是标准 test/it",
+                    ))
+                elif not case_matches(case, names):
+                    fs.append(Finding(
+                        "error", "核心逻辑细节",
+                        f"{who} 的落点用例在 {fpath} 里不存在: {case!r}",
+                        f"该文件的用例有：{'; '.join(names[:5])}",
+                    ))
+    if normal_gaps:
+        fs.append(Finding(
+            "warn", "核心逻辑细节",
+            f"有 {normal_gaps} 个常规判定点既没归属不变式，也没写豁免理由",
+            "给每个判定点挂到一条不变式，或写明为什么它不用测",
+        ))
+    return covered
+
+
+def _waiver_findings(plan: Plan, repo: Repo, fs: list[Finding]) -> None:
+    """正文注释里的豁免（<!-- attest:waive <DP ID> reason="…" -->）。
+
+    豁免的是哪个判定点必须说清楚 —— 空的豁免、指向空气的豁免都是假豁免。
+    """
+    if not plan.waivers:
+        return
+    table_keys = {k for k in (dp_key(r.dp_id) for r in parse_detail_rows(plan))
+                  if k}
+    v2 = detect_plan_format(plan) == PLAN_FORMAT_V2
+    for raw, reason in plan.waivers.items():
+        key = dp_key(raw)
+        if key is None:
+            fs.append(Finding(
+                "error", "核心逻辑细节",
+                f"豁免 {raw} 不是合法的 DP ID",
+                "格式：文件#锚点#类型[#序号]",
+            ))
+            continue
+        if not reason.strip():
+            fs.append(Finding(
+                "error", "核心逻辑细节",
+                f"豁免 {raw} 没给理由",
+                "写清楚豁免了什么、为什么这个判定点不用测",
+            ))
+            continue
+        if not (repo.root / key[0]).exists():
+            fs.append(Finding(
+                "error", "核心逻辑细节",
+                f"豁免 {raw} 指向的文件不存在: {key[0]}",
+                "文件不存在 ⇒ 这条豁免指的是不存在的判定点",
+            ))
+            continue
+        if v2 and key not in table_keys:
+            fs.append(Finding(
+                "error", "核心逻辑细节",
+                f"豁免 {raw} 不在判定点表里",
+                "表里没有这个判定点 ⇒ 豁免的是空气",
+            ))
 
 
 def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
@@ -1467,43 +1795,18 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
 
     # 4d. 核心逻辑细节：每个维度都要有落点，或写「不适用」+理由。
     #     这是"测出核心逻辑的细节"的兜底 —— 维度默默跳过 = 没测到。
+    #     旧格式（模块级维度表）与新格式（判定点粒度）走两套判据。
     if plan.detail_rows:
-        covered: set[str] = set()
-        for row in plan.detail_rows:
-            if len(row) < 2:
-                continue
-            dim = row[0]
-            cell = row[1]
-            # 一行可以覆盖多个维度（"重试/幂等"）⇒ 按子串记
-            for d in _DETAIL_DIMENSIONS:
-                if d in dim:
-                    covered.add(d)
-            if "不适用" in cell:
-                if len(cell.strip()) <= len("不适用"):
-                    fs.append(Finding(
-                        "error", "核心逻辑细节",
-                        f"维度 {dim!r} 写了「不适用」但没给理由",
-                        "写清楚为什么不适用（例如「不适用：纯计算，无外部输入」）",
-                    ))
-                continue
-            pins = _PIN_RE.findall(cell)
-            if not pins:
-                fs.append(Finding(
-                    "error", "核心逻辑细节",
-                    f"维度 {dim!r} 没有测试落点",
-                    "写具体测试文件，或写「不适用」+理由",
-                ))
-                continue
-            for p in pins:
-                fpath = p.split(":")[0]
-                if fpath in bad_pins:
-                    continue      # 越界的钉已经在上面报红了，别去读它
-                if not (repo.root / fpath).exists():
-                    fs.append(Finding(
-                        "error", "核心逻辑细节",
-                        f"维度 {dim!r} 的落点不存在: {fpath}",
-                        "测试文件还没写，或路径写错了",
-                    ))
+        if detect_plan_format(plan) == PLAN_FORMAT_V2:
+            covered = _check_detail_v2(plan, repo, fs, bad_pins)
+        else:
+            covered = _check_detail_v1(plan, repo, fs, bad_pins)
+            fs.append(Finding(
+                "warn", "核心逻辑细节",
+                "本计划还是旧的模块级维度表；升级到判定点粒度后，"
+                "这三条判据才会硬判",
+                "跑 `req_plan.py upgrade <计划文件>` 把旧表升级成判定点粒度",
+            ))
         # 只要求**推导出的**维度都被回答 —— 固定清单会逼人填无关的行
         required = set()
         if plan.modules:
@@ -1522,6 +1825,8 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
                 "这些维度要么有落点，要么写「不适用」+理由 —— "
                 "默默跳过就是没测到",
             ))
+    # 正文注释里的豁免：两种格式都要查
+    _waiver_findings(plan, repo, fs)
 
     # 4e. 新建能力：已存在同名 ⇒ 重复造轮子；调用点 ≤1 ⇒ 过度设计
     for row in plan.newcap_rows:
@@ -1783,13 +2088,17 @@ Python 仓读 Makefile 目标与 tox.ini 环境；别自己编）：
 {cross_store_block}
 ## 核心逻辑细节
 
+每个核心逻辑**判定点**一行 —— 判定点 = 代码里一个真正要选的分支/边界/错误路径。
+**DP ID 与判定点两列是机器推导出来的**（{dp_level}），后三列要人来填：
+这条判定点归属哪条不变式、钉到哪个用例、或者写明为什么豁免。
+
 下面的维度是**按目标模块的代码特征推导**出来的（括号里是触发它的证据）。
 每个维度都要有测试落点，或写「不适用」+理由 —— **默默跳过 = 没测到**。
 
 本需求额外涉及：<待填：没有就删掉这行；填了就多几个维度要答>
 
-| 维度 | 落点 / 不适用理由 |
-| --- | --- |
+| 维度 | DP ID | 判定点 | 归属的不变式 | 落点（文件::用例名） | 豁免理由 |
+| --- | --- | --- | --- | --- | --- |
 {detail_block}
 
 ## 新建能力（先论证不能复用）
@@ -2269,11 +2578,13 @@ def cmd_scaffold(args: argparse.Namespace) -> int:
             if case:
                 inv_by_file.setdefault(fpath, []).append((ident, desc))
 
-    # 细节清单里的落点也是"这次要落到哪个文件"
+    # 细节清单里的落点也是"这次要落到哪个文件"（落点列按格式走：v1 第 2 列，
+    # v2 第 5 列 —— DP ID 那列不是落点）
+    pin_idx = detail_pin_index(plan)
     for row in plan.detail_rows:
-        if len(row) < 2:
+        if len(row) <= pin_idx:
             continue
-        for fpath, case in parse_pins(row[1]):
+        for fpath, case in parse_pins(row[pin_idx]):
             if case:
                 entries.append((row[0], fpath, case))
 
@@ -2415,6 +2726,124 @@ CROSS_STORE_BLOCK = """
 """
 
 
+# 判定点类型 → 「核心逻辑细节」表的维度列。维度列保留既有口径
+# （_DETAIL_DIMENSIONS 覆盖判据靠它），映射不到的就用自己的类别名。
+_DP_KIND_DIMENSION = {
+    "branch": "分支",
+    "boundary": "边界",
+    "boundary-io": "边界",
+    "error-path": "错误路径",
+    "drop": "错误路径",
+    "resource": "资源上限",
+    "state": "状态",
+    "concurrency": "并发",
+}
+
+# 维度列的排序：既有维度清单在前，机器推导出的新类别在后
+_DIMENSION_ORDER = tuple(_DETAIL_DIMENSIONS) + ("分支", "状态")
+
+
+def _read_text(p: Path) -> str:
+    try:
+        return p.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def _module_source_files(root: Path, modules: list[str]) -> list[str]:
+    """目标模块里的生产源码（相对仓库根）—— 测试文件不算。"""
+    out: list[str] = []
+    exts = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py"}
+    for mod in modules:
+        base = root / mod
+        if not base.exists():
+            continue
+        paths = [base] if base.is_file() else _walk(base, exts)
+        for p in paths:
+            if re.search(r"\.(test|spec)\.|_test\.go$|\.itest\.", p.name):
+                continue
+            rel = repo_rel(root, p)
+            if rel not in out:
+                out.append(rel)
+    return sorted(out)
+
+
+def derive_plan_points(root: Path, modules: list[str]) -> tuple[list, str]:
+    """推导目标模块的判定点 ⇒ (判定点列表, 等级说明)。
+
+    规格 §3.2：有 TS AST 后端 ⇒ L3；没有 ⇒ L2 词法；Python ⇒ 标准库 ast。
+    """
+    files = _module_source_files(root, modules)
+    ts_files = [f for f in files if not f.endswith(".py")]
+    py_files = [f for f in files if f.endswith(".py")]
+    points: list = []
+    notes: list[str] = []
+    if ts_files:
+        backend = detect_backend(root)
+        an = ast_analyze(root, ts_files, backend) if backend else None
+        if an is not None and an.points:
+            points.extend(an.points)
+            notes.append(f"L3 AST 推导（{an.note}）")
+        else:
+            for rel in ts_files:
+                points.extend(lexical_analyze(rel, _read_text(root / rel)))
+            notes.append("L2 词法推导（启发式，可能有误报）")
+    for rel in py_files:
+        an = python_ast_analyze(rel, _read_text(root / rel))
+        points.extend(an.points)
+        notes.append("L3 Python ast 推导" if an.level == "L3"
+                     else f"Python 源码解析失败（{an.note}）")
+    allp = DpAnalysis(level="L3" if points else "L1", points=points)
+    allp.assign_ids()
+    return allp.points, "；".join(notes) or "没有可分析的源文件"
+
+
+def _dp_desc(root: Path, point) -> str:
+    """判定点的一句话描述 —— 取源码那一行，比光一个 kind 好懂。"""
+    text = point.detail
+    try:
+        lines = _read_text(root / point.file).splitlines()
+        if 0 < point.line <= len(lines):
+            text = lines[point.line - 1].strip()
+    except OSError:
+        pass
+    # 表格按 "|" 分列 —— 竖线不能进单元格（源码里的 || / | 换成全角）
+    text = re.sub(r"\s+", " ", text).replace("|", "｜")
+    return text[:77] + "…" if len(text) > 78 else text
+
+
+def _detail_table(root: Path, points: list, required: dict[str, list[str]]) -> str:
+    """生成 6 列「核心逻辑细节」表的行。
+
+    机器填 DP ID 与判定点两列；后三列留空 —— 归属是人的判断，工具不代劳。
+    """
+    by_dim: dict[str, list] = {}
+    for p in points:
+        by_dim.setdefault(_DP_KIND_DIMENSION.get(p.kind, p.kind), []).append(p)
+    lines: list[str] = []
+    covered: set[str] = set()
+    for dim in _DIMENSION_ORDER:
+        dps = sorted(by_dim.get(dim, []),
+                     key=lambda p: (p.file, p.anchor, p.line))
+        if not dps:
+            continue
+        ev = required.get(dim) or []
+        suffix = f"（触发证据：{ev[0]}）" if ev else ""
+        for p in dps:
+            lines.append(
+                f"| {dim}{suffix} | {p.dp_id} | {_dp_desc(root, p)} |  |  |  |")
+        covered.add(dim)
+    # 推导出的维度里没有判定点 ⇒ 给一行空 DP（规格 §4.1 的第四行那种）
+    for dim in _DETAIL_DIMENSIONS:
+        if dim not in required or dim in covered:
+            continue
+        ev = required.get(dim) or []
+        suffix = f"（触发证据：{ev[0]}）" if ev else ""
+        lines.append(
+            f"| {dim}{suffix} |  | （该维度不对应任何判定点） |  |  |  |")
+    return "\n".join(lines)
+
+
 def cmd_new(args: argparse.Namespace) -> int:
     root = Path(args.repo).resolve()
     repo = scan_repo(root)
@@ -2467,14 +2896,9 @@ def cmd_new(args: argparse.Namespace) -> int:
                 + ", ".join(sorted(stores)) + "）")
     if not dims:
         dims = {d: [] for d in _CORE_DIMENSIONS}
-    detail_lines = []
-    for dim in _DETAIL_DIMENSIONS:
-        if dim not in dims:
-            continue
-        ev = dims[dim][0] if dims[dim] else ""
-        suffix = f"（触发证据：{ev}）" if ev else ""
-        detail_lines.append(f"| {dim} | <待填：测试文件，或\"不适用：…\">{suffix} |")
-    detail_block = "\n".join(detail_lines)
+    # 判定点由机器推导（规格 §3.2：TS 有 AST 后端走 L3，没有走 L2）
+    points, dp_level = derive_plan_points(root, modules)
+    detail_block = _detail_table(root, points, dims)
     if stores:
         blocks = []
         for kind, ev in sorted(stores.items()):
@@ -2500,6 +2924,7 @@ def cmd_new(args: argparse.Namespace) -> int:
         modules_line=" ".join(f"`{m}`" for m in modules) or "（未指定）",
         stores_block=stores_block,
         detail_block=detail_block,
+        dp_level=dp_level,
         reuse_block="\n".join(reuse_lines) or "（没指定模块）",
         lanes_block=lanes_block,
         # 跨存储才生成「数据一致性」+「约束」两节（单存储模块不需要）
@@ -2508,6 +2933,81 @@ def cmd_new(args: argparse.Namespace) -> int:
     print(f"已生成: {out}")
     print(f"下一步：填不变式与矩阵，然后跑\n"
           f"  python3 {_SELF} check {out} --repo {root}")
+    return 0
+
+
+def cmd_upgrade(args: argparse.Namespace) -> int:
+    """把旧计划升级成判定点粒度：旧表留成附录，新表机器填好 DP ID 与判定点。
+
+    不自动归属 —— 哪个判定点归哪条不变式是人的判断，工具不代劳。
+    """
+    root = Path(args.repo).resolve()
+    plan_path = Path(args.plan)
+    if not plan_path.is_absolute() and not plan_path.exists():
+        alt = root / plan_path          # 找不到就按 --repo 根再试一次
+        if alt.exists():
+            plan_path = alt
+    plan_path = plan_path.resolve()
+    if not plan_path.exists():
+        print(f"计划文件不存在: {plan_path}", file=sys.stderr)
+        return 1
+    plan = parse_plan(plan_path)
+    modules = args.module or plan.modules
+    points, dp_level = derive_plan_points(root, modules)
+
+    # 旧表里写过的维度也要出现在新表里（人自己声明过的，机器推导不出来）
+    required = derive_dimensions(root, modules) if modules else {}
+    for row in plan.detail_rows:
+        dim = row[0].split("（")[0].strip()
+        if dim:
+            required.setdefault(dim, [])
+
+    lines = plan_path.read_text(encoding="utf-8").splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        if re.match(r"^#{1,6}\s", ln) and "细节" in ln:
+            start = i
+            break
+    if start is None:
+        print("这份计划里没有「核心逻辑细节」节 —— 没什么可升级的",
+              file=sys.stderr)
+        return 1
+    end = len(lines)
+    for j in range(start + 1, len(lines)):
+        if re.match(r"^#{1,6}\s", lines[j]):
+            end = j
+            break
+    old_body = lines[start + 1:end]
+    # 「额外涉及」那一行搬进新表 —— 它是给新表用的声明，不是旧表的遗产
+    extra = [ln for ln in old_body if "额外涉及" in ln]
+    old_body = [ln for ln in old_body if "额外涉及" not in ln]
+
+    new_section = [
+        "## 核心逻辑细节",
+        "",
+        "每个核心逻辑**判定点**一行 —— 判定点 = 代码里一个真正要选的分支/边界/错误路径。",
+        f"**DP ID 与判定点两列是机器推导出来的**（{dp_level}），后三列要人来填：",
+        "这条判定点归属哪条不变式、钉到哪个用例、或者写明为什么豁免。",
+        "",
+        "下面的维度是**按目标模块的代码特征推导**出来的（括号里是触发它的证据）。",
+        "每个维度都要有测试落点，或写「不适用」+理由 —— **默默跳过 = 没测到**。",
+        "",
+        *extra,
+        "",
+        "| 维度 | DP ID | 判定点 | 归属的不变式 | 落点（文件::用例名） | 豁免理由 |",
+        "| --- | --- | --- | --- | --- | --- |",
+        *_detail_table(root, points, required).splitlines(),
+        "",
+        "## 附录：旧的模块级维度表（保留作参考）",
+        "",
+        *old_body,
+    ]
+    plan_path.write_text(
+        "\n".join(lines[:start] + new_section + lines[end:]) + "\n",
+        encoding="utf-8")
+    print(f"已升级: {plan_path}")
+    print(f"判定点 {len(points)} 个（{dp_level}）—— "
+          "DP ID 与判定点两列已填好，后三列请人工补")
     return 0
 
 
@@ -2562,6 +3062,13 @@ def main(argv: list[str]) -> int:
                       help="显式指定 JS 测试框架（默认从仓库认；认不出时用它）")
     p_sc.add_argument("--force", action="store_true", help="覆盖已存在的测试文件")
     p_sc.set_defaults(func=cmd_scaffold)
+
+    p_up = sub.add_parser("upgrade", help="把旧计划升级成判定点粒度")
+    p_up.add_argument("plan", help="计划文件")
+    p_up.add_argument("--repo", default=".", help="仓库根")
+    p_up.add_argument("--module", action="append", default=[],
+                      help="目标模块（相对仓库根），可重复；默认取计划里写的")
+    p_up.set_defaults(func=cmd_upgrade)
 
     p_chk = sub.add_parser("check", help="校验计划 vs 代码实况")
     p_chk.add_argument("plan", help="计划文件")

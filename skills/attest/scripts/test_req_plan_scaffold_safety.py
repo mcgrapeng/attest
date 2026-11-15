@@ -387,7 +387,10 @@ def main() -> int:
     sim.mkdir(parents=True, exist_ok=True)
     simhome = mkdtemp() / "home"
     simhome.mkdir(parents=True, exist_ok=True)
-    for name in ("test_req_plan_r3.py", "test_req_plan_r4.py", "req_plan.py"):
+    # decision_points.py 是 req_plan.py 的同仓模块（判定点推导），跟着一起复制；
+    # 外部工具（ai-testing-system）才是这个模拟要拿掉的东西
+    for name in ("test_req_plan_r3.py", "test_req_plan_r4.py", "req_plan.py",
+                 "decision_points.py"):
         shutil.copy2(HERE / name, sim / name)
     for name in ("test_req_plan_r3.py", "test_req_plan_r4.py"):
         rr2 = subprocess.run([sys.executable, str(sim / name)],

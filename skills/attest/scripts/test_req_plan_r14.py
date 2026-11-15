@@ -40,6 +40,23 @@ def run(*args: str) -> subprocess.CompletedProcess:
                           env={**os.environ, "PYTHONUTF8": "1"})
 
 
+def fill_rows(text: str, dim: str, inv: str = "", pin: str = "",
+              waiver: str = "") -> str:
+    """把某个维度的所有判定点行改成给定的不变式/落点/豁免。
+
+    行数随推导等级变化（L2/L3 会数出不同的判定点）⇒ 按维度批量改，不写死行数。
+    """
+    out = []
+    for ln in text.splitlines():
+        if ln.startswith(f"| {dim}（") or ln.startswith(f"| {dim} |"):
+            cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+            cells[3], cells[4], cells[5] = inv, pin, waiver
+            out.append("| " + " | ".join(cells) + " |")
+        else:
+            out.append(ln)
+    return "\n".join(out)
+
+
 MATH_SRC = """export function add(a: number, b: number): number {
   if (a > 100) throw new Error('too big');
   return a + b;
@@ -79,19 +96,16 @@ def main() -> int:
     expect(r.returncode == 0, "new 成功")
     plan = tmp / "docs" / "m-test-plan.md"
     text = plan.read_text(encoding="utf-8")
-    expect("| 边界 |" in text, "边界行在")
-    expect("| 错误路径 |" in text, "错误路径行在")
-    expect("| 权限 |" not in text, "权限行不在（不逼人填无关的）")
-    expect("| 跨租户隔离 |" not in text, "跨租户隔离行不在")
+    expect("| 边界" in text, "边界行在")
+    expect("| 错误路径" in text, "错误路径行在")
+    expect("| 权限" not in text, "权限行不在（不逼人填无关的）")
+    expect("| 跨租户隔离" not in text, "跨租户隔离行不在")
     expect("触发证据" in text, "每行带触发证据")
 
     print("\n校验：只要求推导出的维度（不误报无关维度）")
-    text = text.replace(
-        '| 边界 | <待填：测试文件，或"不适用：…">（触发证据：src/math/add.ts:2 — 取值上下界） |',
-        "| 边界 | src/math/add.test.ts |")
-    text = text.replace(
-        '| 错误路径 | <待填：测试文件，或"不适用：…">（触发证据：src/math/add.ts:2 — 错误分支） |',
-        "| 错误路径 | 不适用：本需求只测正常加法 |")
+    text = fill_rows(text, "边界", inv="I1", pin="src/math/add.test.ts::add")
+    text = fill_rows(text, "错误路径", waiver="不适用：本需求只测正常加法")
+    text = fill_rows(text, "分支", inv="I1", pin="src/math/add.test.ts::add")
     text = text.replace(
         "| I1 | <待填：这需求必须永远成立的性质> | <待填：src/x.test.ts::用例名> |",
         "| I1 | 和法正确 | src/math/add.test.ts::add |")
@@ -105,8 +119,7 @@ def main() -> int:
     expect("权限" not in r2.stdout, "不因无关维度提醒")
 
     print("\n校验：维度行留着但没落点 ⇒ 报红")
-    text2 = text.replace("| 错误路径 | 不适用：本需求只测正常加法 |",
-                          "| 错误路径 |  |")
+    text2 = fill_rows(text, "错误路径")
     plan2 = tmp / "docs" / "m2-test-plan.md"
     plan2.write_text(text2, encoding="utf-8")
     r3 = run("check", str(plan2), "--repo", str(tmp))
@@ -115,7 +128,7 @@ def main() -> int:
     print("\n校验：维度行整行删掉 ⇒ 提醒漏维度")
     text2b = "\n".join(
         ln for ln in text.splitlines()
-        if not ln.startswith("| 错误路径 |"))
+        if not ln.startswith("| 错误路径"))
     plan2b = tmp / "docs" / "m2b-test-plan.md"
     plan2b.write_text(text2b, encoding="utf-8")
     r3b = run("check", str(plan2b), "--repo", str(tmp))

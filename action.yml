@@ -44,6 +44,11 @@ runs:
         ATTEST_MODULE: ${{ inputs.module }}
         ATTEST_PLAN: ${{ inputs.plan }}
       run: |
+        # GitHub 的默认 shell 带 -e（bash --noprofile --norc -e -o pipefail）：
+        # readiness.py 在有阻塞项时退出 1 ⇒ 管道在 -e 下会**直接中断整个步骤**，
+        # 后面的退出码判断根本没机会跑 ⇒ 默认模式（strict=false）也会变红。
+        # 显式 set +e：退出码我们自己判（blocking / strict 两种策略）。
+        set +e
         set -uo pipefail
         REPO="$GITHUB_WORKSPACE/${{ inputs.repo-path }}"
         REPORT="$RUNNER_TEMP/attest-report.txt"

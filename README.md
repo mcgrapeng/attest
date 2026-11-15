@@ -31,10 +31,12 @@ two stores have not drifted apart. `attest` answers the delivery question with
 
 | Evidence kind | What it means |
 | --- | --- |
-| **Measured** (已实测) | Something ran — the command, its exit code and its output are in the report |
-| **Static signal** (静态信号) | Read out of the source, not run. **Can never support a pass on its own** |
-| **Not measured** (未实测) | Could not be measured, and the report names the precondition that was missing |
-| **Not judged** (本工具不判定) | Out of scope by design: requirement understanding, product behaviour, performance, security, availability, operational readiness |
+| **Measured** | Something ran — the command, its exit code and its output are in the report |
+| **Static signal** | Read out of the source, not run. **Can never support a pass on its own** |
+| **Not measured** | Could not be measured, and the report names the precondition that was missing |
+| **Not judged** | Out of scope by design: requirement understanding, product behaviour, performance, security, availability, operational readiness |
+
+The tool prints these four kinds in Chinese (已实测 / 静态信号 / 未实测 / 本工具不判定); the report sample below is its real output.
 
 **Supported today:** TypeScript / JavaScript and Python. Rust and Go are recognised
 by the plan generator, but the readiness checker exits with code 2 and says so
@@ -143,6 +145,12 @@ Real output from attest's own fixture (`fixtures/ts-colocated`):
 结论：0 项阻塞 · 1 项待人工确认 · 7 项无信号 · 1 项实测通过（另有 6 条静态信号）
 退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到
 ```
+
+<div align="center">
+  <img alt="The full report: four sections (measured, static signals, not measured, not judged) and a three-tier verdict — rendered from a real run of attest's own fixture"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.svg"
+       width="574">
+</div>
 
 Look at the last line: **7 items with no signal**, not "7 passed". A criterion
 that was not measured is reported as *not measured*, and the exit code is `1`

@@ -135,6 +135,12 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出：
 退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到
 ```
 
+<div align="center">
+  <img alt="完整报告：四段（已实测 / 静态信号 / 未实测 / 本工具不判定）加三档结论 —— 由 attest 自己 fixture 的真实运行渲染"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.svg"
+       width="574">
+</div>
+
 看最后一行：**7 项无信号**，不是「7 项通过」。没测到的判据报的是「未实测」，
 而退出码是 1 —— 因为有一项关键判据根本没测到。
 

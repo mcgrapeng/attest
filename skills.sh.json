@@ -1,0 +1,10 @@
+{
+  "$schema": "https://skills.sh/schemas/skills.sh.schema.json",
+  "groupings": [
+    {
+      "title": "Delivery readiness",
+      "description": "Evidence lists measured from your repo's own tests, coverage gates and reconciliation scripts.",
+      "skills": ["attest"]
+    }
+  ]
+}

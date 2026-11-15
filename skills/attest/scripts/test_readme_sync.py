@@ -86,7 +86,7 @@ def main() -> int:
         code_n = len(json.loads(out.stdout)["checks"])
     except Exception:
         pass
-    expect(code_n == 14, f"代码里 14 条判据（实际 {code_n}）")
+    expect(code_n == 17, f"代码里 17 条判据（实际 {code_n}）")
     # 判据表搬到了 docs/criteria.md（README 只留一段话 + 链接）
     crit = (ROOT / "docs" / "criteria.md").read_text(encoding="utf-8")
     expect(criteria_rows(crit) == code_n,
@@ -102,8 +102,11 @@ def main() -> int:
     expect(f"{len(tests)} / {len(tests)}" in zh or f"{len(tests)}/{len(tests)}" in zh,
            f"中文 README 的回归套件数是 {len(tests)}")
     fixtures = len([d for d in (ROOT / "fixtures").iterdir() if d.is_dir()])
-    expect(all(("5 / 5" in t or "5/5" in t) for t in (en, zh)),
-           f"README 写 5 / 5 fixture（实际 {fixtures}）")
+    # 断言必须真比数字：写死「5 / 5」的话，fixture 从 5 个变成 10 个
+    # 也不会红 —— 那是橡皮章。
+    expect(all((f"{fixtures} / {fixtures}" in t or f"{fixtures}/{fixtures}" in t)
+               for t in (en, zh)),
+           f"README 写 {fixtures} / {fixtures} fixture")
     evals = json.loads((ROOT / "evals" / "evals.json").read_text(encoding="utf-8"))
     n_evals = len(evals if isinstance(evals, list) else evals.get("evals", []))
     expect(all(("6 / 6" in t or "6/6" in t) for t in (en, zh)),

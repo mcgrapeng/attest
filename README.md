@@ -127,6 +127,18 @@ It publishes the evidence list to the job summary and the PR comment, and
 evidence, the repository decides. Install the repository's own dependencies
 before the action runs: attest runs the repository's own test command.
 
+## Command-line flags
+
+`skills/attest/scripts/readiness.py` takes four switches for the decision-point
+engine. All of them degrade to "not measured" rather than to a false green.
+
+| Flag | What it does |
+| --- | --- |
+| `--plan <file>` | The requirement test plan to compare against. **Without it the three decision-point criteria are skipped**, not passed |
+| `--discriminating {auto,off,quick,full}` | Whether to break the source at each pin and check that the pinned test case catches it. `auto` runs it only for decision-point-grained plans, `off` skips it, `quick`/`full` widen the sample (expensive) |
+| `--analysis-backend {auto,b1,b2,l2}` | How the decision points are derived. `auto` uses the TypeScript AST when it is available; `l2` forces the lexical fallback, which **downgrades the three criteria to warnings** — a missing capability never reports green |
+| `--lenient` | Warn only: every red from the three decision-point criteria becomes a warning |
+
 ## The report
 
 Real output from attest's own fixture (`fixtures/ts-colocated`):
@@ -140,7 +152,7 @@ Real output from attest's own fixture (`fixtures/ts-colocated`):
 ```
 
 ```
-结论：0 项阻塞 · 1 项待人工确认 · 7 项无信号 · 1 项实测通过（另有 6 条静态信号）
+结论：0 项阻塞 · 1 项待人工确认 · 10 项无信号 · 1 项实测通过（另有 6 条静态信号）
 退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到
 ```
 
@@ -151,14 +163,32 @@ because a key criterion could not be measured at all.
 `--json` gives the same thing machine-readably (checks + verdict counters).
 `--dry-run` lists the repo scripts that *would* run, and executes nothing.
 
+With `--plan`, the report grows a **判定点覆盖** (decision-point coverage)
+section — the decision points reverse-derived from the source, counted
+against the plan's own list:
+
+```
+── 判定点覆盖 ────────────────────────────────
+  判定点总数 2 ｜ 已归属 1 ｜ 豁免 0 ｜ 缺口 1
+  高危四类缺口：drop 0 ｜ error-path 0 ｜ resource 1 ｜ state 0
+  缺口清单（只列高危档）：
+    src/a.ts#closeClient#resource  既没有归属不变式，也没有豁免理由
+  推导等级 L3（后端 B2，来源 global-npm）
+  区分力自证：1/1 条（100%），杀得死 1 条
+```
+
+That gap line is the point: a high-risk decision point that **no invariant
+owns and no exemption explains**.
+
 ## What it measures
 
-14 criteria. The full table, the four evidence kinds and the language matrix
+17 criteria. The full table, the four evidence kinds and the language matrix
 are in **[docs/criteria.md](docs/criteria.md)**. In one paragraph: the repo's
 own tests, its own coverage gate, whether its tests can actually fail, the PG
 schema, cross-store drift, baseline accuracy, plus static signals about
 hygiene, unused exports, over-abstraction, reinvented wheels, dependencies and
-assertion independence.
+assertion independence — plus the decision points reverse-derived from the
+source and compared against the plan's own list.
 
 ## Status
 
@@ -166,7 +196,7 @@ assertion independence.
 contract may still change — but they will change with a changelog entry, not
 silently. MIT licensed.
 
-Every number in this repository comes from a command you can re-run: **32 / 32** regression suites, **5 / 5** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
+Every number in this repository comes from a command you can re-run: **32 / 32** regression suites, **10 / 10** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
 
 Known gaps, in full: [CHANGELOG.md](CHANGELOG.md). The three that
 matter most:

@@ -1,6 +1,6 @@
 # The criteria — what attest measures, and what it refuses to measure
 
-`attest` runs 14 criteria against a module. Each one produces **evidence**, and
+`attest` runs 17 criteria against a module. Each one produces **evidence**, and
 the evidence is sorted into four kinds. The report never says "ready to ship" —
 that decision rests on things no tool can read off the code, and the report
 lists them under **本工具不判定**.
@@ -23,7 +23,7 @@ has to call it) and **无信号** (not measured). Exit code `0` means no blockin
 items, `1` means there are blocking items or a key criterion could not be
 measured at all, `2` means the module could not be recognised.
 
-## The 14 criteria
+## The 17 criteria
 
 | Criterion | key | Evidence kind | How it is measured |
 | --- | --- | --- | --- |
@@ -33,6 +33,7 @@ measured at all, `2` means the module could not be recognised.
 | 表结构基本合规 (schema is basically compliant) | `schema` | Measured | Queries the PG catalog: primary key / unique constraint / tenant column / RLS+FORCE / timestamps with a timezone (single-tenant, config and append-only tables exempt) |
 | 数据流一致（跨存储对账）(data agrees across stores) | `data-flow` | Measured | **Runs** the module's own reconciliation script and parses the drift; judged **per tenant kind**; field-level comparison is part of this one |
 | 数据准确（基线对拍）(data matches the baseline) | `data-accuracy` | Measured | **Runs** the repo's own baseline script and parses the metric differences |
+| 钉有区分力 (the pin has discriminating power) | `pin-discriminating` | Measured | **Breaks the source at the pinned point** and runs the pinned test case: red ⇒ the pin kills this class of defect; still green ⇒ **this pin cannot find it** (`--plan` + `--discriminating`; no plan ⇒ not measured) |
 | 需求覆盖到位 (requirement is covered) | `requirement` | Static signal | Reads the plan and the test files: every invariant's pin → a test case that really exists (`--plan`); an unreviewed plan downgrades this to advisory |
 | 向量集合属性自洽 (vector collection attributes agree) | `vector-schema` | Static signal | Whether one collection's dimension/metric/partition key agree across call sites; the partition key must not be a vector field |
 | 测试卫生（不留残留、不靠 sleep）(hygiene) | `hygiene` | Static signal | Fixed waits (a source of flakiness) and database writes without cleanup (a source of leftovers) |
@@ -41,6 +42,8 @@ measured at all, `2` means the module could not be recognised.
 | 没有重复造轮子 (no reinvented wheels) | `no-wheels` | Static signal | Same-named implementations across the repo |
 | 使用主流开源库 (uses mainstream open-source libraries) | `open-source` | Static signal | The module's real dependency list (path aliases and the standard library excluded) |
 | 断言的期望值独立 (assertion oracles are independent) | `oracle` | Static signal | Assertions whose expected value comes from the system under test ⇒ advisory |
+| 计划与机器推导对齐 (the plan matches the machine-derived decision points) | `plan-alignment` | Static signal | The decision points are **reverse-derived from the source** and compared with the plan's decision-point column in both directions: machine-only, plan-only, and pins that do not reference the module at all (`--plan`) |
+| 应有判定点覆盖到位 (the decision points are covered) | `decision-coverage` | Static signal | Every high-risk decision point in the plan has an owning invariant **or** a written exemption, and the landing point (file::case) really exists (`--plan`) |
 
 The evidence kind is assigned **per run**: a criterion that needs a database is
 marked *not measured* when there is no connection, never *measured*.
@@ -80,3 +83,7 @@ was measured is worse than an error.
 - **Environment not ready ≠ the mutant was killed.** When a mutated point fails
   because of an environment error rather than an assertion failure, that point is
   judged **not decided**, not "the tests found the defect".
+- **Level L2 never hard-judges.** When the decision points can only be derived by
+  the lexical fallback (L2), the three decision-point criteria are downgraded to
+  warnings — a missing capability must never report green. The report names the
+  level it reached (`推导等级 L2`) so a downgrade is never silent.

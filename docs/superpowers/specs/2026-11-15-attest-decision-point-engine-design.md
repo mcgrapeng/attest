@@ -223,6 +223,11 @@ Python 侧（`ast` 模块）：`If` / `Match` / `IfExp` / `Compare` / `Raise` / 
 | 落点只有文件、没有用例名 | 提醒（与现有「钉只到文件」同档） |
 | 豁免理由非空但没写清豁免的是什么 | 提醒 |
 
+**实现提示（已核代码）**：`req_plan.py::_plan_pins`（约 1229 行）现在从「核心逻辑细节」表的
+**第 1 列**（索引 1）抽钉。新表把落点放在**索引 3** ⇒ 这一处的列号要跟着改，
+并且要同时认旧表（索引 1）与新表（索引 3），否则旧计划会被误判成「钉缺失」。
+`_plan_pins` 还要继续对所有节的钉做仓库越界闸，新表新增的两列不得引入新的写入面。
+
 ### 4.3 老计划兼容（用户已选「条件式阻塞」）
 
 - `check` 与 `readiness` 都能识别旧格式（维度表 ⇒ 无 DP 列）。
@@ -248,6 +253,9 @@ Python 侧（`ast` 模块）：`If` / `Match` / `IfExp` / `Compare` / `Raise` / 
 - **可达闭包**：模块内调用图上的传递闭包。
   TS：文件内 `f(` 形式的调用正则 + 导出符号的入口 ⇒ 保守上近似（多算不少算）。
   Python：`ast` 的调用图（精确）。
+- **可复用件（已核代码）**：`readiness.py:278` 的 `_import_specs(text, suffix)` 已能抽测试文件的
+  import 规格；`req_plan.py` 侧**没有**同类工具（只 import 了 `re`）⇒ 归属映射的实现位置由实现者定，
+  但 `_import_specs` 的行为口径（抽什么、抽到什么粒度）要复用，别另写一套。
 - 保守上近似是**有意的**：宁可多算覆盖（少报缺口），也不要把无关 DP 塞给人。
 
 ### 5.2 「钉不碰目标模块」要报
@@ -278,10 +286,11 @@ Python 侧（`ast` 模块）：`If` / `Match` / `IfExp` / `Compare` / `Raise` / 
 2. 求 `T` 引用的目标模块生产符号集合 `S`，及其可达闭包 `S*`。
 3. 在 `S*` 的函数体里生成变异点（§6.3 的算子集）。
 4. 对每个变异点 `m`：
-   - **复制工作区**（复用 `mutation_check.py` 已有的副本机制；副本默认不带 `node_modules`，
-     `--self-check-deps` 才软链）
+   - **复制工作区**（复用 `mutation_check.py` 的 `_copy_repo` + `_link_deps`；
+     副本默认不带 `node_modules`，`readiness.py --self-check-deps` 才软链；
+     **计划从原仓库读，副本里没有 `docs/`**）
    - 应用 `m`（只改副本）
-   - 跑测试，判定**用例 `C` 本身**是否变红
+   - 跑测试，判定**用例 `C` 本身**是否变红（复用现有 `classify` 三分口径）
    - 还原/丢弃副本
 5. 结论：
 
@@ -322,10 +331,31 @@ pytest 的 `-k`、go 的 `-run`），直接筛。**前提是必须能确认筛�
 
 ### 6.4 与现有 `mutation_check.py` 的关系
 
-- **复用**：副本创建、脚本执行、runner 输出解析、变异点定位。
-- **新增**：`--case <用例名>` 参数（只跑一个用例并判定它是否红）；`--invariants <计划文件>` 参数
-  （从计划读钉，逐条自证）；7 类算子。
-- **保留**：原有的「按文件跑一遍」用法不变（现有测试脚本 `test_test_strength.py` 等不得回归）。
+**事实校准**（已核代码，2026-11-15）：
+
+- `scripts/mutation_check.py` 是**库**，不是 CLI。它自己的 argparse 只接一个源码文件（单文件调试用）。
+  对外入口是 `run_mutation_check(repo, ws_rel, source_rels, test_rels, runner, max_mutants, timeout, classify)`，
+  由 `readiness.py:2477` 调用。**所以 DPSP 的新参数是函数级参数，不是命令行开关。**
+- 副本机制已存在：`_copy_repo`（`shutil.copytree` + `SKIP_DIRS`）+ `_link_deps`（软链 `node_modules` /
+  `.venv` / `venv`）+ `_has_deps`。`readiness.py` 的 `--self-check-deps` 控制是否软链。
+- **`SKIP_DIRS` 含 `docs`** ⇒ 副本里没有 `docs/` ⇒ **计划文件不在副本内**。
+  DPSP 一律从**原仓库**读计划，从副本读代码。
+- **`classify` 回调已经实现三分口径**（真失败⇒杀死 / 环境没就绪或输出认不出⇒**判不了**）。
+  这正是 DPSP 要的口径，**必须复用**，不要另起一套 —— 另起一套就会把环境错误当成「杀死」，那是假绿。
+
+**复用**：副本创建、依赖软链、脚本执行、runner 输出解析、变异点定位、三分分类。
+
+**新增**：
+
+| 位置 | 新增 | 说明 |
+| --- | --- | --- |
+| `mutation_check.py` | 7 类算子（§6.3） | 现有 6 个比较运算符保留 |
+| `mutation_check.py` | `run_mutation_check(..., case_name=None)` | 给了 `case_name` 时判定「**这个用例**是否红」，而不是「整个文件是否红」 |
+| `mutation_check.py` | 限定变异点作用域的参数（只在目标符号的可达闭包内找变异点） | 具体签名由实现者定 |
+| 新文件 `scripts/discriminate.py` | 钉 → 符号 → 变异点 → 副本 → 单用例 → 结论 | 编排层，不重复造轮子 |
+| `readiness.py` | `--discriminating {auto,off,quick,full}`、`--lenient` | CLI 开关挂在 readiness（与 `--mutation-check` 同级） |
+
+**保留**：原有的「按文件跑一遍」用法不变（现有测试脚本 `test_test_strength.py` 等不得回归）。
 
 ### 6.5 预算与抽样（用户已选「自适应 + 明写抽样比例」）
 
@@ -389,7 +419,16 @@ pytest 的 `-k`、go 的 `-run`），直接筛。**前提是必须能确认筛�
 
 理由：DP 引擎能枚举并发原语，但**证明没有竞态**需要模型检查/压力测试，不是静态分析能给的。
 
+实现位置：`readiness.py` 的模块级 `NOT_JUDGED` 元组（当前 6 项）。它同时被文本输出与
+`conclusion.not_judged` 渲染 ⇒ 只改这一处，两种输出都跟着变。
+
 ### 7.4 JSON 输出新增段
+
+现状（已核 `readiness.py:3249-3263`）：顶层是 `module` / `tables` / `checks` / `conclusion`，
+其中 `checks` 是 `Check.__dict__` 的数组、`conclusion` 装 blocking / needs_human / no_signal /
+measured_pass / static_signals / not_judged / exit_rule。
+
+新增三段作为 **顶层并列键**（不进 `conclusion`）：
 
 ```json
 {

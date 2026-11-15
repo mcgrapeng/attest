@@ -80,11 +80,19 @@ refuses to judge — requirement understanding, product behaviour, performance,
 security, availability, operational readiness.
 
 **Why the name.** *Attest* means to testify formally: to put a claim on the
-record as something you have checked. That is the whole job here. The words
-deliberately avoided are the tell — not *verify*, not *certify*, not
-*sign-off*. The tool does not approve anything; it says what it measured, and
-what it refused to judge. The name shares a root with SLSA's *attestation*,
-which is the same idea: a claim plus its provenance.
+record as something you have checked. The tool does the mechanical half of that
+job, and it takes that half seriously — a failing test is named, coverage is
+measured, drift is attributed to a tenant, and the exit code is 1 whenever a
+blocking item exists or a key criterion could not be measured at all.
+
+What it will not do is print "ready to ship". That verdict also rests on things
+no tool can read off the code: whether the requirement was read correctly,
+whether the behaviour is right, how fast and how safe it is. Those sit on every
+report under **not judged by this tool**, and the call stays with whoever owns
+the delivery. That is why the name avoids *verify*, *certify* and *sign-off*:
+all three promise an approval this tool refuses to fake. (The name also shares
+a root with SLSA's *attestation*, which is the same idea — a claim plus its
+provenance.)
 
 ### How it is measured
 

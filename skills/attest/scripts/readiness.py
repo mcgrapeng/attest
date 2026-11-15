@@ -719,28 +719,96 @@ _ENV_ERROR_RE = re.compile(
     r"MilvusException|ServiceUnavailable", re.I)
 
 
+# node:test 的嵌套 TAP —— describe 里的用例是**缩进**输出的：
+#     # Subtest: outer group
+#         # Subtest: failing case
+#         not ok 2 - failing case
+#           ---
+#           error: 'connect ECONNREFUSED 127.0.0.1:19999'
+#           type: 'test'
+#           ---
+#     not ok 1 - outer group
+#       ---
+#       error: '1 subtest failed'
+#       type: 'suite'
+#       ---
+_TAP_SUBTEST_RE = re.compile(r"^(\s*)# Subtest: (.+)$")
+_TAP_NOT_OK_RE = re.compile(r"^(\s*)not ok \d+ - (.+)$")
+_TAP_TYPE_RE = re.compile(r"^\s*type:\s*'?(\w+)'?\s*$")
+_TAP_ERR_RE = re.compile(r"^(\s*)error:\s*(.*)$")
+_TAP_BLOCK_MARKERS = ("|", "|-", "|+", ">", ">-", ">+")
+
+
+def _tap_error_block(lines: list[str], i: int) -> tuple[str, bool]:
+    """`not ok` 行之后的 YAML 块 ⇒ (报错详情, 是不是套件聚合行)。
+
+    报错有两种写法：单行 `error: 'xxx'` 与块标量 `error: |-`（多行）。
+    """
+    detail = ""
+    is_suite = False
+    for j in range(i + 1, min(i + 60, len(lines))):
+        ln = lines[j]
+        if _TAP_NOT_OK_RE.match(ln) or _TAP_SUBTEST_RE.match(ln):
+            break
+        tm = _TAP_TYPE_RE.match(ln)
+        if tm:
+            is_suite = is_suite or tm.group(1) == "suite"
+            continue
+        em = _TAP_ERR_RE.match(ln)
+        if em and not detail:
+            val = em.group(2).strip()
+            if val in _TAP_BLOCK_MARKERS:
+                base = len(em.group(1))
+                block: list[str] = []
+                k = j + 1
+                while k < len(lines):
+                    nxt = lines[k]
+                    if nxt.strip() in ("---", "..."):
+                        break
+                    if nxt.strip() and len(nxt) - len(nxt.lstrip()) <= base:
+                        break
+                    block.append(nxt.strip())
+                    k += 1
+                while block and not block[-1]:
+                    block.pop()
+                detail = " ".join(x for x in block if x)
+            else:
+                detail = val.strip("'\"")
+    return detail, is_suite
+
+
 def _failed_tests_detail(out: str) -> list[str]:
-    """失败用例：标题 **+ 紧随其后的 YAML 块里的 error 详情**。
+    """失败用例：全路径 **+ 紧随其后的 YAML 块里的 error 详情**。
 
     只看标题判不出"环境没就绪"—— 标题是用例名，报错细节在 `error:` 行
     （例：`14 UNAVAILABLE: ... connect ECONNREFUSED 127.0.0.1:19999`）。
+
+    node --test 把 describe 里的用例**缩进**输出。旧实现只认行首的
+    `not ok` ⇒ 嵌套用例一个都认不出来 ⇒ 只剩套件聚合行，报错文本被换成
+    '1 subtest failed' ⇒ 环境错误被当成产品缺陷（假红）。现在按缩进栈
+    重建全路径，并跳过 `type: 'suite'` 的聚合行。
     """
     res: list[str] = []
     lines = out.splitlines()
+    stack: list[tuple[int, str]] = []       # (缩进, 名字)
     for i, ln in enumerate(lines):
-        m = re.match(r"^not ok \d+ - (.+)$", ln)
+        sm = _TAP_SUBTEST_RE.match(ln)
+        if sm:
+            indent = len(sm.group(1))
+            while stack and stack[-1][0] >= indent:
+                stack.pop()
+            stack.append((indent, sm.group(2).strip()))
+            continue
+        m = _TAP_NOT_OK_RE.match(ln)
         if not m:
             continue
-        title = m.group(1)
-        detail = ""
-        for j in range(i + 1, min(i + 40, len(lines))):
-            if re.match(r"^not ok \d+ - ", lines[j]):
-                break
-            em = re.match(r"^\s*error:\s*'?(.+?)'?\s*$", lines[j])
-            if em:
-                detail = em.group(1)
-                break
-        res.append(f"{title} | {detail}" if detail else title)
+        detail, is_suite = _tap_error_block(lines, i)
+        if is_suite:
+            continue                        # 套件聚合行：子用例已经报过了
+        indent = len(m.group(1))
+        title = m.group(2).strip()
+        path = " > ".join([n for (ind, n) in stack if ind < indent] + [title])
+        res.append(f"{path} | {detail}" if detail else path)
     return res
 
 

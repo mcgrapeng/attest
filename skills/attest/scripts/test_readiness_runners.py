@@ -31,6 +31,9 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
+sys.path.insert(0, str(HERE))
+import readiness  # noqa: E402
+
 SCRIPT = HERE / "readiness.py"
 FAILURES: list[str] = []
 TMPDIRS: list[Path] = []
@@ -106,6 +109,55 @@ process.exit(1);
 QUIET_OK = """console.log("ok");
 """
 
+# node --test 的**嵌套** TAP —— describe 里的用例是缩进输出的。
+# 以前只认行首的 `not ok` ⇒ 嵌套用例一个都认不出来 ⇒ 只剩套件聚合行，
+# 报错文本被换成 '1 subtest failed' ⇒ 环境错误被当成产品缺陷（假红）。
+NESTED_TAP = """# Subtest: outer group
+    # Subtest: failing case
+    not ok 2 - failing case
+      ---
+      duration_ms: 1.2
+      error: 'connect ECONNREFUSED 127.0.0.1:19999'
+      type: 'test'
+      ---
+not ok 1 - outer group
+  ---
+  duration_ms: 3.4
+  failureType: 'subtestsFailed'
+  code: 'ERR_TEST_FAILURE'
+  error: '1 subtest failed'
+  type: 'suite'
+  ---
+"""
+
+NESTED_TAP_RUNNER = """console.log(%s);
+process.exitCode = 1;
+""" % json.dumps(NESTED_TAP)
+
+
+def test_nested_tap_failure_keeps_full_path() -> None:
+    print("\\n嵌套 TAP ⇒ 失败用例要带全路径与真实报错（不是套件聚合行）")
+    got = readiness._failed_tests_detail(NESTED_TAP)
+    expect(got == ["outer group > failing case | "
+                    "connect ECONNREFUSED 127.0.0.1:19999"],
+           f"嵌套用例的全路径与报错详情（实际 {got}）")
+
+
+def test_nested_env_error_not_blocking() -> None:
+    print("\\n嵌套 describe 里的环境错误 ⇒ 未实测，不算产品缺陷")
+    fails, setup = readiness._classify_run(1, NESTED_TAP, "unit")
+    expect(fails == [], f"不算阻塞项（实际 {fails}）")
+    expect(bool(setup) and "环境没就绪" in setup[0],
+           f"说清是环境没就绪（实际 {setup}）")
+
+
+def test_nested_env_error_e2e_not_blocking() -> None:
+    print("\\n（端到端）嵌套 describe 里的环境错误 ⇒ 0 项阻塞")
+    d = repo_with_runner("node scripts/runner.js", NESTED_TAP_RUNNER)
+    r = run("src", "--repo", str(d))
+    expect("0 项阻塞" in r.stdout, f"0 项阻塞（退出码 {r.returncode}）")
+    expect("环境没就绪" in r.stdout, "说清是环境没就绪")
+
 
 def test_jest_like_failure_blocks() -> None:
     print("\njest 风格输出 + 失败用例 ⇒ 必须阻塞，不能判绿")
@@ -174,6 +226,9 @@ def main() -> int:
         sys.stdout.reconfigure(encoding="utf-8")
     except AttributeError:
         pass
+    test_nested_tap_failure_keeps_full_path()
+    test_nested_env_error_not_blocking()
+    test_nested_env_error_e2e_not_blocking()
     test_jest_like_failure_blocks()
     test_vitest_like_failure_blocks()
     test_mocha_like_failure_blocks()

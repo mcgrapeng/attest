@@ -45,9 +45,14 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from bisect import bisect_right
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from decision_points import (  # noqa: E402
+    _anchor_at, detect_backend, structural_points)
 
 #: 变异算子全集（规格 §6.3 的表，顺序即报告里的展示顺序）
 OPERATORS: tuple[str, ...] = (
@@ -94,6 +99,19 @@ _STRUCT_KIND: dict[str, str] = {
 #: 三字符的 === / !== 先试 ⇒ JS 的严格相等也进得来（很常见的变异点）。
 _OP_RE = re.compile(r"(?<![=!<>])(===|!==|==|!=|>=|<=)(?![=])")
 
+#: `in` 运算符：`x in Y` ⇒ `Object.hasOwn(Y, x)`。
+#: 只认「两边都是标识符链」这种保守形状 —— 认不出的（调用结果、下标、
+#: 字面量）宁可跳过，也别造出会崩的变异体。
+_IN_EXPR_RE = re.compile(
+    r"(?<![A-Za-z0-9_$\.\]\)])"
+    r"([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$])*)"
+    r"\s+(in)\s+"
+    r"([A-Za-z_$][\w$]*(?:\s*\.\s*[A-Za-z_$][\w$])*)"
+    r"(?![A-Za-z0-9_$\.\[\(])")
+
+#: `in` 关键字（词边界）—— 用来认出 `for (x in y)` 头里那个**不是运算符**的 in
+_IN_KW_RE = re.compile(r"(?<![A-Za-z0-9_$])in(?![A-Za-z0-9_$])")
+
 #: 复制副本时跳过的目录
 SKIP_DIRS = (
     "node_modules", ".git", "dist", "build", "coverage", ".next", "out",
@@ -115,6 +133,8 @@ class Mutation:
     original: str
     mutated: str
     kind: str
+    op: str = ""              # 算子名（规格 §6.3 的 7 个之一）
+    symbol: str | None = None  # 所属具名符号（作用域限定用）
 
     def where(self) -> str:
         return f"{self.path.name}:{self.line}"
@@ -168,8 +188,74 @@ def _strip_js_code(src: str) -> str:
     return _JS_STRIP_RE.sub(lambda m: " " * len(m.group(0)), src)
 
 
+def _for_in_positions(code: str) -> set[int]:
+    """`for (x in y)` 头里那个 `in` 的位置（它不是运算符，别去改它）。"""
+    out: set[int] = set()
+    for m in re.finditer(r"\bfor\s*\(", code):
+        start = m.end()
+        depth = 0
+        end = len(code)
+        for j in range(start, len(code)):
+            ch = code[j]
+            if ch in "([{":
+                depth += 1
+            elif ch in ")]}":
+                if depth == 0:
+                    end = j
+                    break
+                depth -= 1
+            elif ch == ";" and depth == 0:
+                end = j
+                break
+        header = code[start:end]
+        for km in _IN_KW_RE.finditer(header):
+            depth = 0
+            for ch in header[:km.start()]:
+                if ch in "([{":
+                    depth += 1
+                elif ch in ")]}":
+                    depth -= 1
+            if depth == 0:
+                out.add(start + km.start())
+                break
+    return out
+
+
+def _find_in_mutations(path: Path, code: str, lines: list[str],
+                       limit: int) -> list[Mutation]:
+    """`x in Y` ⇒ `Object.hasOwn(Y, x)`（原型链语义不同 ⇒ 真实缺陷）。
+
+    Python 不做：`Object.hasOwn` 是 JS 的 API。
+    """
+    if path.suffix == ".py":
+        return []
+    for_ins = _for_in_positions(code)
+    out: list[Mutation] = []
+    for mm in _IN_EXPR_RE.finditer(code):
+        if mm.start(2) in for_ins:
+            continue
+        left, right = mm.group(1), mm.group(3)
+        start = mm.start()
+        line = code.count("\n", 0, start) + 1
+        col = start - (code.rfind("\n", 0, start) + 1) + 1
+        out.append(Mutation(
+            path=path, line=line, col=col, offset=start,
+            length=mm.end() - start,
+            original=f"{left} in {right}",
+            mutated=f"Object.hasOwn({right}, {left})",
+            kind="in 换成 hasOwn（看不见原型链上的键）",
+            op="in-to-hasown", symbol=_anchor_at(lines, line)))
+        if len(out) >= limit:
+            break
+    return out
+
+
 def find_mutations(path: Path, limit: int = DEFAULT_MAX_PER_FILE) -> list[Mutation]:
-    """在文件里找可注入的变异点（只认代码位置，不碰字符串与注释）。"""
+    """在文件里找可注入的变异点（只认代码位置，不碰字符串与注释）。
+
+    比较运算符与 `in` **分两族各取上限** —— 否则一堆比较运算符会把
+    `in` 挤掉（要什么算子由调用方按 `op` 过滤）。
+    """
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
     except OSError:
@@ -178,6 +264,7 @@ def find_mutations(path: Path, limit: int = DEFAULT_MAX_PER_FILE) -> list[Mutati
         code = _strip_py_code(src)
     else:
         code = _strip_js_code(src)
+    lines = code.split("\n")
     out: list[Mutation] = []
     for mm in _OP_RE.finditer(code):
         op = mm.group(1)
@@ -187,15 +274,154 @@ def find_mutations(path: Path, limit: int = DEFAULT_MAX_PER_FILE) -> list[Mutati
         col = start - (code.rfind("\n", 0, start) + 1) + 1
         out.append(Mutation(path=path, line=line, col=col, offset=start,
                             length=len(op), original=op, mutated=mutated,
-                            kind=kind))
+                            kind=kind, op=_OP_NAMES[op],
+                            symbol=_anchor_at(lines, line)))
         if len(out) >= limit:
             break
+    out.extend(_find_in_mutations(path, code, lines, limit))
     return out
 
 
 def _apply(text: str, mut: Mutation) -> str:
     """把一个变异应用到文本（按绝对偏移，偏移量与原文件一致）。"""
     return text[:mut.offset] + mut.mutated + text[mut.offset + mut.length:]
+
+
+# ---------------------------------------------------------------- 结构算子
+#
+# 结构算子要语句与表达式的边界 ⇒ 只有走 TypeScript AST 后端才拿得到。
+# 后端那边只吐**事实**（算子 / 区间 / 符号），替换文本在这儿算 ——
+# 这样替换规则不用装 TypeScript 也能单测。
+
+#: 结构算子的替换文本（catch-drop 换的是整个 catch 体 `{...}`）
+_STRUCT_REPLACEMENT: dict[str, str] = {
+    "drop-throw": "void",
+    "drop-call": "undefined",
+    "catch-drop": "{}",
+}
+
+#: TS 后端探测一次要起 node，慢 ⇒ 按项目根缓存
+_BACKEND_CACHE: dict[str, object] = {}
+
+
+def _project_root(path: Path) -> Path | None:
+    """往上找带 package.json 的目录（TS AST 后端要在项目里跑）。"""
+    for parent in path.parents:
+        if (parent / "package.json").is_file():
+            return parent
+    return None
+
+
+def _backend_for(root: Path):
+    """项目根对应的 TS AST 后端（没有 ⇒ None，调用方退回 L2）。"""
+    key = str(root)
+    if key not in _BACKEND_CACHE:
+        try:
+            _BACKEND_CACHE[key] = detect_backend(root)
+        except OSError:
+            _BACKEND_CACHE[key] = None
+    return _BACKEND_CACHE[key]
+
+
+def _astral_u16_starts(src: str) -> list[int]:
+    """星平面字符（emoji 之类）的 UTF-16 起始偏移（升序）。"""
+    out: list[int] = []
+    u = 0
+    for ch in src:
+        if ord(ch) > 0xFFFF:
+            out.append(u)
+            u += 2
+        else:
+            u += 1
+    return out
+
+
+def _u16_to_cp(off: int, starts: list[int]) -> int:
+    """TypeScript 的 UTF-16 偏移 → Python 的码点下标。
+
+    TS 的偏移是 UTF-16 码元，Python 字符串下标是码点 ——
+    前面有一个 emoji，两者就差 1。
+    """
+    return off - bisect_right(starts, off - 2)
+
+
+def find_structural_mutations(path: Path,
+                              limit: int = DEFAULT_MAX_PER_FILE) -> list[Mutation]:
+    """L3 结构算子（throw / 调用 / 谓词 / catch 体）。
+
+    没有 TypeScript 后端 ⇒ 空列表（不是报错）—— 调用方据此退回 L2。
+    """
+    if path.suffix not in (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"):
+        return []
+    root = _project_root(path)
+    if root is None:
+        return []
+    backend = _backend_for(root)
+    if backend is None:
+        return []
+    try:
+        src = path.read_text(encoding="utf-8", errors="replace")
+        rel = str(path.resolve().relative_to(root.resolve()))
+    except (OSError, ValueError):
+        return []
+    starts = _astral_u16_starts(src)
+    out: list[Mutation] = []
+    for fact in structural_points(root, [rel], backend):
+        op = str(fact.get("op") or "")
+        if op not in L3_OPERATORS:
+            continue
+        try:
+            start = _u16_to_cp(int(fact["start"]), starts)
+            end = _u16_to_cp(int(fact["end"]), starts)
+        except (KeyError, TypeError, ValueError):
+            continue
+        if not 0 <= start <= end <= len(src):
+            continue
+        mutated = _STRUCT_REPLACEMENT.get(op)
+        if op == "predicate-negate":
+            # 换掉谓词**体**：`(r) => r.ok` ⇒ `(r) => !((r) => r.ok)(r)`
+            arrow = str(fact.get("arrow") or "")
+            param = str(fact.get("param") or "")
+            if not arrow or not param:
+                continue
+            mutated = f"!({arrow})({param})"
+        if mutated is None:
+            continue
+        line = src.count("\n", 0, start) + 1
+        col = start - (src.rfind("\n", 0, start) + 1) + 1
+        out.append(Mutation(
+            path=path, line=line, col=col, offset=start, length=end - start,
+            original=src[start:end], mutated=mutated, kind=_STRUCT_KIND[op],
+            op=op, symbol=str(fact.get("symbol") or "") or None))
+        if len(out) >= limit:
+            break
+    return out
+
+
+# ---------------------------------------------------------------- 用例匹配
+
+
+def match_case(case: str, full_path: str) -> bool:
+    """用例名是否命中某个失败项（**严格**，只有两条规则）。
+
+    1. 归一化（折叠空白、去首尾）后完全相等；
+    2. 否则按 `>` 切段，取 `full_path` 的**末尾 k 段**（k = case 的段数）
+       与 case 逐段完全相等。
+
+    不做「去前缀」「包含」「去标点」—— 那些宽松规则会把别的用例的失败
+    算成命中（假杀死）。
+    """
+    a = " ".join(case.split())
+    b = " ".join(full_path.split())
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    a_parts = [p.strip() for p in a.split(">")]
+    b_parts = [p.strip() for p in b.split(">")]
+    if len(b_parts) < len(a_parts):
+        return False
+    return b_parts[-len(a_parts):] == a_parts
 
 
 # ---------------------------------------------------------------- 副本
@@ -287,14 +513,18 @@ def _run_tests(runner: list[str], cwd: Path, test_rels: list[str],
 def run_mutation_check(repo: Path, ws_rel: str,
                        source_rels: list[str], test_rels: list[str],
                        runner: list[str], max_mutants: int = 6,
-                       timeout: int = 120, classify=None) -> dict:
+                       timeout: int = 120, classify=None,
+                       case_name: str | None = None,
+                       scope_symbols: set[str] | None = None,
+                       ops: tuple[str, ...] | None = None,
+                       parse_check=None) -> dict:
     """对目标模块跑一轮变异检查。
 
     返回：
         attempted   试了几个变异点
         killed      多少个被测试发现（测试红了）
         timeouts    其中多少个是超时（也算发现了，但值得看一眼）
-        unknown     多少个**判不了**（环境没就绪 / 输出格式认不出）
+        unknown     多少个**判不了**（环境没就绪 / 输出格式认不出 / 变异后解析不过）
         survivors   杀不死的（位置 + 改了什么）
         notes       说明与阻碍
 
@@ -303,6 +533,12 @@ def run_mutation_check(repo: Path, ws_rel: str,
     `classify(code, out, name) -> (失败用例, 未实测原因)` 可选：
     给了就按三分口径判（真失败⇒杀死、环境没就绪/输出认不出⇒**判不了**），
     不给就退回"退出码非 0 = 杀死" —— 那会把环境错误算成"杀死了"，是假绿。
+    `ops` 要哪些算子（默认全部 L2 词法算子）；先按算子过滤**再**按文件
+    取上限 —— 否则比较运算符会把点名要的其他算子挤掉。
+    `scope_symbols` 只保留这些具名符号里的变异点。
+    `case_name` 只让**这个用例**的失败算数（钉的用例有没有区分力）。
+    `parse_check(path, text) -> bool` 判断变异后的代码还解析不解析得过；
+    解析不过 ⇒ 记"判不了"，**不进分母**（跑了也测不出东西）。
     """
     res: dict = {"attempted": 0, "killed": 0, "timeouts": 0, "unknown": 0,
                  "survivors": [], "notes": [], "scanned": 0}
@@ -316,6 +552,10 @@ def run_mutation_check(repo: Path, ws_rel: str,
         res["notes"].append("没认出测试命令")
         return res
 
+    wanted = set(ops) if ops is not None else set(L2_OPERATORS)
+    want_l2 = wanted & L2_OPERATORS
+    want_l3 = wanted & L3_OPERATORS
+
     candidates: list[tuple[str, Mutation]] = []
     # source_rels 是相对**工作区**的 ⇒ 得按工作区找，不是按仓库根
     base = repo if ws_rel in (".", "") else repo / ws_rel
@@ -324,11 +564,20 @@ def run_mutation_check(repo: Path, ws_rel: str,
         if not src.is_file():
             continue
         res["scanned"] += 1
-        for mut in find_mutations(src):
-            candidates.append((rel, mut))
+        if want_l2:
+            for mut in find_mutations(src):
+                if mut.op in want_l2:
+                    candidates.append((rel, mut))
+        if want_l3:
+            for mut in find_structural_mutations(src):
+                if mut.op in want_l3:
+                    candidates.append((rel, mut))
+    if scope_symbols:
+        candidates = [(rel, mut) for rel, mut in candidates
+                      if mut.symbol and mut.symbol in scope_symbols]
     if not candidates:
-        res["notes"].append("源码里没找到可注入的运算符变异点"
-                            "（没有 == / != / >= / <= 这类比较）")
+        res["notes"].append("源码里没找到可注入的变异点"
+                            f"（要的算子：{'、'.join(sorted(wanted))}）")
         return res
 
     per_file: Counter = Counter()
@@ -362,7 +611,18 @@ def run_mutation_check(repo: Path, ws_rel: str,
             if not target.is_file():
                 continue
             original = target.read_text(encoding="utf-8", errors="replace")
-            target.write_text(_apply(original, mut), encoding="utf-8")
+            mutated_text = _apply(original, mut)
+            if parse_check is not None:
+                try:
+                    parses = bool(parse_check(target, mutated_text))
+                except Exception:      # noqa: BLE001 —— 判卷器自己炸了也算判不了
+                    parses = False
+                if not parses:
+                    res["unknown"] += 1
+                    res["notes"].append(
+                        f"{rel}:{mut.line} 变异后解析不过 ⇒ 判不了")
+                    continue
+            target.write_text(mutated_text, encoding="utf-8")
             try:
                 code, out = _run_tests(runner, cwd, test_rels, env, timeout)
             finally:
@@ -381,8 +641,21 @@ def run_mutation_check(repo: Path, ws_rel: str,
                 #   环境没就绪  ⇒ **判不了**（既不算杀死，也不算存活）
                 #   输出认不出  ⇒ **判不了**（不能因为退出码非 0 就说"杀死了"）
                 fails, setup = classify(code, out, f"变异 {rel}:{mut.line}")
-                if fails:
+                if case_name is None:
+                    hit = bool(fails)
+                else:
+                    # 只认**钉的那个用例**的红：别的用例红了不算它有区分力
+                    hit = any(match_case(case_name, f) for f in fails)
+                if hit:
                     res["killed"] += 1
+                elif fails:
+                    # 别的用例红了、钉的用例没红 ⇒ 对这个用例来说没区分力
+                    res["survivors"].append({
+                        "where": f"{rel}:{mut.line}",
+                        "kind": mut.kind,
+                        "op": mut.op,
+                        "change": f"{mut.original} → {mut.mutated}",
+                    })
                 elif setup:
                     res["unknown"] += 1
                     res["notes"].append(setup[0] if setup else "判不了")
@@ -390,6 +663,7 @@ def run_mutation_check(repo: Path, ws_rel: str,
                     res["survivors"].append({
                         "where": f"{rel}:{mut.line}",
                         "kind": mut.kind,
+                        "op": mut.op,
                         "change": f"{mut.original} → {mut.mutated}",
                     })
                 continue
@@ -399,6 +673,7 @@ def run_mutation_check(repo: Path, ws_rel: str,
                 res["survivors"].append({
                     "where": f"{rel}:{mut.line}",
                     "kind": mut.kind,
+                    "op": mut.op,
                     "change": f"{mut.original} → {mut.mutated}",
                 })
     return res
@@ -414,7 +689,7 @@ def main(argv: list[str] | None = None) -> int:
     muts = find_mutations(src, args.limit)
     print(f"{src}: 找到 {len(muts)} 个变异点")
     for m in muts:
-        print(f"  {m.where()}  {m.kind}  {m.original!r} → {m.mutated!r}")
+        print(f"  {m.where()}  {m.op}  {m.kind}  {m.original!r} → {m.mutated!r}")
     return 0
 
 

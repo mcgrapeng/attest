@@ -170,10 +170,13 @@ def test_in_to_hasown_skips_for_in():
               "for (const x in obj) { use(x); }\n"
               "if (k in obj) { use(k); }\n")
     muts = find_mutations(p)
-    expect(all("for" not in m.original for m in muts),
+    in_muts = [m for m in muts if m.op == "in-to-hasown"]
+    expect(len(in_muts) == 1,
+           f"只找到一个 in 运算符（for...in 那个不算）实际 {len(in_muts)}")
+    expect(all(m.line == 2 for m in in_muts),
+           "找到的那个 in 在第 2 行（if (k in obj)），不是第 1 行的 for...in")
+    expect(all("for" not in m.original for m in in_muts),
            "for...in 不会被当成 in 运算符")
-    expect(any(m.op == "in-to-hasown" for m in muts),
-           "普通的 in 运算被找到")
 
 
 # --------------------------------------------------------------- L3 算子
@@ -297,10 +300,15 @@ def test_scope_symbols_limits_points():
             "test('a', () => { assert.strictEqual(a(1), true); });\n"
             "test('b', () => { assert.strictEqual(b(2), true); });\n"),
     })
-    res = run_check(root, ["src/a.js"], ["src/a.test.js"],
-                    ops=("cmp-negate",), scope_symbols={"b"})
-    expect(res["attempted"] >= 1, "挑到了变异点")
-    where = [s["where"] for s in res["survivors"]]
+    res_all = run_check(root, ["src/a.js"], ["src/a.test.js"],
+                        ops=("cmp-negate",))
+    res_b = run_check(root, ["src/a.js"], ["src/a.test.js"],
+                      ops=("cmp-negate",), scope_symbols={"b"})
+    expect(res_all["attempted"] == 2,
+           f"不限定作用域 ⇒ 两个点都试（实际 {res_all['attempted']}）")
+    expect(res_b["attempted"] == 1,
+           f"限定 b ⇒ 只试 b 里那个（实际 {res_b['attempted']}）")
+    where = [s["where"] for s in res_b["survivors"]]
     expect(all(w.endswith(":5") for w in where) if where else True,
            "只挑了 b 里的变异点（第 5 行），没碰 a（第 2 行）")
 

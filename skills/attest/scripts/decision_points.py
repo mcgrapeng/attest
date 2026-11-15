@@ -553,28 +553,68 @@ def _scan_repo(root: Path) -> tuple[list[tuple[Path, str]], bool]:
     return candidates, node_project
 
 
-def _global_ts_candidate() -> Path | None:
-    """全局 npm 里的 typescript（`npm root -g`）⇒ 绝对路径。"""
-    npm = shutil.which("npm")
-    if not npm:
-        return None
-    try:
-        proc = subprocess.run([npm, "root", "-g"], capture_output=True, text=True,
-                              encoding="utf-8", errors="replace", timeout=60)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    if proc.returncode != 0:
-        return None
-    lines = [ln.strip() for ln in proc.stdout.splitlines() if ln.strip()]
-    if not lines:
-        return None
-    cand = Path(lines[-1]) / "typescript"
-    if not (cand / "package.json").is_file():
-        return None
-    try:
-        return cand.resolve()
-    except OSError:
-        return None
+def _npm_global_roots() -> list[Path]:
+    """`npm root -g` ⇒ 全局包目录（每个能找到的 npm 各问一次）。"""
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    npm_bins: list[str] = []
+    which = shutil.which("npm")
+    if which:
+        npm_bins.append(which)
+    for extra in ("/opt/homebrew/bin/npm", "/usr/local/bin/npm", "/usr/bin/npm"):
+        if extra not in npm_bins and os.path.exists(extra):
+            npm_bins.append(extra)
+    for npm in npm_bins:
+        try:
+            proc = subprocess.run([npm, "root", "-g"], capture_output=True,
+                                  text=True, encoding="utf-8",
+                                  errors="replace", timeout=60)
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if proc.returncode != 0:
+            continue
+        for ln in proc.stdout.splitlines():
+            ln = ln.strip()
+            if not ln:
+                continue
+            try:
+                real = Path(ln).resolve()
+            except OSError:
+                continue
+            if real in seen:
+                continue
+            seen.add(real)
+            roots.append(real)
+    return roots
+
+
+def _global_ts_candidates() -> list[Path]:
+    """机器上全局装的 typescript ⇒ 绝对路径列表。
+
+    `npm root -g` 只反映**当前那个 npm**（fnm / nvm / Volta 各有自己的全局
+    目录）⇒ 只问它一个会「明明装了 typescript 却找不到」，整个 L3 路径
+    永远走不到。所以除了它，还看几个常见的全局前缀。
+    """
+    prefixes = [Path("/opt/homebrew/lib/node_modules"),
+                Path("/usr/local/lib/node_modules"),
+                Path("/usr/lib/node_modules"),
+                Path.home() / ".npm-global/lib/node_modules"]
+    env_prefix = os.environ.get("NPM_CONFIG_PREFIX")
+    if env_prefix:
+        prefixes.append(Path(env_prefix) / "lib/node_modules")
+    out: list[Path] = []
+    seen: set[Path] = set()
+    for d in _npm_global_roots() + prefixes:
+        cand = d / "typescript"
+        try:
+            real = cand.resolve()
+        except OSError:
+            continue
+        if real in seen or not (real / "package.json").is_file():
+            continue
+        seen.add(real)
+        out.append(real)
+    return out
 
 
 def _backend_label(pkg_dir: Path) -> str:
@@ -646,8 +686,7 @@ def detect_backend(root: Path, prefer: str = "auto") -> TsBackend | None:
     if node_project:
         # 全局 npm 的 typescript 只在目标真的是 Node/TS 项目时才看 ——
         # 空目录不该因为机器上装了全局 typescript 就「有后端」。
-        g = _global_ts_candidate()
-        if g is not None:
+        for g in _global_ts_candidates():
             candidates.append((g, "global-npm"))
     for kind in kinds:
         for pkg_dir, source in candidates:
@@ -714,6 +753,38 @@ def ast_analyze(root: Path, files: list[str],
                     backend_source=backend.source, note=label, points=points)
     an.assign_ids()
     return an
+
+
+def structural_points(root: Path, files: list[str],
+                      backend: TsBackend | None) -> list[dict]:
+    """L3 结构变异点（**事实**：算子 / 区间 / 符号，不含替换文本）。
+
+    替换文本由 Python 算 —— 这样替换规则不用装 TypeScript 也能单测。
+    后端不可用或跑不起来 ⇒ 空列表（调用方据此退回 L2）。
+    """
+    if backend is None:
+        return []
+    payload_files: list[dict[str, str]] = []
+    for rel in files:
+        p = Path(root) / rel
+        if p.is_file():
+            payload_files.append({"abs": str(p.resolve()), "rel": rel})
+    if not payload_files:
+        return []
+    payload = {"kind": backend.kind, "cwd": str(Path(root).resolve()),
+               "files": payload_files,
+               "nodePath": str(Path(backend.package_dir).parent)}
+    code, out, _err = _run_ts_script(_probe_script(), "mutate",
+                                     backend.package_dir, payload, Path(root))
+    data: dict | None = None
+    if out.strip():
+        try:
+            data = json.loads(out.strip().splitlines()[-1])
+        except ValueError:
+            data = None
+    if code != 0 or not data or not data.get("ok"):
+        return []
+    return [p for p in data.get("points", []) if isinstance(p, dict)]
 
 
 _TS_SCRIPT = r"""
@@ -846,6 +917,158 @@ function makeWords() {
            concurrency: set("concurrency"), drop: set("drop") };
 }
 
+function isFnExpr(SK, n) {
+  if (!n) return false;
+  return n.kind === SK.ArrowFunction || n.kind === SK.FunctionExpression;
+}
+
+// 锚点 = 最近的具名作用域（函数 / 类 / 方法）。
+function anchorFor(SK, node, anchor) {
+  if (node.kind === SK.FunctionDeclaration || node.kind === SK.ClassDeclaration ||
+      node.kind === SK.ClassExpression || node.kind === SK.MethodDeclaration ||
+      node.kind === SK.GetAccessor || node.kind === SK.SetAccessor ||
+      node.kind === SK.Constructor) {
+    return text(node.name) || anchor;
+  }
+  if (node.kind === SK.PropertyDeclaration ||
+      node.kind === SK.PropertyAssignment ||
+      node.kind === SK.PropertySignature) {
+    return isFnExpr(SK, node.initializer) ? (text(node.name) || anchor) : anchor;
+  }
+  if (node.kind === SK.VariableDeclaration) {
+    return isFnExpr(SK, node.initializer) ? (text(node.name) || anchor) : anchor;
+  }
+  return anchor;
+}
+
+// 谓词类方法：参数是「对每个元素成立的判断」⇒ 谓词取反有判定力。
+const PREDICATE_METHODS = new Set([
+  "filter", "find", "findIndex", "some", "every", "findLast", "findLastIndex",
+]);
+
+// catch 体清空前先做「声明-使用」检查：体里声明的名字在块外还被引用 ⇒
+// 清空会让那个名字变成未定义 ⇒ 变异测的是语法而不是行为，放弃该点。
+function catchBodySafe(backend, sf, block, startOf, endOf) {
+  const SK = backend.syntaxKind;
+  const bStart = startOf(block);
+  const bEnd = endOf(block);
+  const decls = new Map();
+  const collect = (n) => {
+    if (n.kind === SK.VariableDeclaration || n.kind === SK.FunctionDeclaration ||
+        n.kind === SK.ClassDeclaration) {
+      const nm = text(n.name);
+      if (nm) decls.set(nm, n.name);
+    }
+    backend.forEachChild(n, collect);
+  };
+  backend.forEachChild(block, collect);
+  if (!decls.size) return true;
+  let usedOutside = false;
+  const scan = (n) => {
+    if (usedOutside) return;
+    if (n.kind === SK.Identifier) {
+      const declNode = decls.get(text(n));
+      if (declNode && n !== declNode) {
+        const p = n.parent;
+        const isPropName = !!(p && p.kind === SK.PropertyAccessExpression &&
+                              p.name === n);
+        if (!isPropName) {
+          const pos = startOf(n);
+          if (pos < bStart || pos >= bEnd) { usedOutside = true; return; }
+        }
+      }
+    }
+    backend.forEachChild(n, scan);
+  };
+  backend.forEachChild(sf, scan);
+  return !usedOutside;
+}
+
+// 结构变异点：只报**事实**（算子 / 区间 / 符号 / 少量上下文），
+// 替换文本由 Python 算 —— 替换规则因此不用装 TypeScript 也能单测。
+function collectStructural(backend, files) {
+  const SK = backend.syntaxKind;
+  const out = [];
+  for (let i = 0; i < files.length; i++) {
+    const sf = backend.sourceFiles[i];
+    const rel = files[i].rel;
+    const src = String(sf.text || "");
+    const startOf = (n) => {
+      try { const p = n.getStart(sf); if (typeof p === "number") return p; } catch (e) {}
+      try { const p = n.getStart(); if (typeof p === "number") return p; } catch (e) {}
+      return typeof n.pos === "number" ? n.pos : 0;
+    };
+    const endOf = (n) => {
+      try { const p = n.getEnd(); if (typeof p === "number") return p; } catch (e) {}
+      return typeof n.end === "number" ? n.end : 0;
+    };
+    const slice = (a, b) => src.slice(a, b);
+    const lineOf = (n) => {
+      const pos = startOf(n);
+      try { return sf.getLineAndCharacterOfPosition(pos).line + 1; } catch (e) { return 0; }
+    };
+    const emit = (op, start, end, node, anchor, extra) => {
+      const rec = { op: op, start: start, end: end, line: lineOf(node),
+                    symbol: anchor, file: rel };
+      if (extra) for (const k of Object.keys(extra)) rec[k] = extra[k];
+      out.push(rec);
+    };
+
+    const visit = (node, anchor) => {
+      const k = node.kind;
+      if (k === SK.ThrowStatement) {
+        const s = startOf(node);
+        if (slice(s, s + 5) === "throw") emit("drop-throw", s, s + 5, node, anchor);
+      } else if (k === SK.CallExpression || k === SK.NewExpression) {
+        const parent = node.parent;
+        const calleeNode = node.expression;
+        const calleeKind = calleeNode ? calleeNode.kind : -1;
+        const inMember = !!(parent && parent.kind === SK.PropertyAccessExpression &&
+                            parent.expression === node);
+        const inTag = !!(parent && parent.kind === SK.TaggedTemplateExpression &&
+                         parent.tag === node);
+        const inCallee = !!(parent && parent.kind === SK.CallExpression &&
+                            parent.expression === node);
+        const isSuper = calleeKind === SK.SuperKeyword;
+        const isImport = calleeKind === SK.ImportKeyword;
+        if (!inMember && !inTag && !inCallee && !isSuper && !isImport) {
+          emit("drop-call", startOf(node), endOf(node), node, anchor);
+        }
+        if (node.arguments && node.arguments.length === 1 && calleeNode &&
+            calleeNode.kind === SK.PropertyAccessExpression) {
+          const mName = text(calleeNode.name);
+          const arg = mName && PREDICATE_METHODS.has(mName) ? node.arguments[0] : null;
+          if (arg && arg.kind === SK.ArrowFunction) {
+            const params = arg.parameters || [];
+            const p = params.length === 1 ? params[0] : null;
+            const pname = p && p.name ? text(p.name) : null;
+            const aStart = startOf(arg);
+            const aText = slice(aStart, endOf(arg));
+            const body = arg.body;
+            const isAsync = slice(aStart, aStart + 6).indexOf("async") === 0;
+            const hasComment = aText.indexOf("//") >= 0 || aText.indexOf("/*") >= 0;
+            if (pname && body && body.kind !== SK.Block && !isAsync &&
+                !hasComment && aText.indexOf(",") < 0) {
+              emit("predicate-negate", startOf(body), endOf(body), node, anchor,
+                   { arrow: aText, param: pname });
+            }
+          }
+        }
+      } else if (k === SK.CatchClause) {
+        const block = node.block;
+        if (block && catchBodySafe(backend, sf, block, startOf, endOf)) {
+          emit("catch-drop", startOf(block), endOf(block), node, anchor);
+        }
+      }
+      const child = anchorFor(SK, node, anchor);
+      backend.forEachChild(node, (n) => visit(n, child));
+    };
+
+    visit(sf, TOPLEVEL);
+  }
+  return out;
+}
+
 function collectImports(backend, sf) {
   const SK = backend.syntaxKind;
   const names = new Set();
@@ -891,10 +1114,6 @@ function analyzeFiles(backend, files) {
                  line: lineOf(node), detail: String(detail || "").slice(0, 80) });
     };
 
-    const isFnExpr = (n) => {
-      if (!n) return false;
-      return n.kind === SK.ArrowFunction || n.kind === SK.FunctionExpression;
-    };
     const opText = (n) => {
       const t = n.operatorToken;
       return t ? (backend.opMap[t.kind] || "") : "";
@@ -915,25 +1134,7 @@ function analyzeFiles(backend, files) {
       }
       return { name: null, obj: null };
     };
-    const anchorFor = (node, anchor) => {
-      if (node.kind === SK.FunctionDeclaration || node.kind === SK.ClassDeclaration ||
-          node.kind === SK.ClassExpression || node.kind === SK.MethodDeclaration ||
-          node.kind === SK.GetAccessor || node.kind === SK.SetAccessor ||
-          node.kind === SK.Constructor) {
-        return text(node.name) || anchor;
-      }
-      if (node.kind === SK.PropertyDeclaration ||
-          node.kind === SK.PropertyAssignment ||
-          node.kind === SK.PropertySignature) {
-        return isFnExpr(node.initializer) ? (text(node.name) || anchor) : anchor;
-      }
-      if (node.kind === SK.VariableDeclaration) {
-        return isFnExpr(node.initializer) ? (text(node.name) || anchor) : anchor;
-      }
-      return anchor;
-    };
-
-    const visit = (node, anchor) => {
+        const visit = (node, anchor) => {
       const k = node.kind;
       if (k === SK.IfStatement) {
         emit("branch", node, "if", anchor);
@@ -984,7 +1185,7 @@ function analyzeFiles(backend, files) {
           if (imported.has(c.name)) emit("boundary-io", node, shown, anchor);
         }
       }
-      const child = anchorFor(node, anchor);
+      const child = anchorFor(SK, node, anchor);
       backend.forEachChild(node, (n) => visit(n, child));
     };
 
@@ -1033,6 +1234,20 @@ if (mode === "probe") {
       ? openB1(payload.files)
       : openB2(payload.files, payload.cwd);
     const points = analyzeFiles(backend, payload.files);
+    backend.close();
+    process.stdout.write(JSON.stringify({ ok: true, points: points }) + "\n");
+    process.exit(0);
+  } catch (e) {
+    process.stdout.write(JSON.stringify({
+      ok: false, error: String((e && e.message) || e) }) + "\n");
+    process.exit(1);
+  }
+} else if (mode === "mutate") {
+  try {
+    const backend = payload.kind === "B1"
+      ? openB1(payload.files)
+      : openB2(payload.files, payload.cwd);
+    const points = collectStructural(backend, payload.files);
     backend.close();
     process.stdout.write(JSON.stringify({ ok: true, points: points }) + "\n");
     process.exit(0);

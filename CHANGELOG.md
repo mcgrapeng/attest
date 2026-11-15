@@ -23,8 +23,14 @@
 事实记录），只在开头加命名说明。
 
 仓库的 **description 也改成英文**（与英文默认的 README 对齐 —— 搜索结果里中英混排会
-削弱可信度），沿用同一套四段结构：
-`What: delivery-readiness evidence | Does: pins test plans to real cases, runs your own gates | Solves: 'looks green to me' | Use when: shipping`
+削弱可信度）。写法不套批量工具的四段式，而是参照头部开源项目的惯例（ruff / uv / fd /
+pre-commit / pytest：单句、点明品类与产出、不用暗示「通过 / 不通过」的词）：
+
+> An evidence list for delivery readiness, built from your repo's own tests,
+> coverage gates and reconciliation scripts.
+
+刻意避开 checker / verifier / validator 这类词 —— 它们都承诺一个「通过 / 不通过」的
+判定，而这个工具只给证据、不做批准。
 
 ### 搬运
 

@@ -63,7 +63,7 @@ OCR 报出 5 处真缺陷，每处都配了回归钉：
 | G2 | 人工计划 ↔ 机器矩阵双向对齐，缺口可见 | 机器有/人工无 ⇒ 报红；人工有/机器无 ⇒ 保留待人签 |
 | G3 | 逐条不变式的「钉」做区分力自证 | 注入缺陷后，钉住的那**一个用例**变红 ⇒ 该钉有区分力 |
 | G4 | 变异算子扩展到结构性缺陷 | 算子集从 6 个比较运算符扩到 7 类（含语句删除、`in→hasOwn`、谓词取反） |
-| G5 | 黄金缺陷集作验收基准 | 5 个 fixture 全部 5/5 独立报出，误报 0 |
+| G5 | 缺陷集 fixture 作验收基准 | 5 个 fixture 全部 5/5 独立报出，误报 0 |
 
 ### 1.2 非目标（明确不做）
 
@@ -141,8 +141,8 @@ OCR 报出 5 处真缺陷，每处都配了回归钉：
 
 | 级别 | 手段 | 适用 | 精度 | 判据降级 |
 | --- | --- | --- | --- | --- |
-| **L3** | AST | Python 源码 ⇒ Python 自带 `ast` 模块（标准库）<br>TS/JS 源码 ⇒ 目标仓库 `node_modules/typescript` 存在时，生成临时 `.mjs` 用 `ts.createSourceFile` 输出 JSON | 精确 | 正常判定 |
-| **L2** | 词法扫描（正则 + 轻量状态机，跳过注释与字符串字面量） | 无 TS 编译器的 TS/JS 仓库 | 有误报漏报 | **降级 warn**，标注「词法推导，可能有误报」 |
+| **L3** | AST | Python 源码 ⇒ Python 自带 `ast` 模块（标准库）<br>TS/JS 源码 ⇒ 目标仓库里**存在可用的 TS AST 后端**（见 §3.3） | 精确 | 正常判定 |
+| **L2** | 词法扫描（正则 + 轻量状态机，跳过注释与字符串字面量） | 找不到可用 TS AST 后端 | 有误报漏报 | **降级 warn**，标注「词法推导，可能有误报」 |
 | **L1** | 不支持 | Rust / Go / 其他 | — | **skipped** + 说明「当前只实现了 TS/JS/Python」 |
 
 ### 3.3 L3 的 TS 路径不违反纯标准库约束
@@ -150,21 +150,62 @@ OCR 报出 5 处真缺陷，每处都配了回归钉：
 attest **不引入**第三方 Python 依赖，而是**驱动目标仓库自己的工具链** ——
 与它现在跑仓库自己的 test 命令、仓库自己的覆盖率闸是同一套路。
 
-实现要点：
+#### 3.3.1 已核事实（2026-11-15，lumen monorepo 实测）
 
-1. 探测：仓库根存在 `node_modules/typescript`（或 `package.json` 的 `dependencies`/`devDependencies`
-   里有 `typescript`）。
-2. 生成：把一段 `.mjs` 写到临时目录（**不写进用户仓库**），内容是
-   `require('<repo>/node_modules/typescript')` → `ts.createSourceFile` → 遍历 AST → 输出 DP 的 JSON。
-3. 执行：`node <tmp>.mjs <目标文件...>`，`cwd` = 仓库根。
-4. 解析：读 stdout 的 JSON。
+**不能假定 `require('typescript')` 暴露 `createSourceFile`。** 实测：
 
-**注意**：`ts.createSourceFile` 只需要 `typescript` 包本身，不需要 `tsconfig`、不需要类型检查 ⇒ 快。
-解析失败（语法错误等）⇒ **退回 L2**，并在报告里说明。
+| 位置 | typescript 版本 | `require('typescript')` 暴露什么 |
+| --- | --- | --- |
+| `service/`、`rag/`、`users/`、`service-api/`、`workflow-engine/` | **7.0.2** | 只有 `version` / `versionMajorMinor` —— **没有 `createSourceFile`** |
+| `frontend/` | 5.9.2 | 经典 JS API（含 `createSourceFile`） |
+
+TypeScript 7 是 Go 原生版，npm 包里只带 `tsc` 二进制（`lib/` 下只有 `tsc.js` / `version.cjs`）。
+但它**另带一套 AST 导出**：
+
+- `typescript/unstable/ast` ⇒ 全套节点判定（`isIfStatement` / `isBinaryExpression` / `isCatchClause` /
+  `isThrowStatement` / `isAwaitExpression` / `isCallExpression` / `isSwitchStatement` /
+  `isConditionalExpression` …）+ `SyntaxKind` + `visitNode` / `visitEachChild` / `forEachChildOfJSDocParameterTag`；
+- `typescript/unstable/sync` ⇒ `API` / `Snapshot` / `Project` / `Program`，
+  路径是 `new API()` → `api.updateSnapshot()` → `snapshot.getDefaultProjectForFile(file)` →
+  `project.program.getSourceFile(file)` → 得到可 `visitNode` 的 `SourceFile`。
+
+**注意 `unstable/` 是 unstable**：API 形状会随版本变 ⇒ 探测必须**运行时验能力**，不能按版本号写死。
+
+#### 3.3.2 后端探测链（必须按顺序试，第一个「能真解析」的胜出）
+
+| 序 | 后端 | 探测方式 | 备注 |
+| --- | --- | --- | --- |
+| B1 | TS 5.x 经典 API | `require(ts).createSourceFile` 存在 | 最省事，**先找仓库里任何一份 5.x**（lumen 的 `frontend/` 就是 5.9.2） |
+| B2 | TS 7 项目 API | `typescript/unstable/ast` + `unstable/sync` 的 `API`/`Snapshot`/`Program` | 需要项目配置，比 B1 重；**可行性由实现者验证**，本设计只要求「能解析就算可用」 |
+| B3 | L2 词法回退 | 总是可用 | 降级 warn |
+
+**探测范围＝整个仓库，不只是模块所在的工作区。**
+理由（实测）：lumen 的 `service/`（目标模块所在）只有 TS 7，而 `frontend/` 有 TS 5.9.2 ——
+只看模块所在工作区会误判「没有 AST 后端」。
+
+**探测必须验能力，不能验版本**：
+拿一段合成代码（`if (x >= 1) { throw new Error('e') }`）真跑一遍后端，
+能解析出节点才算可用。`version` 字段不可靠（7.0.2 只暴露 version，没有 API）。
+
+#### 3.3.3 实现要点
+
+1. **探测**：在仓库内找 `node_modules/typescript`（含 pnpm 的 `.pnpm/` 布局 ⇒ 要顺着软链找），
+   以及各工作区的 `package.json` 里声明的 `typescript`。逐个试 §3.3.2 的后端。
+2. **生成**：把一段 `.mjs` 写到**临时目录**（**不写进用户仓库**），内容是
+   加载后端 → 解析目标文件 → 遍历 AST → 输出 DP 的 JSON。
+3. **执行**：`node <tmp>.mjs <目标文件...>`，`cwd` = 仓库根。
+4. **解析**：读 stdout 的 JSON。
+5. **降级**：任何一步失败（没找到后端 / 后端解析不了该文件 / 语法错误）⇒ **退回 L2**，
+   并在报告里写明降级原因与用了哪级。
+
+**性能**：B1 的 `createSourceFile` 不需要 `tsconfig`、不需要类型检查 ⇒ 快。
+B2 需要项目配置 ⇒ 可能慢；实测后若太慢，**先只解析目标模块的文件**，不要全仓扫。
 
 ### 3.4 DP 的 AST 提取规则（TS 与 Python 各一张表）
 
-必须逐条实现、可单测。TS 侧（`ts.SyntaxKind`）：
+必须逐条实现、可单测。TS 侧用**后端无关**的描述（不同后端的节点类型名不同：
+5.x 是 `ts.SyntaxKind.IfStatement`，7.x 是 `isIfStatement(...)` 谓词）——
+**规则表用「节点概念」写，实现时映射到各自后端的判定函数**。
 
 | kind | AST 节点 |
 | --- | --- |
@@ -463,40 +504,79 @@ measured_pass / static_signals / not_judged / exit_rule。
 
 ---
 
-## 8. 黄金缺陷集（验收基准）
+## 8. 缺陷集 fixture（验收基准）
 
-### 8.1 位置与形态
+### 8.1 复用现有 fixture 机制，不另造一套
 
-`fixtures/golden/<name>/` —— 每个是一个**最小可复现**的 TS 仓（`package.json` + `src/`），
-带 `README.md` 说明：复现什么缺陷形态、期望 attest 报出哪条发现、为什么。
+**事实校准**（已核 `fixtures/`）：仓库已有 5 个「黄金 fixture」（`ts-colocated` / `python-repo` /
+`rust-repo` / `english-reconciler` / `no-tests`），机制是：
 
-### 8.2 五个 fixture
+- 每个 fixture 是一个**自包含小仓库**（`package.json` 或 `pyproject.toml` + 源码 + 测试）+ `README.md`；
+- `fixtures/run_fixtures.sh` 的 `check()` 把 fixture 复制到临时目录再跑，
+  断言用一套**钉死的文本语言**：`+文本`（必须出现）/ `-文本`（必须不出现）/ `?A;;B`（至少一个）；
+- 退出码：`0` 全部命中 / `1` 有不符 / `3` 有环境缺失未判定；
+- CI 步骤「跑黄金 fixture（5 个期望判定）」调的就是它。
 
-| fixture | 复现的缺陷形态 | 期望报出 |
+**因此本设计不新增 `fixtures/golden/`、不新增 `scripts/test_golden_defects.py`** ——
+新缺陷集就是现有机制的**第 6–10 个 fixture**，断言继续用 `+`/`-`/`?` 语言。
+
+需要扩的是 `check()`：现在它固定跑 `python3 readiness.py <module> --repo <dest>`，**不带 `--plan`**。
+缺陷集 fixture 必须带计划文件 ⇒ `check()` 要多接一个「额外参数」位（放在模块路径之后或用环境变量，
+具体形式实现者定），并把 fixture 里的计划文件路径传进去。
+
+**命名**：现有 README 把它们叫「黄金 fixture」。新的一批叫**缺陷集 fixture**（`fixtures/<name>/`），
+`fixtures/README.md` 的期望判定表加一节「缺陷集 fixture」，避免两套叫法混。
+
+### 8.2 五个缺陷集 fixture
+
+每个 fixture 除了小仓库，还要带一份**计划文件**（`plan.md`），内容是「有不变式清单、但清单漏了
+对应条目」或「钉指向的用例不碰这段逻辑」——这样才能触发新判据。
+
+| fixture | 复现的缺陷形态 | 期望报出（断言写法） |
 | --- | --- | --- |
-| `silent-drop` | 适配器 `filter` 掉缺 id/正文的行，不报错 | `drop` 类高危 DP 未归属 |
-| `shared-client` | `store.close()` 关掉进程内共享 client | `resource` 类：关闭归属冲突 |
-| `stale-cache` | 关闭后未清缓存，缓存握死连接 | `resource` 类：释放顺序缺失 |
-| `prototype-class` | `x in MAP` 走原型链放行非法值 | `in-to-hasown` 变异存活 ⇒ 对应钉无区分力 |
-| `mixed-subject` | 第一人称豁免吞掉整句（含第三方部分） | `branch` 类：混合路径未单列 |
+| `defect-silent-drop` | 适配器 `filter` 掉缺 id/正文的行，不报错 | `+` 出现 `drop` 类高危缺口；`-` 不出现「结论：达到交付条件」 |
+| `defect-shared-client` | `store.close()` 关掉进程内共享 client | `+` 出现 `resource` 类缺口 |
+| `defect-stale-cache` | 关闭后未清缓存，缓存握死连接 | `+` 出现 `resource` 类缺口 |
+| `defect-prototype-class` | `x in MAP` 走原型链放行非法值 | `+` 出现 `in-to-hasown` 变异存活 ⇒ 该钉无区分力 |
+| `defect-mixed-subject` | 第一人称豁免吞掉整句（含第三方部分） | `+` 出现 `branch` 类覆盖缺口 |
 
-### 8.3 验收断言（工具自身的回归测试）
+「误报为 0」的断言形态：在每个 fixture 的期望里加 `-` 行，把**该 fixture 不该有的其他类别**钉死
+（例如 `defect-silent-drop` 里加 `-resource`、`-branch`）。这正是现有 `-文本` 机制能干的事。
 
-新文件 `scripts/test_golden_defects.py`：
+### 8.3 验收断言
 
-1. 5 个 fixture **全部 5/5** 报出期望发现（精确匹配 DP ID 或类别）；
-2. **误报为 0** —— fixture 上不得报出该 fixture 之外的类别；
-3. 每条发现必须带 `file:line`（可复现）；
-4. 判定点推导级别在报告里标明（L3 / L2）。
+1. 5 个缺陷集 fixture **全部 5/5** 命中；
+2. **误报为 0** —— 用 `-` 行钉死不该出现的类别；
+3. 每条发现必须带 `file:line` ⇒ 断言里用 `+src/x.ts:128:drop` 这类稳定字符串
+   （现有 `fixtures/README.md` 已写明「不用行号做断言主键」的规矩 —— 那是说**不要用报告格式里的行号**；
+   DP ID 里带行号是**内容**不是**格式**，改动 DP 就该让 fixture 变红，这是有意的）；
+4. 判定点推导级别在报告里标明（L3 / L2）⇒ 断言一条稳定串。
 
 **这就是「attest 能证明自己能失败」的完整版**：现在的 `--self-check` 只能证明静态判据能红，
-新 fixture 能证明**新的实测判据能红**（`pin-discriminating` 在 `prototype-class` 上必须报 fail）。
+新 fixture 能证明**新的实测判据能红**（`pin-discriminating` 在 `defect-prototype-class` 上必须报 fail）。
 
-### 8.4 与真实模块的关系
+### 8.4 AST 后端的 fixture 覆盖（不许留「没人测的测具」）
 
-黄金集是**工具的回归基准**（小、快、确定）。
+现有 fixture **都没有 `node_modules/typescript`**（`ts-colocated/package.json` 无依赖，靠 node 22 直接跑 `.ts`）
+⇒ 缺陷集 fixture 默认会走 **L2**。
+若 L3 路径只在 CI 之外被跑过，就等于**没人测测具** —— 与本设计的立意相反。
+
+处置（两条都要）：
+
+1. **CI 里装一份 TS 5.x**（`npm i -g typescript@5`）—— 与 CI 现有的 `pip install pytest pytest-cov` 对称，
+   **只影响 fixture 车道，不影响 attest 运行时**（attest 本身仍然不联网、不加依赖）。
+   探测时也要看**全局安装**（`npm root -g` / `NODE_PATH`），不能只看仓库内的 `node_modules`。
+2. **断言要后端无关**：缺陷集 fixture 的期望 DP 只用**两种后端都会产出**的那几条
+   （fixture 代码故意写简单：`filter` / `close` / `in` / 一条正则，都是词法层能看见的）。
+   再加一条**交叉一致性测试**（在 `scripts/test_decision_points.py` 里）：
+   当 TS 后端可用时，对 fixture 源码断言 L2 与 L3 产出的 DP 集合**一致** ——
+   不一致就是两个后端之一有 bug，当场抓住。
+
+### 8.5 与真实模块的关系
+
+缺陷集是**工具的回归基准**（小、快、确定）。
 真实模块 `service/src/agent-memory` 是**人工核对项**：改造完成后，在该模块上跑一次，
-人工核对新判据是否报出与 OCR 那 5 处对应���缺口。这一步不自动化进 CI（依赖真实 PG/Milvus）。
+人工核对新判据是否报出与 OCR 那 5 处对应的缺口。这一步不自动化进 CI（依赖真实 PG/Milvus）。
 
 ---
 
@@ -507,7 +587,7 @@ measured_pass / static_signals / not_judged / exit_rule。
 | 分档 | 只有 `error-path`/`resource`/`drop`/`state` 四类高危 DP 的缺口才逐条报红；其余只报汇总 |
 | 豁免 | 计划里可写豁免 + 理由；豁免逐条列进报告供复核 |
 | 可复现 | 每条发现必须带 `file:line` + 类别 + 一句「怎么复现」 |
-| 误报硬断言 | 黄金 fixture 上误报必须为 0 |
+| 误报硬断言 | 缺陷集 fixture 上用 `-` 行钉死不该出现的类别 |
 | 不许假绿 | DP 推导不可用 ⇒ 降级 warn 并说明；Rust/Go ⇒ skipped；都**不报 pass** |
 | 不重复劳动 | `new` 自动填 DP 列；`upgrade` 把旧表转成新表 |
 
@@ -519,10 +599,10 @@ measured_pass / static_signals / not_judged / exit_rule。
 | --- | --- | --- | --- |
 | P1 | DP 推导引擎 | 新增 `scripts/decision_points.py` | TS/Python 各能枚举 8 类 DP；L2 回退可用；单测全绿 |
 | P2 | 计划格式升级 | 改 `scripts/req_plan.py` | `new` 填 DP 列；`check` 校验归属/豁免/旧格式识别；`upgrade` 子命令 |
-| P3 | 变异算子扩展 + 单用例运行 | 改 `scripts/mutation_check.py` | 7 类算子各能被自证（能杀死已知坏实现）；`--case` 可用 |
+| P3 | 变异算子扩展 + 单用例判定 | 改 `scripts/mutation_check.py` | 7 类算子各能被自证（能杀死已知坏实现）；`run_mutation_check(..., case_name=)` 可用 |
 | P4 | 区分力自证 | 新增 `scripts/discriminate.py` | 钉→符号→变异点→副本→单用例→结论全链通 |
 | P5 | 判据接入与输出 | 改 `scripts/readiness.py` | 3 条新判据 + 「判定点覆盖」节 + JSON 三段 + 条件式阻塞 + `--lenient` |
-| P6 | 黄金缺陷集 | 新增 `fixtures/golden/*`、`scripts/test_golden_defects.py` | 5/5 报出，误报 0 |
+| P6 | 缺陷集 fixture | 新增 `fixtures/defect-*/`（含 `plan.md`）；改 `fixtures/run_fixtures.sh` 的 `check()` 以接额外参数；改 `fixtures/README.md` | 5/5 报出，误报 0；`run_fixtures.sh` 退出码 0 |
 | P7 | 文档 | 改 `SKILL.md`、`README.md`、`CHANGELOG.md` | 判据表 14+3=17 条与代码一致；新节写入 SKILL.md |
 
 **依赖关系**：P1 → P2/P3 → P4 → P5 → P6 → P7。
@@ -536,7 +616,7 @@ measured_pass / static_signals / not_judged / exit_rule。
 | R1 | DP 推导有误报（L2 词法回退时尤甚） | L3 精确；L2 降级 warn；词表可扩充；fixture 上误报硬断言 |
 | R2 | DPSP 成本高（反复跑测试） | 自适应预算 + 抽样比例明写；`--discriminating` 三档；先整文件跑、只判单个用例结果 |
 | R3 | 「钉是橡皮章」被判红，但修起来要改测试 | 这正是要的效果 —— 报的是「这个钉杀不死缺陷」，修法是补断言 |
-| R4 | 目标仓库没有 TS 编译器 ⇒ 退回 L2 ⇒ 精度降 | 报告显式标注级别与降级原因；L2 下新判据不硬判 |
+| R4 | 目标仓库没有可用的 TS AST 后端（TS 7 且无 5.x 副本）⇒ 退回 L2 ⇒ 精度降 | 报告显式标注级别与降级原因；L2 下新判据不硬判；**探测范围是整个仓库**（lumen 的 `frontend/` 就有 5.9.2） |
 | R5 | 计划变长（DP 表可能有上百行）⇒ 维护成本上升 | `new` 自动生成；只报未归属的；豁免机制；DP 表按类别折叠展示 |
 | R6 | Rust/Go 不支持 ⇒ 用户以为「没报＝没问题」 | 该判据 `skipped` + 明说；输出契约里写明「本工具不判定」新增项 |
 | R7 | 判据越多 ⇒ Goodhart 风险越高 | 新判据全部条件式阻塞；报告永远列出未判/抽样部分；不产出「达到交付条件」类措辞 |
@@ -545,14 +625,14 @@ measured_pass / static_signals / not_judged / exit_rule。
 
 ## 12. 验收标准（Definition of Done）
 
-1. **黄金缺陷集**：5 个 fixture 5/5 独立报出，误报 0（`scripts/test_golden_defects.py` 全绿）
+1. **缺陷集 fixture**：5 个新 fixture 5/5 独立报出，误报 0（`bash fixtures/run_fixtures.sh` 全命中）
 2. **实测判据能红**：`--self-check` 现在能证明**实测**类判据翻红（标尺 3 的缺口关闭）
 3. **真实模块人工核对**：在 `service/src/agent-memory` 上，新判据报出的缺口与 OCR 那 5 处对应
 4. **无回归**：现有全部测试脚本（`scripts/test_*.py`）与 14 条既有判据行为不变
 5. **约束不被破坏**：无新增第三方 Python 依赖；不联网；不写用户仓库（除 `scaffold`/`upgrade`
    的既有受控写入范围）
 6. **文档一致**：`SKILL.md` 判据表 17 条与代码一致；`README.md` 与 `CHANGELOG.md` 同步
-7. **fixture 退出码**：`fixtures/run_fixtures.sh` 5 个既有 fixture + 5 个黄金 fixture 全命中
+7. **fixture 退出码**：`fixtures/run_fixtures.sh` 5 个既有 + 5 个缺陷集 fixture 全命中（10 个）
 
 ---
 

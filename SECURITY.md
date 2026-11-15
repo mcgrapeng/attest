@@ -53,6 +53,28 @@ scrutinising:
 - Vulnerabilities in the target repository's dependencies. Report those to the
   dependency's own maintainers.
 
+## What scanners flag, and why
+
+`attest` is flagged by automated skill scanners, and it will keep being
+flagged. The reason is the tool's purpose: it runs the **target repository's**
+own scripts, so a scanner sees subprocess execution and file writes and says so.
+
+The three patterns a scanner will find, and what is actually behind them:
+
+| Flagged | What it really is |
+| --- | --- |
+| Subprocess execution | `subprocess.run([...])` with an **argument list**, never `shell=True`, never a string command. The argv comes from the target repo's own `package.json` / `Makefile` / `tox.ini` |
+| File writes | `req_plan.py scaffold` writes test files, and every write is confined to `--out-dir` after path normalisation. `--self-check` and `--mutation-check` write only into a temporary copy |
+| Environment access | The child process gets an **allowlisted** environment only (see above). The whole-`os.environ` inheritance check is a CI gate, not a convention |
+
+`skills.sh` shows the aggregated verdict of several scanners for this skill,
+and it is `critical`. That verdict comes from the pattern above, not from a
+hidden hole: there is no `shell=True`, no `eval`, no `exec`, no outbound
+network call and no credential read anywhere in `skills/attest/scripts/`.
+
+If a scanner reports something that is **not** on this list, that is a real
+finding — please report it.
+
 ## Scope of the code
 
 The skill lives in `skills/attest/`. The scripts under

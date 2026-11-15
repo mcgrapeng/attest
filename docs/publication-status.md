@@ -1,6 +1,6 @@
 # 发布状态：能不能发，还差什么
 
-日期：2026-11-14
+日期：2026-11-15
 仓库：`<repo>`（分支 main）
 本文是**唯一的现状结论**。前面的 `oss-release-review.md` / `oss-release-review-v2.md` /
 `testing-philosophy-review.md` / `testing-philosophy-review-v2.md` 是历史评测记录，
@@ -19,11 +19,11 @@
 
 | 闸门 | 命令 | 结果 |
 | --- | --- | --- |
-| 回归套件 | `for t in scripts/test_*.py; do python3 "$t"; done` | 25/25 全绿 |
+| 回归套件 | `for t in skills/attest/scripts/test_*.py; do python3 "$t"; done` | 25/25 全绿 |
 | 黄金 fixture | `bash fixtures/run_fixtures.sh` | 5/5 命中，0 不符，0 未判定 |
 | 行为 eval | `python3 evals/run_evals.py` | 6/6 通过 |
 | 安全扫描 | `bash .github/check-skillspector.sh` | 47 条 HIGH/CRITICAL，未放行 **0** 条 |
-| 环境收口 | `python3 scripts/check_env_inheritance.py` | 生产代码没有整份继承 `os.environ` |
+| 环境收口 | `python3 skills/attest/scripts/check_env_inheritance.py` | 生产代码没有整份继承 `os.environ` |
 | 反向验证 | `readiness.py src --repo fixtures/ts-colocated --self-check` | 结论：反向验证通过 |
 | 打包 | `python3 package.py` | 23 个文件，214 KB 的 `.skill` |
 
@@ -37,10 +37,10 @@ CI（`.github/workflows/ci.yml`）四个 job：字节码卫生 / 回归+fixture+
    报「✓ 测试全绿」、退出码 0。**一个红着的套件拿到绿色裁决。**
    现在按「runner 退出码 + 输出」一起判：真失败⇒阻塞、环境没就绪⇒未实测、
    **输出格式认不出⇒未实测（绝不判绿）**。
-   回归：`scripts/test_readiness_runners.py`（六种 runner 形态）。
+   回归：`skills/attest/scripts/test_readiness_runners.py`（六种 runner 形态）。
 2. **`scaffold` 的路径穿越与代码注入**。钉里的 `..` 能把文件写到仓库外；用例名原样
    插进 `it('...')` 能变成可执行代码。都封了（写盘面 + 读取面）。
-   回归：`scripts/test_req_plan_scaffold_safety.py`（66 条）。
+   回归：`skills/attest/scripts/test_req_plan_scaffold_safety.py`（66 条）。
 3. **输出契约从裁决改成证据清单**。原来输出"结论：达到交付条件 / 不可交付"——那是
    裁决措辞，而工具掌握的只是 14 条机械判据的实测状态。现在：证据分层（已实测 /
    静态信号 / 未实测）+ 三档结论（阻塞项 / 待人工确认 / 无信号）+ 固定的
@@ -82,21 +82,34 @@ itest 车道的**全量**支持（Makefile/tox 兜底已接，但只覆盖脚本
 向量集合与**线上真实租户**是否一致不判（现在判的是代码侧自洽；要判线上得项目自己出
 一个「集合 schema 快照」脚本让工具去跑）。
 
-## 发布前要做的三件事（不是代码）
+## 发布后接着要做的（不是代码）
 
-1. **建 GitHub 远端**（当前没有）。要定：仓库名、公开还是私有、要不要先打 v0.1.0 tag、
-   作者联系方式。
-2. **首屏定位**用上面那句，不要用"判断能不能交付"。
-3. **README 的仍开放表与 CHANGELOG 对齐**（已对齐，发布前再核一遍）。
+远端已建（`github.com/mcgrapeng/attest`，公开仓，MIT），仓库 description 已按头部开源
+项目的写法改成英文，README 已英中双份。剩下的：
+
+1. **打 `v0.1.0` tag 并发 Release** —— 之后 `mcgrapeng/attest@v0.1.0` 才是别人能钉的
+   东西（marketplace 条目与 GitHub Action 都要引版本号）。
+2. **提交到官方 marketplace**：Anthropic 官方 skills 仓库（模板要求
+   `skills/<name>/SKILL.md`，现布局已符合）、OpenCode 与 Codex 的插件市场。
+3. **首屏定位**用上面那句，不要用"判断能不能交付"。
+
+## 分发现状（2026-11-15 实测）
+
+| 渠道 | 状态 |
+| --- | --- |
+| `npx skills add mcgrapeng/attest` | 实测通过：装进 `.agents/skills/attest/`，自动识别 20+ 个 agent |
+| skills.sh 收录 | 已收录（<https://skills.sh/mcgrapeng/attest>）—— 布局下沉到 `skills/attest/` 才被索引器扫到 |
+| skills.sh 安全审计 | Snyk 报 critical、Socket 报 2 条告警：命中的都是「跑目标仓库自己声明的脚本」这一设计本身，仓库无 `shell=True` / `eval` / 外发网络；逐条说明见 `SECURITY.md` |
+| GitHub 私有漏洞报告 | 已开启（`SECURITY.md` 给的入口即此） |
 
 ## 怎么复核这份状态
 
 ```bash
 cd <repo>
-for t in scripts/test_*.py; do python3 "$t" || echo "FAIL $t"; done
+for t in skills/attest/scripts/test_*.py; do python3 "$t" || echo "FAIL $t"; done
 PATH="/tmp/ptcov-venv/bin:$PATH" bash fixtures/run_fixtures.sh    # 需要 pytest-cov
 python3 evals/run_evals.py
 bash .github/check-skillspector.sh
-python3 scripts/check_env_inheritance.py
+python3 skills/attest/scripts/check_env_inheritance.py
 python3 package.py --check
 ```

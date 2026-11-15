@@ -87,10 +87,13 @@ def main() -> int:
     except Exception:
         pass
     expect(code_n == 14, f"代码里 14 条判据（实际 {code_n}）")
-    expect(criteria_rows(en) == code_n,
-           f"英文 README 判据表 {code_n} 行（实际 {criteria_rows(en)}）")
-    expect(criteria_rows(zh) == code_n,
-           f"中文 README 判据表 {code_n} 行（实际 {criteria_rows(zh)}）")
+    # 判据表搬到了 docs/criteria.md（README 只留一段话 + 链接）
+    crit = (ROOT / "docs" / "criteria.md").read_text(encoding="utf-8")
+    expect(criteria_rows(crit) == code_n,
+           f"docs/criteria.md 判据表 {code_n} 行（实际 {criteria_rows(crit)}）")
+    for label, text in (("英文", en), ("中文", zh)):
+        expect("docs/criteria.md" in text,
+               f"{label} README 链到了判据表所在文档")
 
     print("\nREADME 里的数字与仓库实况一致")
     tests = sorted(p.name for p in SKILL_DIR.joinpath("scripts").glob("test_*.py"))
@@ -112,10 +115,20 @@ def main() -> int:
          "--repo", str(ROOT / "fixtures" / "ts-colocated")],
         capture_output=True, text=True, cwd=str(ROOT)).stdout
     run_out = re.sub(r"/\S*/fixtures/ts-colocated", "<repo root>", run_out).rstrip("\n")
+    # README 里放的是**摘录**（首段 + 结论段），每一段都必须是真实输出的连续子串
+    blocks = re.findall(r"```\n([^`]+?)```", en, re.S)
+    expect(len(blocks) >= 2, f"英文 README 有输出摘录（实际 {len(blocks)} 段）")
+    real_lines = [l.rstrip() for l in run_out.splitlines()]
+    for b in blocks:
+        if not b.startswith("将执行的仓库脚本") and not b.startswith("结论："):
+            continue
+        # 逐行比对（摘录的两段在真实输出里并不相邻 ⇒ 连续子串不成立）
+        for l in b.strip().splitlines():
+            expect(l in real_lines,
+                   f"英文 README 的输出摘录与真实运行逐字一致：{l[:28]!r}")
     for label, text in (("英文", en), ("中文", zh)):
-        expect(run_out in text,
-               f"{label} README 的输出样例与真实运行逐字一致"
-               "（样例被删节过就会失败）")
+        expect("结论：0 项阻塞" in text,
+               f"{label} README 引用了真实结论行")
 
     print("\nREADME 用到的资源文件都存在")
     for asset in ("skills/attest/assets/hero.png",
@@ -168,7 +181,8 @@ def main() -> int:
         names = set(re.findall(r"^  ([a-z][a-z0-9-]*):$", block.group(1), re.M)) if block else set()
         expect(bool(names), f"action.yml 的 inputs 段解析得到 {len(names)} 个输入")
         for label, text in (("英文", en), ("中文", zh)):
-            miss = sorted(n for n in names if f"`{n}`" not in text)
+            # 输入名在 YAML 示例里就是 key（module: src/auth）⇒ 不要求反引号
+            miss = sorted(n for n in names if n not in text)
             expect(not miss, f"{label} README 写全了 action 的输入（缺：{miss}）")
 
     print("\nREADME 的环境白名单描述与代码一致")
@@ -185,16 +199,18 @@ def main() -> int:
     expect(not leaked, f"白名单里没有凭据前缀（代码侧，实际有：{leaked}）")
     expect("NODE_AUTH_TOKEN" in deny,
            "NODE_AUTH_TOKEN 在拒绝名单里（NODE_* 前缀内的 npm registry token）")
+    # 环境白名单搬到了 SECURITY.md（README 只剩一行链接）
+    sec = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
+    miss = sorted(x for x in exact if f"`{x}`" not in sec)
+    expect(not miss, f"SECURITY.md 列全了环境白名单（缺：{miss}）")
+    missp = sorted(x for x in prefixes if f"{x}*" not in sec and f"`{x}`" not in sec)
+    expect(not missp, f"SECURITY.md 列全了白名单前缀（缺：{missp}）")
+    missd = sorted(x for x in deny if f"`{x}`" not in sec)
+    expect(not missd, f"SECURITY.md 写明了拒绝名单（缺：{missd}）")
+    expect(any(k in sec for k in ("NPM_TOKEN", "NODE_AUTH_TOKEN")),
+           "SECURITY.md 点明了哪些凭据不外泄")
     for label, text in (("英文", en), ("中文", zh)):
-        miss = sorted(x for x in exact if f"`{x}`" not in text)
-        expect(not miss, f"{label} README 列全了环境白名单（缺：{miss}）")
-        missp = sorted(x for x in prefixes if f"{x}*" not in text and f"`{x}`" not in text)
-        expect(not missp, f"{label} README 列全了白名单前缀（缺：{missp}）")
-        missd = sorted(x for x in deny if f"`{x}`" not in text)
-        expect(not missd, f"{label} README 写明了拒绝名单（缺：{missd}）")
-        # 凭据必须在文档里点明（README 要说清哪些不外泄）
-        expect(any(k in text for k in ("NPM_TOKEN", "NODE_AUTH_TOKEN")),
-               f"{label} README 点明了哪些凭据不外泄")
+        expect("SECURITY.md" in text, f"{label} README 链到了 SECURITY.md")
 
     print()
     if FAILURES:

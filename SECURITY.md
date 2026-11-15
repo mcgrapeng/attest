@@ -53,6 +53,77 @@ scrutinising:
 - Vulnerabilities in the target repository's dependencies. Report those to the
   dependency's own maintainers.
 
+## What the tool runs, and when
+
+`readiness.py` **executes scripts the target repository defines itself** (the
+`test`, `coverage`, `reconcile` and `eval:baseline:check` entries in
+`package.json`, or the matching Makefile / tox targets). Three things to know:
+
+1. **See what it will run first**. `--dry-run` lists the candidate scripts and
+   the exact commands without executing them. In normal mode the tool prints
+   that line before it runs anything — it is the audit trail, and it includes
+   the repo's own `test` command, which is the largest thing the tool runs (it
+   is executed once per test file).
+
+   Script selection has **two** rules, and they differ by ecosystem:
+
+   - **JS repos (`package.json`)** — an **explicit allowlist** of script names
+     (exact names or allowlisted prefixes). A script that merely has a keyword
+     in its name (for example `reconcile:reset`) is never auto-executed.
+   - **Python repos (Makefile / tox.ini)** — matched by **keyword in the target
+     name** (`cov` / `reconcile` / `integration` / `itest`), as a whole word:
+     `coverage`, `test-coverage` and `py-cov` qualify; `recover` and `cover` do
+     not. The coverage gate additionally accepts a Makefile anywhere at or above
+     the module directory, so a repo-wide `make coverage` still counts; the
+     reconcile and itest lanes additionally require the recipe or the command to
+     mention this module.
+
+   The Python rule is the looser one: a target whose name looks like a coverage
+   gate will be run. The tool never runs anything the repo has not declared
+   itself, and `--dry-run` shows exactly which targets would run — so if you do
+   not want a target picked up, do not give it a gate-like name.
+
+2. **Child processes get an allowlisted environment only**: `PATH`, `HOME`,
+   `LANG`/`LANGUAGE`, `TZ`, `TMPDIR`/`TEMP`/`TMP`, `SHELL`, `USER`/`LOGNAME`,
+   `TERM`, `CI`, `SYSTEMROOT`/`COMSPEC` (Windows), the prefixes `LC_*`,
+   `NODE_*`, `PYTHON*`, plus the `POSTGRES_URL` / `DATABASE_URL` /
+   `MEMORY_ITEST` / `MEMORY_RECONCILE_OUT_DIR` / `REQ_PLAN_RECONCILE_OUT_DIR`
+   variables the tool itself needs.
+
+   **Nothing outside that list is passed through**: your cloud provider keys
+   (`AWS_*` / `GCP_*` / `AZURE_*`) and your registry credentials (`NPM_TOKEN`,
+   `NODE_AUTH_TOKEN`, `PIP_INDEX_URL` with a password in it,
+   `UV_INDEX_SECRET_PASSWORD`) do not reach the target repo's scripts. The
+   `NPM_*` / `PNPM_*` / `YARN_*` / `PIP_*` / `UV_*` prefixes are not on the
+   allowlist at all, and `NODE_AUTH_TOKEN` is on an explicit **deny** list even
+   though `NODE_*` is allowed. If a repo's test command needs npm or pip
+   configuration, put it in a config file (`.npmrc`, `pip.conf`) rather than in
+   the environment.
+
+   The two connection strings *are* passed through: a repo's own integration
+   lane has to reach its database, and that trade-off is deliberate. The levers
+   that exist: unset `POSTGRES_URL` / `DATABASE_URL` in the environment and pass
+   the connection string with `--database-url` (it is not read from the
+   environment, so it never enters the child environment), or set `PGHOST` /
+   `PGUSER` / `PGDATABASE` and let `psql` read the password from `.pgpass`.
+   `.pgpass` alone is not enough: the schema query reads only the `PG*`
+   variables, so without them the schema criterion degrades to "not measured"
+   instead of being measured through `.pgpass`. The `psql` password travels in
+   the `PGPASSWORD` environment variable, never in a command-line argument.
+
+3. **Trusting a repo's `test` script means handing it your environment**. The
+   risk level of that layer equals the risk level of every script it runs. With
+   `--self-check-deps` the copy's `node_modules` / `.venv` are **symlinks to the
+   real ones**, so a test that writes inside a dependency directory still writes
+   to the real one.
+
+`req_plan.py scaffold` writes test files into the repo. Two gates run before
+anything is written: a pinned path must still be under `--out-dir` after
+normalisation (a pin that escapes it is neither read nor written), and test
+case names are quote-escaped per language (the plan's markdown is not turned
+into executable code). When it cannot recognise the repo's test conventions it
+**refuses to generate** and reports red instead of guessing.
+
 ## What scanners flag, and why
 
 `attest` is flagged by automated skill scanners, and it will keep being

@@ -37,6 +37,7 @@ bash .github/check-skillspector.sh                   # security scan
 python3 skills/attest/scripts/check_env_inheritance.py             # environment containment
 python3 skills/attest/scripts/selfcheck.py src --repo fixtures/ts-colocated   # reverse verification
 python3 skills/attest/scripts/test_readme_sync.py                  # README consistency
+python3 package.py --check                          # packaging smoke
 ```
 
 `test_readme_sync.py` is the one people forget: it checks that the English and
@@ -55,6 +56,28 @@ command, run it before you commit.
 - If a change alters what the tool reports, update `skills/attest/SKILL.md` in the same
   change — the skill contract and the implementation are read together.
 
+## What is being built next
+
+[docs/roadmap.md](docs/roadmap.md) lists the phases and where outside help is
+worth the most. Issues labelled *good first issue* are the smallest useful
+steps; a pull request that fixes something nobody filed is welcome too.
+
+The highest-value contributions right now, in order:
+
+| If you can… | The most useful contribution is… |
+| --- | --- |
+| Write Rust or Go | Port the readiness checker's module recognition (Phase 2 of the roadmap) |
+| Maintain a public repository | Let us run attest on it and publish the report |
+| Use an agent we do not support | Port the skill contract to that agent's plugin format |
+| Review the criteria | Argue with one — a criterion that cannot be argued with is a bug |
+| Write documentation | A language that is not English or Chinese yet |
+| Nothing above | Report a case where the tool was wrong, in either direction |
+
+The tool's own [self-test report](docs/self-test-report.md) is the model to
+follow: run it against real repositories, publish the verdicts **including the
+ones that make the tool look wrong**, and file each one as an issue with the
+evidence attached.
+
 ## Reporting a problem
 
 Open an issue with: the repo you ran it on, the module path, the command, and
@@ -65,9 +88,3 @@ fixture.
 Security problems do not go in an issue — see [SECURITY.md](SECURITY.md).
 Everyone participating is expected to follow the
 [Code of Conduct](CODE_OF_CONDUCT.md).
-
-## What is being built next
-
-[docs/roadmap.md](docs/roadmap.md) lists the phases and where outside help is
-worth the most. Issues labelled *good first issue* are the smallest useful
-steps; a pull request that fixes something nobody filed is welcome too.

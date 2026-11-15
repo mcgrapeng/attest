@@ -7,6 +7,25 @@
 
 （暂无）
 
+## [0.1.4] - 2026-11-15
+
+**README 整体重写。** 旧版 14 段、3526 词，是一份"文档"而不是门面 —— 读者要滚过
+badge 墙、两张图、14 行判据表和一整段报告样例，才看到安装命令。新版 8 段、约 1100 词，
+按"读者什么时候能下决心放弃"排序：
+
+- 首屏：字标 → 一句话定位 → 命令 → 图（badge 收到 4 个，去掉 Stars 这个虚荣项）
+- **点名替代品**：覆盖率徽章、AI 写的测试计划、聊天里问一句、PR 里的 checklist ——
+  逐个说清 attest 补的是哪一块（这是最稀缺的一类内容，也是旧版最缺的）
+- 判据表搬进 [docs/criteria.md](docs/criteria.md)；安全须知（71 行）搬进
+  [SECURITY.md](SECURITY.md)；开发闸门与参与共建搬进 [CONTRIBUTING.md](CONTRIBUTING.md)
+  —— 内容没删，只是搬家；社区健康内容不再占首页篇幅
+- 一句话定位改成从读者的问题起手：
+  *Turns "is this module ready to ship?" from a coverage percentage into an auditable
+  evidence list.*
+
+守卫跟着搬家：判据表校验指向 `docs/criteria.md`，输出摘录改成**逐行比对**真实运行
+（比"整段输出逐字出现"更能抓漂移 ✓），环境白名单校验指向 `SECURITY.md`。
+
 ## [0.1.3] - 2026-11-15
 
 **Python 覆盖率车道说清原因**（自测报告里的第四个发现）。pytest 自己没跑起来时

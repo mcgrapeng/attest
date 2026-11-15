@@ -38,7 +38,7 @@ with whoever owns the delivery.
 
 ## Status
 
-**Actively developed.** Released as `v0.1.0`. The criteria and the skill
+**Actively developed.** Released as `v0.1.1`. The criteria and the skill
 contract may still change — but they will change with a changelog entry, not
 silently. MIT licensed.
 
@@ -277,7 +277,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.0
+      - uses: mcgrapeng/attest@v0.1.1
         with:
           module: src/auth
 ```

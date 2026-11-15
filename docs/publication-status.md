@@ -87,8 +87,9 @@ itest 车道的**全量**支持（Makefile/tox 兜底已接，但只覆盖脚本
 远端已建（`github.com/mcgrapeng/attest`，公开仓，MIT），仓库 description 已按头部开源
 项目的写法改成英文，README 已英中双份。剩下的：
 
-1. **打 `v0.1.0` tag 并发 Release** —— 之后 `mcgrapeng/attest@v0.1.0` 才是别人能钉的
-   东西（marketplace 条目与 GitHub Action 都要引版本号）。
+1. ~~**打 tag 并发 Release**~~ —— 已完成：`v0.1.0`（0be80c7）与 `v0.1.1`（市场清单 +
+   自测报告）都发了，`mcgrapeng/attest@v0.1.1` 是别人能钉的东西（marketplace 条目与
+   GitHub Action 都引版本号）。
 2. **提交到官方 marketplace**：Anthropic 官方 skills 仓库（模板要求
    `skills/<name>/SKILL.md`，现布局已符合）、OpenCode 与 Codex 的插件市场。
 3. **首屏定位**用上面那句，不要用"判断能不能交付"。

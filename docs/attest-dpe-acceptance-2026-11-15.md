@@ -52,7 +52,7 @@ CLI：`readiness.py <模块> --repo <根> --plan <计划> [--lenient] [--discrim
 
 | 检查 | 命令 | 结果 |
 | --- | --- | --- |
-| 黄金 fixture | `bash fixtures/run_fixtures.sh` | **命中 10 / 不符 0 / 未判定 0**（五个缺陷集各 2 例） |
+| 黄金 fixture | `bash fixtures/run_fixtures.sh` | **命中 9 / 不符 0 / 未判定 1**（十个 fixture 里 `python-repo` 被跳过：PATH 上的 `pytest` 是 uv 工具环境那个，没带 pytest-cov，`pytest --help` 里没有 `--cov`；系统 python 里 pytest-cov 7.0.0 是在的，但那套 fixture 用的是 PATH 上的 pytest） |
 | eval | `python3 evals/run_evals.py` | **6 / 6 通过** |
 | 打包自检 | `python3 package.py --check` | 退出 **0** |
 
@@ -218,15 +218,31 @@ monorepo 根，机器生成的 DP ID 列用了工作区根（`src/agent-memory/�
 「这条钉真的有效」的正面证据，7 条给出了「这条钉无效」的负面证据，11 条说判不了。引擎没有把
 「判不了」粉饰成「通过」，这是本轮最重要的行为约定。
 
-## 6. 引擎自身的三个 P0 缺陷（fixture 全绿时看不见）
+## 6. 引擎自身的四个 P0 缺陷（fixture 全绿时看不见）
 
 | # | 缺陷 | 机制 | 后果 | 修法 |
 | --- | --- | --- | --- | --- |
 | A | 大 JSON 被截断 | `decision_points.py` 里 `process.stdout.write(JSON)` 紧跟 `process.exit(0)`；stdout 是管道时 write 是异步的，exit 把没刷出去的数据丢掉。实测：管道缓冲上限正好 65536 字节 | JSON 解析失败 ⇒ 静默回退 L2 词法 ⇒ 三条判据只 warn 不硬判 ⇒ **整套判定点引擎在真实仓库上等于没开** | stdout/stderr 改落**文件**；JS 侧 `emit()` 用写回调再退出；`_parse_ts_json` 区分「输出被截断」与「后端起不来」 |
 | B | 每文件上限截断在作用域过滤之前 | `find_mutations` / `find_structural_mutations` 内部各自 `break` 在 `DEFAULT_MAX_PER_FILE = 3`，而作用域过滤在其后 | 作用域相关的变异点永远轮不到 ⇒ 报出假结论「没有可判的变异点」 | 候选先不限上限收齐 → 作用域过滤 → 最后才施加每文件 3 个的上限 |
 | C | 解析闸判的是文件不是变异 | `_default_parse_check` 用括号配平判断「原文能不能解析」，对真实 TS 误判（`memory-r5-cleanup.ts` 原文 `{}` 89/87、`[]` 64/63） | 每个变异都被判「解析不过」⇒ 报出假结论「判不了」 | 改成判变异：Python 走 `compile()`；JS/TS 比对变异前后的括号结构差值 |
+| D | 多行注释把词法变异点的行号顶掉 | `mutation_check._strip_js_code` 把字符串与注释整段替换成**等长空格**，段内换行被吃掉 ⇒ 压缩后的代码比原文少行 ⇒ `line = code.count("\n", 0, start) + 1` 数的是压缩后的行号 | 该行之后的每个词法变异点都报错的行号 ⇒ 报告里「哪一行坏了」指错地方；作用域过滤按符号筛，符号是按（错）行号找的 | 剥离时**保留换行**（`re.sub(r"[^\n]", " ", …)`），与 `decision_points._strip_js_code` 同口径 |
 
-这三条在 fixture 上全绿时看不见。五个缺陷集 fixture 每个只有一个源文件，JSON 远不到 64KB，
+缺陷 D 在 lumen 那 7 个 OCR 修复文件上的实测（修复前后逐点导出、逐字段 diff）：
+
+| 项 | 修复前 | 修复后 |
+| --- | --- | --- |
+| 词法变异点 | 71 个 | 71 个 |
+| 行号 | **71 个全错** | 71 个全对 |
+| 列号 | 全对（偏移量没变） | 全对 |
+| 作用域 `symbol` | 全对 | 全对（零变化） |
+
+丢失换行合计 214 个（r5-cleanup 111 / review-seed 26 / backfill 19 / rebuild 18 /
+vector-check 14 / reconciliation 13 / probes 13）。单点例子：`memory-r5-cleanup.ts` 真 L511 报成 L400。
+
+作用域不受影响是可以推出来的：压缩掉的都是函数体内注释占的行，丢的换行数小于「变异点与所属函数声明的行距」，
+所以压缩后的行号**不可能跨出函数**。实测的零变化与这个推导一致。
+
+这四条在 fixture 上全绿时看不见。五个缺陷集 fixture 每个只有一个源文件，JSON 远不到 64KB，
 所以验收口径必须是真实模块。
 
 复核方式如下（不采信代理自报）：
@@ -235,7 +251,11 @@ monorepo 根，机器生成的 DP ID 列用了工作区根（`src/agent-memory/�
 | --- | --- | --- |
 | 四项独立探针 | `/tmp/dpe_verify/probe_green.py` | 全绿：A 真路径 L3/1600 条；B 不限上限时作用域内 1 个（带上限时 0 个）；C 原文 True / 砍闭合括号 False / `===→!==` True |
 | **反向自证** | 三份文件退回 HEAD 后跑 `test_dpe_engine_regressions.py` | **4 条断言全红**（大 stdout 恰好卡在 65536 字节＝管道缓冲上限）⇒ 回归文件钉得住这三个修复 |
+| 缺陷 D 的反向自证 | `test_mutation_operators.py` 的 `test_mutation_line_number_survives_multiline_comments` | 修复前红（`行号是原文件里的真行号（6），实际 3`）⇒ 修复后绿 |
 | 全量 `test_*.py` | 34 个文件 | 31 PASS / 3 FAIL，与修复前基线逐项一致，无新增失败 |
+
+D 修复后重跑全量时，那三个既有红用 `git archive HEAD` 抽出的干净副本验过：在 HEAD 上同样红
+⇒ 与本次改动无关。
 
 ---
 
@@ -269,6 +289,8 @@ monorepo 根，机器生成的 DP ID 列用了工作区根（`src/agent-memory/�
 | 1 | `skills/attest/SKILL.md` 的判据表同步（14 → 17 条） | **阻塞在集成者**。本车道按约定不碰该文件；逐条改动清单见 `docs/attest-dpe-skill-md-changes.md` |
 | 2 | 计划升 v2 + 补钉（lumen 侧） | 本车道只证明「引擎升上去之后机器看得见」；改计划是 lumen 侧的动作，且那里有并行车道在跑 |
 | 3 | OCR 缺陷⑥（reconciliation 脚本 ENOBUFS）与⑦（`?? []`「取不到就当空」） | **不在现有 7 个算子的形态覆盖范围内** ⇒ 补钉也解决不了，要新算子或新判据。本轮不做 |
+| 3b | 次序比较符 `<` `>` 不在算子射程内 | 7 个算子里的比较符只有 `===`/`!==`/`==`/`!=`/`>=`/`<=`（`_OP_RE`），**裸 `<` 与 `>` 不变异**。规格 §6.2 的算子表本来就这么定的，所以这是已声明的覆盖边界，不是缺陷 —— 但它意味着 `x > 0`、`len < PAGE` 这类判据改坏了也测不出来。要覆盖得给 `cmp-tighten` 加 `<`/`>` 的收紧方向 |
+| 3c | OCR 那 27 处修复点里 12 处不在算子射程内 | 实测（缺陷 D 修复后、行号正确）：可达 15 / 不可达 12。不可达的都是「形状」问题而非行号问题：裸赋值（`backupComplete = false`）、裸取反的标识符（`if (!backupComplete)`）、`.catch(() => 0)` 这种方法调用、数值字面量（`maxBuffer: 64 * 1024 * 1024`）、数组元素增补、取反的正则调用（`!/LTMT-PRIVATE/.test(`）、以及 4 处靠 `<`/`>` 的判据（见 3b）。**补钉解决不了 ⇒ 需要新算子** |
 | 4 | `discriminate.run_dpsp` 的三元组契约 | `run_dpsp` 收 `(id, pin_cell, text)`，`plan.invariants` 是 `(id, desc, pin)`。顺序传错时不报错，只是全部落进「钉解析不出来」的 untested 档。本次踩过一次（`readiness._dpe_run_dpsp` 里有一行显式重排）。没有加断言，列为遗留 |
 | 5 | 变异副本**不密闭** ⇒ 跨包引用的模块判不了 | 20 条里有 5 条因此落进 not-applicable：测试文件经**包名**引用 `@lumen/service-api` / `drizzle-orm` / `ai`，而变异只对相对路径可达的源文件生效 ⇒ 被引模块根本没被变异。要修得让副本里的包路径指向副本内实体。**本轮未做**（超出「判定点引擎」的范围，属变异基础设施） |
 

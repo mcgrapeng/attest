@@ -51,7 +51,7 @@ with whoever owns the delivery.
 
 | Gate | What it measures | Why it matters |
 | --- | --- | --- |
-| **24 / 24** regression scripts | The tool's own behaviour, including every false green it has been known to produce | A criterion that cannot fail is not a criterion |
+| **25 / 25** regression scripts | The tool's own behaviour, including every false green it has been known to produce | A criterion that cannot fail is not a criterion |
 | **5 / 5** golden fixtures | Whether the tool reports the same verdict on small repos with pinned expectations | Reproducible proof against false greens |
 | **6 / 6** behaviour evals | Whether "the user says X ⇒ the tool answers Y" holds | The skill contract, not just the scripts |
 | **14** criteria | Every criterion carries an evidence kind: measured, static signal, or not measured | Nothing is presented as measured unless it was |
@@ -134,9 +134,10 @@ python3 package.py --check    # list what would be packaged, write nothing
 
 `.skill` is the community's distribution format (a zip whose first level is the
 skill directory). The packager is **self-contained**: it needs no external
-tooling. Excluded: `.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` /
-bytecode, and `scripts/test_*.py` (the regression suite belongs to the repo, not
-to the skill's runtime). **It refuses to package bytecode** — compiled artifacts
+tooling. Excluded are the repo's own working files — `.git` / `.github` /
+`dist` / `fixtures` / `evals` / `.omx` / `node_modules` / virtualenvs / tool
+caches / bytecode — and `scripts/test_*.py` (the regression suite belongs to the
+repo, not to the skill's runtime). **It refuses to package bytecode** — compiled artifacts
 leak the author's environment and give users an unreadable bundle.
 
 ### Quick start
@@ -378,10 +379,13 @@ Three things to know:
    script that merely has a keyword in its name (for example `reconcile:reset`)
    is never auto-executed.
 2. **Child processes get an allowlisted environment only**: `PATH`, `HOME`,
-   `LANG`/`LC_*`, `TMPDIR`, `NODE_*`, `PYTHON*`, and the `POSTGRES_URL` /
-   `DATABASE_URL` / `MEMORY_ITEST` / `REQ_PLAN_RECONCILE_OUT_DIR` variables the
-   tool itself needs. **Nothing else is passed through**: your cloud provider
-   keys and npm tokens do not reach the target repo's scripts. Note that those
+   `LANG`/`LANGUAGE`, `TZ`, `TMPDIR`/`TEMP`/`TMP`, `SHELL`, `USER`/`LOGNAME`,
+   `TERM`, `CI`, `SYSTEMROOT`/`COMSPEC` (Windows), the prefixes `LC_*`,
+   `NODE_*`, `PYTHON*`, `NPM_*`, `PNPM_*`, `YARN_*`, `PIP_*`, `UV_*`, plus the
+   `POSTGRES_URL` / `DATABASE_URL` / `MEMORY_ITEST` /
+   `MEMORY_RECONCILE_OUT_DIR` / `REQ_PLAN_RECONCILE_OUT_DIR` variables the tool
+   itself needs. **Nothing outside that list is passed through**: your cloud
+   provider keys and npm tokens do not reach the target repo's scripts. Note that those
    two connection strings *are* passed through: a repo's own integration lane
    has to reach its database, and that trade-off is deliberate. Drop them from
    the allowlist, or use `.pgpass`, if you do not want that. The `psql`
@@ -438,7 +442,7 @@ This repo runs its own tool on itself, and the evidence is reproducible:
 
 | Gate | Command | Result |
 | --- | --- | --- |
-| Regression suite | `for t in scripts/test_*.py; do python3 "$t"; done` | 24/24 green |
+| Regression suite | `for t in scripts/test_*.py; do python3 "$t"; done` | 25/25 green |
 | Golden fixtures | `bash fixtures/run_fixtures.sh` | 5/5 hit, 0 mismatches, 0 undecided |
 | Behaviour evals | `python3 evals/run_evals.py` | 6/6 passed |
 | Security scan | `bash .github/check-skillspector.sh` | 47 HIGH/CRITICAL, **0** outside the allowlist |

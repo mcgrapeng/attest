@@ -40,7 +40,7 @@ attest 是一套面向交付就绪度的需求级测试工具包。接一条需�
 
 | 闸门 | 测的是什么 | 为什么要在意 |
 | --- | --- | --- |
-| **24 / 24** 回归脚本 | 工具自身的行为，包括它已知会出现的每一种假绿 | 不会翻红的判据不算判据 |
+| **25 / 25** 回归脚本 | 工具自身的行为，包括它已知会出现的每一种假绿 | 不会翻红的判据不算判据 |
 | **5 / 5** 黄金 fixture | 在钉死期望的小仓库上，结论是否一致 | 对「会不会假绿」的可复现证据 |
 | **6 / 6** 行为 eval | 「用户这么说 ⇒ 工具这样回」是否成立 | 考的是 skill 契约，不只是脚本 |
 | **14** 条判据 | 每条判据都带证据类别：已实测 / 静态信号 / 未实测 | 没测到的绝不写成测到了 |
@@ -101,7 +101,7 @@ python3 package.py            # → dist/attest.skill
 python3 package.py --check    # 只看会打进包的内容，不写文件
 ```
 
-`.skill` 是社区通行的分发格式（一个 zip，第一层是 skill 目录）。打包脚本**自包含**，不依赖别的工具。排除：`.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` / 字节码，以及 `scripts/test_*.py`（回归套件是仓库的开发资产，不是 skill 的运行时）。**打进包前会检查有没有字节码**，有就中止 —— 字节码既泄漏作者环境，又让用户拿到不可读的产物。
+`.skill` 是社区通行的分发格式（一个 zip，第一层是 skill 目录）。打包脚本**自包含**，不依赖别的工具。排除的是仓库自己的工作文件 —— `.git` / `.github` / `dist` / `fixtures` / `evals` / `.omx` / `node_modules` / 虚拟环境 / 工具缓存 / 字节码 —— 以及 `scripts/test_*.py`（回归套件是仓库的开发资产，不是 skill 的运行时）。**打进包前会检查有没有字节码**，有就中止 —— 字节码既泄漏作者环境，又让用户拿到不可读的产物。
 
 ### 快速上手
 
@@ -296,7 +296,7 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清「当前只实现�
 `readiness.py` 会**执行目标仓库自己定义的脚本**（`package.json` 里的 `test`、`coverage`、`reconcile`、`eval:baseline:check` 等）。三件事要知道：
 
 1. **先看它要跑什么**。`--dry-run` 只列出候选脚本与将执行的命令，不执行。正常模式下工具也会在执行前把那几行（白名单命中的脚本 + 确切命令）打印出来。那是审计入口。脚本选取走**显式白名单**（精确脚本名或白名单前缀），名字里带关键词的脚本（例如 `reconcile:reset`）不会被自动执行。
-2. **子进程只拿到白名单环境变量**：`PATH`、`HOME`、`LANG`/`LC_*`、`TMPDIR`、`NODE_*`、`PYTHON*`，以及工具自己需要的 `POSTGRES_URL` / `DATABASE_URL` / `MEMORY_ITEST` / `REQ_PLAN_RECONCILE_OUT_DIR`。**其余环境变量一律不透传**：你的云厂商密钥、npm token 之类不会进目标仓库的脚本。注意那两个连接串**会**透传：仓库自己的集成车道要连库，这是刻意的取舍 —— 不想要就把它们从白名单里去掉，或改用 `.pgpass`。`psql` 的口令走 `PGPASSWORD` 环境变量，不出现在命令行参数里。
+2. **子进程只拿到白名单环境变量**：`PATH`、`HOME`、`LANG`/`LANGUAGE`、`TZ`、`TMPDIR`/`TEMP`/`TMP`、`SHELL`、`USER`/`LOGNAME`、`TERM`、`CI`、`SYSTEMROOT`/`COMSPEC`（Windows），前缀 `LC_*`、`NODE_*`、`PYTHON*`、`NPM_*`、`PNPM_*`、`YARN_*`、`PIP_*`、`UV_*`，以及工具自己需要的 `POSTGRES_URL` / `DATABASE_URL` / `MEMORY_ITEST` / `MEMORY_RECONCILE_OUT_DIR` / `REQ_PLAN_RECONCILE_OUT_DIR`。**名单之外的一律不透传**：你的云厂商密钥、npm token 之类不会进目标仓库的脚本。注意那两个连接串**会**透传：仓库自己的集成车道要连库，这是刻意的取舍 —— 不想要就把它们从白名单里去掉，或改用 `.pgpass`。`psql` 的口令走 `PGPASSWORD` 环境变量，不出现在命令行参数里。
 3. **信任一个仓库的 `test` 脚本，就等于把它交给了你的环境变量**。这一层的风险等级 = 它所运行的每一个脚本的风险等级。
 
 `req_plan.py scaffold` 会向仓库写测试文件。写入前有两道闸：钉的路径必须规范化后仍在 `--out-dir` 之下（越界的钉不读也不写），用例名按语言做引号转义（计划 markdown 不会被变成可执行代码）。认不出仓库的测试约定时它**拒绝生成**并报红，不猜。
@@ -332,7 +332,7 @@ Rust / Go 模块上 `readiness.py` **退出码 2** 并说清「当前只实现�
 
 | 闸门 | 命令 | 结果 |
 | --- | --- | --- |
-| 回归套件 | `for t in scripts/test_*.py; do python3 "$t"; done` | 24/24 全绿 |
+| 回归套件 | `for t in scripts/test_*.py; do python3 "$t"; done` | 25/25 全绿 |
 | 黄金 fixture | `bash fixtures/run_fixtures.sh` | 5/5 命中，0 不符，0 未判定 |
 | 行为 eval | `python3 evals/run_evals.py` | 6/6 通过 |
 | 安全扫描 | `bash .github/check-skillspector.sh` | 47 条 HIGH/CRITICAL，未放行 **0** 条 |

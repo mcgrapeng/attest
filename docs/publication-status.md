@@ -19,7 +19,7 @@
 
 | 闸门 | 命令 | 结果 |
 | --- | --- | --- |
-| 回归套件 | `for t in scripts/test_*.py; do python3 "$t"; done` | 24/24 全绿 |
+| 回归套件 | `for t in scripts/test_*.py; do python3 "$t"; done` | 25/25 全绿 |
 | 黄金 fixture | `bash fixtures/run_fixtures.sh` | 5/5 命中，0 不符，0 未判定 |
 | 行为 eval | `python3 evals/run_evals.py` | 6/6 通过 |
 | 安全扫描 | `bash .github/check-skillspector.sh` | 47 条 HIGH/CRITICAL，未放行 **0** 条 |

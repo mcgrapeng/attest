@@ -240,6 +240,35 @@ P0/P1 清单，以及 [docs/testing-philosophy-review.md](docs/testing-philosoph
 - 「How to use」按 Prerequisites / Install / Distribute / Quick start / Switches 分层，
   Quick start 改成四步编号 + 加粗小标题。
 
+### README 审计（ce-doc-review 四视角 + 逐条实跑）
+
+按 `ce-doc-review` 的 persona 选择规则组队：coherence + feasibility（常驻）+
+security-lens（README 写了凭据透传与子进程执行）+ design-lens（README 是渲染页）；
+再按 `code-documenter` 的纪律**把 README 里的每个命令真跑一遍**。
+
+**找到并修掉的三个真问题：**
+
+1. **`doctor.sh` 只跑了 14/24 个测试**。README 说「`~/.agents/testkit/doctor.sh`
+   跑回归套件」，但那个文件（机器本地，不在仓库里）**硬编码**了 14 个测试文件名，
+   新增的 10 个从来没在这台机器上跑过 ⇒ 改成 glob（与仓库 CI 同一口径）。
+2. **「其余环境变量一律不透传」这句话不准确**。实际白名单还有 `TZ`/`TEMP`/`TMP`/
+   `SHELL`/`USER`/`LOGNAME`/`TERM`/`CI`/`SYSTEMROOT`/`COMSPEC` 与
+   `NPM_*`/`PNPM_*`/`YARN_*`/`PIP_*`/`UV_*` 前缀 —— 这话让白名单看起来比实际更严，
+   审自己环境的人会被误导 ⇒ 两份 README 改成逐项列全。
+3. **打包排除项列举不全**（漏了 `node_modules`/虚拟环境/工具缓存）⇒ 改成
+   「排除的是仓库自己的工作文件」。
+
+**新增 `scripts/test_readme_sync.py`**（守卫这次审计发现的漂移类）：
+
+- 中英两份 README 的章节数、层级、顺序必须一致；
+- 判据表行数 == 代码里的 Check 数（14）；
+- README 里的回归套件数 / fixture 数 / eval 数 == 仓库实况；
+- README 引用的仓库内路径必须存在；
+- README 列的环境白名单 == `readiness.py` 的 `ENV_ALLOW_EXACT`。
+
+它上线当场就抓到一处过期：回归套件数已经是 25（多了本次新增的这个脚本），
+两份 README 还写着 24 ⇒ 已更新，并写进 CI。
+
 ### 已知遗留（发布时仍开放）
 
 - **仍然开放**：

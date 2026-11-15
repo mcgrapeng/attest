@@ -15,6 +15,7 @@ DP 的种类（规格 §2.2）与高危档（规格 §3.5）：
 """
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -1050,3 +1051,194 @@ if (mode === "probe") {
 def _probe_script() -> str:
     """探测/分析用的 .mjs 源码（一份，两个模式）。"""
     return _TS_SCRIPT
+
+
+# ------------------------------------------------------------------ Python L3
+
+# Python 的比较运算符与 TS 的边界运算符一一对应；`in` / `is` 不算边界
+# （规格 §3.4 的边界运算符表里没有它们）。
+_PY_BOUNDARY_OPS = (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE)
+
+
+def _py_dotted(node: ast.AST) -> str:
+    """`a.b.c` 还原成点号串；还原不了 ⇒ ""。"""
+    parts: list[str] = []
+    cur = node
+    while isinstance(cur, ast.Attribute):
+        parts.append(cur.attr)
+        cur = cur.value
+    if isinstance(cur, ast.Name):
+        parts.append(cur.id)
+        return ".".join(reversed(parts))
+    return ""
+
+
+def _py_imported_names(tree: ast.Module) -> set[str]:
+    """模块里被 import 进来的名字（`import a` → a；`from m import b as c` → c）。"""
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+    return names
+
+
+class _PyVisitor(ast.NodeVisitor):
+    """Python 侧的判定点收集器。锚点 = 最近的具名作用域（函数 / 类）。"""
+
+    def __init__(self, file: str, imported: set[str]) -> None:
+        self.file = file
+        self.imported = imported
+        self.points: list[DecisionPoint] = []
+        self._scopes: list[str] = []
+
+    @property
+    def anchor(self) -> str:
+        return self._scopes[-1] if self._scopes else TOPLEVEL
+
+    def _emit(self, kind: str, line: int, detail: str = "") -> None:
+        self.points.append(DecisionPoint(file=self.file, anchor=self.anchor,
+                                         kind=kind, line=line, detail=detail))
+
+    # -- 作用域 --
+    def _scope(self, node: ast.AST, name: str) -> None:
+        self._scopes.append(name)
+        self.generic_visit(node)
+        self._scopes.pop()
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._scope(node, node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self._scope(node, node.name)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self._scope(node, node.name)
+
+    # -- 分支 --
+    def visit_If(self, node: ast.If) -> None:
+        self._emit("branch", node.lineno, "if")
+        self.generic_visit(node)
+
+    def visit_IfExp(self, node: ast.IfExp) -> None:
+        self._emit("branch", node.lineno, "if 表达式")
+        self.generic_visit(node)
+
+    def visit_Match(self, node: ast.Match) -> None:
+        for case in node.cases:
+            # `ast.match_case` 没有 lineno ⇒ 借分支体第一行的行号。
+            line = case.body[0].lineno if case.body else node.lineno
+            self._emit("branch", line, "match 分支")
+        self.generic_visit(node)
+
+    # -- 边界与错误路径 --
+    def visit_Compare(self, node: ast.Compare) -> None:
+        if any(isinstance(op, _PY_BOUNDARY_OPS) for op in node.ops):
+            self._emit("boundary", node.lineno, "比较")
+        self.generic_visit(node)
+
+    def visit_Raise(self, node: ast.Raise) -> None:
+        self._emit("error-path", node.lineno, "raise")
+        self.generic_visit(node)
+
+    def visit_ExceptHandler(self, node: ast.ExceptHandler) -> None:
+        self._emit("error-path", node.lineno, "except")
+        self.generic_visit(node)
+
+    # -- 资源 --
+    def visit_With(self, node: ast.With) -> None:
+        self._emit("resource", node.lineno, "with")
+        self.generic_visit(node)
+
+    def visit_AsyncWith(self, node: ast.AsyncWith) -> None:
+        self._emit("resource", node.lineno, "async with")
+        self.generic_visit(node)
+
+    # -- 状态 --
+    def _state_target(self, target: ast.AST) -> None:
+        name = None
+        if isinstance(target, ast.Attribute):
+            name = target.attr
+        elif isinstance(target, ast.Name):
+            name = target.id
+        if name and _norm(name) in _STATE_NORM:
+            self._emit("state", getattr(target, "lineno", 0), name)
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        for target in node.targets:
+            self._state_target(target)
+        self.generic_visit(node)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self._state_target(node.target)
+        self.generic_visit(node)
+
+    def visit_AugAssign(self, node: ast.AugAssign) -> None:
+        self._state_target(node.target)
+        self.generic_visit(node)
+
+    # -- 并发 --
+    def visit_Await(self, node: ast.Await) -> None:
+        self._emit("concurrency", node.lineno, "await")
+        self.generic_visit(node)
+
+    # -- 丢弃 --
+    def _comprehension(self, node: ast.AST) -> None:
+        # 过滤条件挂在每个 generator 上（`ast.comprehension.ifs`），不在
+        # ListComp 节点上 —— 一个推导式记一条 drop（对上 TS 的 `filter()` 一次调用）。
+        for gen in getattr(node, "generators", ()):
+            if gen.ifs:
+                self._emit("drop", gen.ifs[0].lineno, "推导式过滤")
+        self.generic_visit(node)
+
+    visit_ListComp = _comprehension
+    visit_SetComp = _comprehension
+    visit_GeneratorExp = _comprehension
+    visit_DictComp = _comprehension
+
+    # -- 调用 --
+    def visit_Call(self, node: ast.Call) -> None:
+        dotted = _py_dotted(node.func)
+        last = dotted.rsplit(".", 1)[-1] if dotted else ""
+        norm = _norm(last)
+        shown = f"{dotted}()" if dotted else "<调用>()"
+        if norm:
+            # 一个名字可能同时命中几张表（如 `acquire` 既是资源动词又是并发词），
+            # 跟 TS 侧一样**各自记一条**，不互斥。
+            if norm in _RESOURCE_NORM:
+                self._emit("resource", node.lineno, shown)
+            if norm in _IO_NORM:
+                self._emit("boundary-io", node.lineno, shown)
+            if norm in _CONCURRENCY_NORM:
+                self._emit("concurrency", node.lineno, shown)
+            if norm in _DROP_NORM:
+                self._emit("drop", node.lineno, shown)
+        if dotted.endswith("gather"):
+            self._emit("concurrency", node.lineno, shown)
+        if last and last in self.imported:
+            self._emit("boundary-io", node.lineno, shown)
+        self.generic_visit(node)
+
+
+def python_ast_analyze(file: str, source: str) -> DpAnalysis:
+    """Python 源码的 L3 判定点 —— 标准库 `ast`，不依赖任何第三方包。
+
+    解析不了就降级成 L1 并写明原因 —— 静默给一张空清单会被读成「这个文件
+    没有判定点」，那是假绿。
+    """
+    an = DpAnalysis(level="L3", backend="py-ast", backend_source="stdlib")
+    try:
+        tree = ast.parse(source)
+    except SyntaxError as exc:
+        an.level = "L1"
+        an.note = f"Python 源码解析失败（第 {exc.lineno} 行）：{exc.msg}"
+        return an
+    visitor = _PyVisitor(file, _py_imported_names(tree))
+    visitor.visit(tree)
+    an.points = visitor.points
+    an.assign_ids()
+    return an

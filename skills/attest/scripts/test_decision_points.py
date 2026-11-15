@@ -31,6 +31,7 @@ from decision_points import (  # noqa: E402
     dp_key,
     lexical_analyze,
     normalize_dp_id,
+    python_ast_analyze,
 )
 
 FAILURES: list[str] = []
@@ -485,6 +486,92 @@ def test_both_backends_agree_on_the_same_points() -> None:
            f"B2 独有 {sorted(keys[1] - keys[0])}）")
 
 
+# ---------------------------------------------------------------- Python L3
+
+
+def test_python_ast_finds_kinds() -> None:
+    print("\nPython 标准库 ast：判定点种类")
+    src = ("def load(rows):\n"
+           "    if len(rows) >= 1:\n"
+           "        raise ValueError('x')\n"
+           "    try:\n"
+           "        client.close()\n"
+           "    except OSError:\n"
+           "        pass\n"
+           "    return [r for r in rows if r]\n")
+    an = python_ast_analyze("a.py", src)
+    expect(an.level == "L3", f"level 是 L3（实际 {an.level}）")
+    expect(an.backend == "py-ast", f"backend 是 py-ast（实际 {an.backend}）")
+    got = {(p.anchor, p.kind) for p in an.points}
+    for kind in ("branch", "boundary", "error-path", "resource", "drop"):
+        expect(("load", kind) in got,
+               f"认出 {kind} 判定点（实际 {sorted(got)}）")
+    expect(all(p.dp_id for p in an.points), "每个判定点都带 DP ID")
+
+
+def test_python_ast_anchor_is_function_name() -> None:
+    print("\nPython ast：锚点是最近的具名作用域")
+    an = python_ast_analyze("a.py", "def f():\n    return client.close()\n")
+    expect(len(an.points) == 1, f"只有 1 个判定点（实际 {len(an.points)}）")
+    expect(an.points[0].anchor == "f",
+           f"锚点是函数名 f（实际 {an.points[0].anchor}）")
+    cls = python_ast_analyze(
+        "a.py", "class S:\n    def close(self):\n        client.close()\n")
+    got = sorted({p.anchor for p in cls.points})
+    expect(got == ["close"], f"类方法锚点是方法名（实际 {got}）")
+    top = python_ast_analyze("a.py", "status = 'ready'\n")
+    expect(top.points[0].anchor == "<toplevel>",
+           f"顶层锚点是 <toplevel>（实际 {top.points[0].anchor}）")
+    expect(top.points[0].kind == "state",
+           f"状态赋值是 state（实际 {top.points[0].kind}）")
+
+
+def test_python_ast_concurrency_io_and_imports() -> None:
+    print("\nPython ast：并发、I/O、被导入的符号")
+    an = python_ast_analyze(
+        "a.py", "async def go():\n    await asyncio.gather(a())\n")
+    expect(any(p.kind == "concurrency" for p in an.points),
+           f"await / asyncio.gather 是 concurrency（实际 {an.points}）")
+    io = python_ast_analyze("a.py", "def q():\n    return db.query('x')\n")
+    expect(any(p.kind == "boundary-io" for p in io.points),
+           f"I/O 词表的调用是 boundary-io（实际 {io.points}）")
+    imp = python_ast_analyze(
+        "a.py",
+        "from db import query_rows\n\ndef q():\n    return query_rows()\n")
+    expect(any(p.kind == "boundary-io" for p in imp.points),
+           f"被导入符号的调用是 boundary-io（实际 {imp.points}）")
+
+
+def test_python_ast_parse_error_does_not_crash() -> None:
+    print("\nPython ast：源码解析失败不崩、也不给一张空清单")
+    bad = python_ast_analyze("a.py", "def f(:\n")
+    expect(bad.level == "L1", f"解析失败降级到 L1（实际 {bad.level}）")
+    expect("解析失败" in bad.note, f"写明解析失败（实际 {bad.note!r}）")
+    expect(not bad.points, "解析失败不产判定点")
+
+
+def test_python_ast_match_and_with() -> None:
+    print("\nPython ast：match 分支与 with 语句")
+    an = python_ast_analyze(
+        "a.py",
+        "def f(x):\n"
+        "    match x:\n"
+        "        case 1:\n"
+        "            return 'a'\n"
+        "        case _:\n"
+        "            return 'b'\n")
+    branches = [p for p in an.points if p.kind == "branch"]
+    expect(len(branches) == 2,
+           f"match 的每个 case 一条 branch（实际 {len(branches)}）")
+    expect(all(p.line > 0 for p in an.points),
+           f"判定点都有行号（实际 {[p.line for p in an.points]}）")
+    w = python_ast_analyze(
+        "a.py", "def f():\n    with open('x') as fh:\n        return fh.read()\n")
+    kinds = {p.kind for p in w.points}
+    expect("resource" in kinds, f"with 语句是 resource（实际 {sorted(kinds)}）")
+    expect("boundary-io" in kinds, f"I/O 调用是 boundary-io（实际 {sorted(kinds)}）")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -520,6 +607,11 @@ def main() -> int:
     test_cross_backend_l2_subset_of_l3()
     test_l3_and_l2_agree_on_dp_ids()
     test_both_backends_agree_on_the_same_points()
+    test_python_ast_finds_kinds()
+    test_python_ast_anchor_is_function_name()
+    test_python_ast_concurrency_io_and_imports()
+    test_python_ast_match_and_with()
+    test_python_ast_parse_error_does_not_crash()
     print()
     if FAILURES:
         print(f"{len(FAILURES)} 项失败:")

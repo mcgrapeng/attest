@@ -19,10 +19,23 @@ import subprocess
 import sys
 from collections import Counter
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from req_plan import case_matches, parse_pins, parse_plan, test_case_names  # noqa: E402
+from req_plan import (  # noqa: E402
+    _vague_waiver,
+    _waiver_for,
+    case_matches,
+    derive_plan_analysis,
+    detect_plan_format,
+    module_source_files,
+    parse_detail_rows,
+    parse_pins,
+    parse_plan,
+    test_case_names,
+)
+from decision_points import HIGH_RISK_KINDS, normalize_dp_id  # noqa: E402
+import discriminate  # noqa: E402
 import mutation_check  # noqa: E402
 
 CODE_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
@@ -126,6 +139,10 @@ NOT_JUDGED = (
     "安全",
     "可用性",
     "运维就绪",
+    # 判定点引擎判的是「有没有判定点、判点有没有被钉住」，
+    # 不是「并发下对不对」「扛不扛得住量」—— 后两样本工具没有条件判。
+    "并发正确性",
+    "容量与规模行为",
 )
 
 
@@ -3275,6 +3292,478 @@ def check_requirement(m: Module, plan_path: str | None) -> Check:
                  ev, evidence_kind="executed")
 
 
+# ---------------------------------------------------------------- DPE 判定点引擎
+#
+# 三条新判据（规格 §7.1）：
+#   plan-alignment     计划与机器推导双向对齐（静态）
+#   decision-coverage  应有判定点覆盖到位（静态，**不产生 pass**）
+#   pin-discriminating 每条不变式的钉有区分力（实测）
+#
+# 三条判据**各管一段缺口空间** —— 同一个根因只报一条红：
+#   机器推导出、计划里没有        ⇒ plan-alignment（规格 §1.1 G2）
+#   计划里写了、既没归属也没豁免  ⇒ decision-coverage（规格 §4.2）
+
+#: 旧格式计划下三条判据一律降为 warn 时要写的话（规格 §4.4，测试认「升级」二字）
+_DPE_V1_NOTE = ("本计划还是旧的模块级维度表；升级到判定点粒度后，"
+                "这三条判据才会硬判")
+#: 推导只到 L2（词法回退）时的话（规格 §7.4：缺能力绝不报绿）
+_DPE_L2_NOTE = ("判定点推导只到 L2（词法回退）⇒ 这三条判据不硬判"
+                "（缺能力绝不报绿）")
+
+
+def _dpe_plan(m: Module, plan_path: str | None):
+    """读计划 ⇒ (plan, 说明)。没有计划 / 读不了 ⇒ (None, 说明)。"""
+    if not plan_path:
+        return None, "没给计划文件（--plan）"
+    pp = Path(plan_path)
+    if not pp.is_absolute() and not pp.exists():
+        pp = m.root / pp
+    if not pp.exists():
+        return None, f"计划文件不存在: {plan_path}"
+    try:
+        return parse_plan(pp), ""
+    except SystemExit:
+        return None, f"计划文件读不了: {plan_path}"
+
+
+def _dpe_modules(m: Module, plan) -> list[str]:
+    """判定点的推导范围：计划的目标模块；计划没写就本次检查的模块。"""
+    mods = [x.strip() for x in (getattr(plan, "modules", None) or []) if x.strip()]
+    return mods or [m.path]
+
+
+def _dpe_kind(dp_id: str) -> str:
+    """DP ID 里的 kind 段（`x#f#drop#2` ⇒ `drop`）。"""
+    parts = normalize_dp_id(dp_id).split("#")
+    return parts[2] if len(parts) >= 3 else ""
+
+
+def _dpe_gate(fmt: str, level: str, lenient: bool) -> tuple[str, str]:
+    """新判据的门槛 ⇒ (模式, 要补进说明的话)。
+
+    blocking = 照实报红；downgrade = 只提醒（--lenient）；force-warn = 一律 warn。
+    """
+    if fmt == "v1":
+        return "force-warn", _DPE_V1_NOTE
+    if level != "L3":
+        return "force-warn", _DPE_L2_NOTE
+    if lenient:
+        return "downgrade", "--lenient：只提醒不阻塞"
+    return "blocking", ""
+
+
+def _dpe_gate_apply(chk: Check, mode: str, note: str) -> Check:
+    if mode == "force-warn":
+        chk.status = "warn"
+        chk.detail = f"{chk.detail}｜{note}"
+    elif mode == "downgrade" and chk.status == "fail":
+        chk.status = "warn"
+        chk.detail = f"{chk.detail}｜{note}"
+    return chk
+
+
+def _dpe_py_candidates(files: list[str], modules: list[str]) -> set[str]:
+    """Python 源文件 ⇒ 可以被 import 的点号模块名集合。
+
+    `src/pkg/core.py`（模块 `src`）⇒ {"src.pkg.core", "pkg.core"} ——
+    计划里的 `from pkg.core import divide` 要能对上（pythonpath 可能是 src）。
+    """
+    out: set[str] = set()
+    for rel in files:
+        parts = list(PurePosixPath(rel).with_suffix("").parts)
+        if parts and parts[-1] == "__init__":
+            parts = parts[:-1]
+        if not parts:
+            continue
+        out.add(".".join(parts))
+        for mod in modules:
+            mp = list(PurePosixPath(mod).parts)
+            if len(parts) > len(mp) and parts[:len(mp)] == mp:
+                out.add(".".join(parts[len(mp):]))
+    return out
+
+
+def _dpe_refs_module(root: Path, test_rel: str, module_files: list[str],
+                     py_candidates: set[str]) -> bool:
+    """这个测试文件是不是**运行时**引用了目标模块（规格 §5.2）。
+
+    纯类型 import 运行时被擦除 ⇒ 不算引用。
+    """
+    try:
+        text = (root / test_rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return False
+    if test_rel.endswith(".py"):
+        mods, names = discriminate.python_imports(text)
+        for mod in mods:
+            if mod in py_candidates:
+                return True
+            if any(f"{mod}.{n}" in py_candidates for n in names):
+                return True
+        return False
+    for ref in discriminate.parse_imports(text, test_rel, root):
+        if ref.type_only:
+            continue
+        if ref.target and ref.target in module_files:
+            return True
+    return False
+
+
+def _dpe_zero_coverage(m: Module, plan, rows, module_files: list[str],
+                       py_candidates: set[str]) -> list[str]:
+    """钉不直接引用目标模块 ⇒ 对目标模块零覆盖（规格 §5.2）。
+
+    锚在**判定点行**上：行自己的落点，没有就退回那条不变式的钉；
+    豁免看行自己的「豁免理由」或正文里的 attest:waive 注释（规格 §5.3）。
+    """
+    inv_pins = {ident: pin for ident, _desc, pin in plan.invariants}
+    out: list[str] = []
+    for row in rows:
+        did = (row.dp_id or "").strip()
+        if not did:
+            continue
+        waiver = (row.waiver or "").strip() or _waiver_for(plan, did)
+        pin = (row.pin or "").strip()
+        if not pin:
+            pin = inv_pins.get((row.invariant or "").strip(), "")
+        pins = parse_pins(pin)
+        if not pins:
+            continue
+        test_rel = pins[0][0]
+        if not (m.root / test_rel).is_file():
+            continue        # 落点文件不存在 ⇒ 另一条判据报（规格 §4.2）
+        if _dpe_refs_module(m.root, test_rel, module_files, py_candidates):
+            continue
+        if waiver:
+            continue        # 豁免了就不报（理由逐条列在报告里）
+        out.append(f"{did} —— 这条不变式的钉（{test_rel}）不直接引用目标模块的"
+                   "任何代码；若是通过间接调用覆盖，请豁免并写理由")
+    return out
+
+
+def _dpe_alignment(dp, plan) -> dict:
+    """计划 ↔ 机器推导的双向差集（规格 §7.4 的 alignment 段）。
+
+    machine_only = 机器推导出、计划里没有（规格 §1.1 G2 ⇒ 报红）
+    human_only  = 计划里有、机器没推导出（保留待人签，不报红）
+    """
+    machine = ({normalize_dp_id(p.dp_id): p for p in dp.points if p.dp_id}
+               if dp is not None else {})
+    planned = set()
+    if plan is not None:
+        for row in parse_detail_rows(plan):
+            did = (row.dp_id or "").strip()
+            if did:
+                planned.add(normalize_dp_id(did))
+    return {
+        "machine_only": [k for k in sorted(machine) if k not in planned],
+        "human_only": [k for k in sorted(planned) if k not in machine],
+    }
+
+
+def _dpe_discriminating(dpsp, plan) -> dict:
+    """区分力自证的结果（规格 §7.4 的 discriminating 段）。"""
+    if not dpsp:
+        total = len(plan.invariants) if plan is not None else 0
+        return {"checked": 0, "total": total, "sample_rate": 0.0,
+                "killed": 0, "not_applicable": 0, "untested": 0,
+                "survivors": [],
+                "budget_note": "没跑区分力自证（--discriminating off，"
+                               "或没有可跑的钉）"}
+    checked = dpsp.get("checked", 0)
+    total = dpsp.get("total", 0)
+    survivors = []
+    for v in dpsp.get("verdicts") or []:
+        muts = []
+        for s in v.get("survivors") or []:
+            where = str(s.get("where", ""))
+            f, _, ln = where.rpartition(":")
+            muts.append({"file": f, "line": int(ln) if ln.isdigit() else None,
+                         "op": s.get("op")})
+        if muts:
+            survivors.append({"pin": v.get("pin", ""), "test": v.get("test", ""),
+                              "mutants": muts})
+    return {
+        "checked": checked,
+        "total": total,
+        "sample_rate": (checked / total) if total else 0.0,
+        "killed": dpsp.get("killed", 0),
+        "not_applicable": dpsp.get("not_applicable", 0),
+        "untested": dpsp.get("untested", 0),
+        "survivors": survivors,
+        "budget_note": dpsp.get("budget_note", ""),
+    }
+
+
+def check_plan_alignment(m: Module, plan_path: str | None, dp, *,
+                         lenient: bool = False) -> Check:
+    """计划 ↔ 机器推导双向对齐（规格 §7.1，静态）。
+
+    机器有/人工无 ⇒ 报红（规格 §1.1 G2）：计划的判定点列整列失效时，
+    每个移过行的判定点都落在这里。人工有/机器无 ⇒ 保留待人签（只列清单），
+    但 DP ID 指向的文件在仓库里不存在 ⇒ 报红（规格 §4.2）。
+    钉不直接引用目标模块 ⇒ 报红（规格 §5.2）。
+    """
+    plan, err = _dpe_plan(m, plan_path)
+    if plan is None:
+        return Check("plan-alignment", "计划与机器推导对齐", "skipped", err,
+                     evidence_kind="untested")
+    fmt = detect_plan_format(plan)
+    rows = parse_detail_rows(plan)
+    machine = {normalize_dp_id(p.dp_id): p for p in dp.points if p.dp_id}
+    align = _dpe_alignment(dp, plan)
+    machine_only = align["machine_only"]
+    human_only = align["human_only"]
+
+    ev: list[str] = []
+    for did in machine_only:
+        ev.append(f"{did} —— 机器推导出、计划里没有"
+                  "（计划的判定点列整列失效就会这样）")
+    missing_file: list[str] = []
+    for did in human_only:
+        f = did.split("#")[0]
+        if f and not (m.root / f).exists():
+            missing_file.append(did)
+            ev.append(f"{did} —— DP ID 指向的文件 {f} 在仓库里不存在")
+        else:
+            ev.append(f"{did} —— 计划里有、机器没推导出（保留待人签）")
+
+    modules = _dpe_modules(m, plan)
+    module_files = module_source_files(m.root, modules)
+    zero = _dpe_zero_coverage(m, plan, rows, module_files,
+                               _dpe_py_candidates(module_files, modules))
+
+    if not machine:
+        chk = Check("plan-alignment", "计划与机器推导对齐", "skipped",
+                    "没有可推导的判定点（源文件为空或解析失败）⇒ 不给结论",
+                    ev, evidence_kind="untested")
+        return _dpe_gate_apply(chk, *_dpe_gate(fmt, dp.level, lenient))
+    if machine_only or missing_file or zero:
+        chk = Check("plan-alignment", "计划与机器推导对齐", "fail",
+                    f"{len(machine_only)} 条判定点机器推导出但计划里没有；"
+                    f"{len(missing_file)} 条计划里的 DP 指向不存在的文件；"
+                    f"{len(zero)} 条钉不直接引用目标模块",
+                    ev + zero,
+                    "把机器推导出的判定点补进计划的判定点列，或删掉机器已不认的旧行",
+                    evidence_kind="static")
+    else:
+        chk = Check("plan-alignment", "计划与机器推导对齐", "pass",
+                    f"{len(machine)} 条判定点与计划一致", ev,
+                    evidence_kind="static")
+    return _dpe_gate_apply(chk, *_dpe_gate(fmt, dp.level, lenient))
+
+
+def check_decision_coverage(m: Module, plan_path: str | None, dp, *,
+                            lenient: bool = False) -> Check:
+    """应有判定点覆盖到位（规格 §7.1，静态；**不产生 pass**）。
+
+    计划里写了、既没归属不变式也没豁免理由的判定点：
+    高危四类（error-path/resource/drop/state）⇒ 报红；常规 ⇒ 只计数。
+    另外：归属的不变式不在清单里、落点用例不存在 ⇒ 报红（规格 §4.2）。
+    """
+    plan, err = _dpe_plan(m, plan_path)
+    if plan is None:
+        return Check("decision-coverage", "应有判定点覆盖到位", "skipped", err,
+                     evidence_kind="untested")
+    fmt = detect_plan_format(plan)
+    rows = parse_detail_rows(plan)
+    inv_ids = {ident for ident, _d, _p in plan.invariants}
+    hard: list[str] = []
+    notes: list[str] = []
+    regular = 0
+    covered = 0
+    for row in rows:
+        did = (row.dp_id or "").strip()
+        if not did:
+            continue
+        kind = _dpe_kind(did)
+        attributed = (row.invariant or "").strip()
+        waiver = (row.waiver or "").strip() or _waiver_for(plan, did)
+        if attributed and attributed not in inv_ids:
+            hard.append(f"{did} —— 归属的不变式 {attributed} 不在不变式清单里")
+            continue
+        if waiver and _vague_waiver(waiver):
+            notes.append(f"{did} —— 豁免理由「{waiver}」太笼统，"
+                         "写清楚豁免了什么")
+        if not attributed and not waiver:
+            if kind in HIGH_RISK_KINDS:
+                hard.append(f"{did} —— 高危判定点（{kind}）既没有归属不变式，"
+                            "也没有豁免理由")
+            else:
+                regular += 1
+            continue
+        covered += 1
+        for fpath, case in parse_pins((row.pin or "").strip()):
+            if not (m.root / fpath).exists():
+                hard.append(f"{did} —— 落点文件 {fpath} 不存在")
+            elif case is None:
+                notes.append(f"{did} —— 落点只写了文件没写用例名")
+            elif not case_matches(case, test_case_names(m.root, fpath)):
+                hard.append(f"{did} —— 落点用例 {fpath}::{case} 不存在")
+    if hard:
+        chk = Check("decision-coverage", "应有判定点覆盖到位", "fail",
+                    f"{len(hard)} 条判定点没覆盖到位"
+                    + (f"（另有 {regular} 条常规判定点无归属，只计数）"
+                       if regular else ""),
+                    hard + notes,
+                    "给高危判定点归属一条不变式，或写清楚豁免理由",
+                    evidence_kind="static")
+    else:
+        chk = Check("decision-coverage", "应有判定点覆盖到位", "skipped",
+                    f"{covered} 条判定点全部有归属或豁免"
+                    + (f"；{regular} 条常规判定点无归属（只计数）"
+                       if regular else "")
+                    + "（静态判定，不产生「通过」）",
+                    notes, evidence_kind="static")
+    return _dpe_gate_apply(chk, *_dpe_gate(fmt, dp.level, lenient))
+
+
+def check_pin_discriminating(m: Module, plan_path: str | None, dpsp, *,
+                             lenient: bool = False) -> Check:
+    """钉有区分力（规格 §7.1，实测）：把代码改坏 ⇒ 钉住的用例会不会红。
+
+    四档映射：fail（杀不死）＞ untested（判不了）＞ pass（杀得死）
+    ＞ skipped（没有可判的变异点）。
+    """
+    plan, err = _dpe_plan(m, plan_path)
+    if plan is None:
+        return Check("pin-discriminating", "钉有区分力", "skipped", err,
+                     evidence_kind="untested")
+    if not dpsp:
+        chk = Check("pin-discriminating", "钉有区分力", "untested",
+                    "没跑区分力自证（--discriminating off，或没有可跑的钉）",
+                    evidence_kind="untested")
+        return _dpe_gate_apply(
+            chk, *_dpe_gate(detect_plan_format(plan), "L3", lenient))
+    verdicts = dpsp.get("verdicts") or []
+    fails = [v for v in verdicts if v.get("status") == "fail"]
+    untested = [v for v in verdicts if v.get("status") == "untested"]
+    passes = [v for v in verdicts if v.get("status") == "pass"]
+    ev = [f"{v.get('invariant_id')}：{v.get('detail')}"
+          for v in fails + untested]
+    if fails:
+        status, detail = "fail", f"{len(fails)} 条不变式的钉发现不了这类缺陷"
+    elif untested:
+        status, detail = "untested", f"{len(untested)} 条判不了（环境没就绪 / 输出认不出）"
+    elif passes:
+        status, detail = "pass", f"{len(passes)} 条不变式的钉有区分力"
+    else:
+        status, detail = "skipped", "没有可判的变异点"
+    chk = Check("pin-discriminating", "钉有区分力", status, detail, ev,
+                evidence_kind="executed" if status in ("pass", "fail")
+                else "untested")
+    return _dpe_gate_apply(
+        chk, *_dpe_gate(detect_plan_format(plan),
+                        dpsp.get("level") or "L3", lenient))
+
+
+def _dpe_accounting(dp, plan) -> dict:
+    """判定点的账：总数 / 已归属 / 豁免 / 缺口（规格 §7.4）。"""
+    if dp is None:
+        return {"total": 0, "attributed": 0, "waived": 0, "gaps": 0,
+                "gaps_high_risk": [], "analysis_level": "L1",
+                "analysis_backend": "none", "analysis_backend_source": "none",
+                "analysis_note": "没给计划 ⇒ 没推导判定点"}
+    machine = {normalize_dp_id(p.dp_id): p for p in dp.points if p.dp_id}
+    planned: dict[str, object] = {}
+    if plan is not None:
+        for row in parse_detail_rows(plan):
+            did = (row.dp_id or "").strip()
+            if did:
+                planned[normalize_dp_id(did)] = row
+    attributed = 0
+    waived = 0
+    gaps: list = []
+    for key, p in machine.items():
+        row = planned.get(key)
+        if row is None:
+            gaps.append((key, p, "计划里没有这条判定点"))
+            continue
+        if (row.invariant or "").strip():
+            attributed += 1
+        elif (row.waiver or "").strip() or _waiver_for(plan, key):
+            waived += 1
+        else:
+            gaps.append((key, p, "既没有归属不变式，也没有豁免理由"))
+    high = [{"id": p.dp_id, "kind": p.kind, "file": p.file, "line": p.line,
+             "why": why}
+            for _key, p, why in gaps if p.kind in HIGH_RISK_KINDS]
+    return {
+        "total": len(machine),
+        "attributed": attributed,
+        "waived": waived,
+        "gaps": len(gaps),
+        "gaps_high_risk": high,
+        "analysis_level": dp.level,
+        "analysis_backend": dp.backend,
+        "analysis_backend_source": dp.backend_source,
+        "analysis_note": dp.note,
+    }
+
+
+def _dpe_run_dpsp(m: Module, root: Path, plan, dp, mode: str):
+    """跑一轮区分力自证（把代码改坏 ⇒ 看钉住的用例会不会红）。"""
+    invariants = [(ident, pin, desc) for ident, desc, pin in plan.invariants]
+    if not invariants:
+        return None
+    if m.lang == "py":
+        exe, ptests = python_test_cmd(m, root)
+        if not exe:
+            return None
+        runner = [exe]
+        test_rels = list(ptests or [])
+        ws_rel = "."
+        src_base = root
+    else:
+        if not m.workspace:
+            return None
+        runner, _script = project_test_cmd(m)
+        if not runner:
+            return None
+        ws_rel = str(m.workspace.relative_to(root)) or "."
+        test_rels = [str(t.relative_to(m.workspace)) for t in m.tests]
+        src_base = m.workspace
+    if not test_rels:
+        return None
+    modules = _dpe_modules(m, plan)
+    source_rels = []
+    for rel in module_source_files(root, modules):
+        try:
+            source_rels.append(str((root / rel).relative_to(src_base)))
+        except ValueError:
+            continue
+    budget = {"quick": 8, "auto": 20, "full": 40}.get(mode, 20)
+    max_mutants = {"quick": 2, "auto": 6, "full": 12}.get(mode, 6)
+    res = discriminate.run_dpsp(root, ws_rel, invariants, runner, test_rels,
+                                source_rels=source_rels,
+                                max_mutants=max_mutants, level=dp.level,
+                                budget=budget)
+    res["level"] = dp.level
+    return res
+
+
+def _dpe_print_section(acc: dict, alignment: dict, disc: dict) -> None:
+    """「判定点覆盖」输出节（规格 §7.2）。"""
+    print("── 判定点覆盖 " + "─" * 32)
+    print(f"  判定点总数 {acc['total']} ｜ 已归属 {acc['attributed']} ｜ "
+          f"豁免 {acc['waived']} ｜ 缺口 {acc['gaps']}")
+    counts = Counter(g["kind"] for g in acc["gaps_high_risk"])
+    print("  高危四类缺口：" + " ｜ ".join(
+        f"{k} {counts.get(k, 0)}" for k in sorted(HIGH_RISK_KINDS)))
+    if acc["gaps_high_risk"]:
+        print("  缺口清单（只列高危档）：")
+        for g in acc["gaps_high_risk"]:
+            print(f"    {g['id']}  {g['why']}")
+    if alignment["machine_only"]:
+        print(f"  机器推导出、计划里没有：{len(alignment['machine_only'])} 条")
+    print(f"  推导等级 {acc['analysis_level']}（后端 {acc['analysis_backend']}"
+          f"，来源 {acc['analysis_backend_source']}）")
+    if disc.get("total"):
+        print(f"  区分力自证：{disc['checked']}/{disc['total']} 条"
+              f"（{disc['sample_rate'] * 100:.0f}%），杀得死 {disc['killed']} 条")
+    print()
+
+
 def _module_exports_any(m: Module) -> dict[str, str]:
     """模块的导出符号（Python 用公开 def/class，TS 用 export）。"""
     if m.lang == "py":
@@ -3468,6 +3957,32 @@ def run_readiness(args) -> int:
         check_oracle_independence(m),
     ]
 
+    # ---- 判定点引擎（规格 §7）：机器推导 ↔ 人工计划 双向对齐 ----
+    # 没计划就不推导：三条判据全是「计划相对」的，没计划时判据一律 skipped，
+    # 推导只会白扫一遍模块（还会拖慢每次调用）。
+    dpe_plan, _dpe_err = _dpe_plan(m, args.plan)
+    dpe_analysis = None
+    if dpe_plan is not None:
+        dpe_analysis = derive_plan_analysis(
+            root, _dpe_modules(m, dpe_plan),
+            prefer=getattr(args, "analysis_backend", "auto"))
+    dpe_mode = getattr(args, "discriminating", "auto")
+    dpe_fmt = detect_plan_format(dpe_plan) if dpe_plan else "v1"
+    dpsp = None
+    if dpe_plan is not None and dpe_mode != "off":
+        # auto：只对判定点粒度的计划跑（v1 计划里没有 DP 列，跑了也对不上）
+        if dpe_mode in ("quick", "full") or dpe_fmt == "v2":
+            dpsp = _dpe_run_dpsp(m, root, dpe_plan, dpe_analysis, dpe_mode)
+    dpe_lenient = bool(getattr(args, "lenient", False))
+    checks.extend([
+        check_plan_alignment(m, args.plan, dpe_analysis, lenient=dpe_lenient),
+        check_decision_coverage(m, args.plan, dpe_analysis, lenient=dpe_lenient),
+        check_pin_discriminating(m, args.plan, dpsp, lenient=dpe_lenient),
+    ])
+    dpe_acc = _dpe_accounting(dpe_analysis, dpe_plan)
+    dpe_align = _dpe_alignment(dpe_analysis, dpe_plan)
+    dpe_disc = _dpe_discriminating(dpsp, dpe_plan)
+
     # ---- 结论：证据分层 + 三档，不用"达到交付条件"这种裁决措辞 ----
     # 为什么不是裁决：工具掌握的是"11 条机械判据的实测状态"，不是"这个模块能不能
     # 交付客户"。那两者之间隔着一整层未言明的推理（需求是否被正确理解、性能、安全、
@@ -3491,6 +4006,10 @@ def run_readiness(args) -> int:
             "module": m.path,
             "tables": m.tables,
             "checks": [c.__dict__ for c in checks],
+            # 三段都是**顶层并列键**，不进 conclusion（规格 §7.4）
+            "decision_points": dpe_acc,
+            "alignment": dpe_align,
+            "discriminating": dpe_disc,
             "conclusion": {
                 "blocking": len(fails),
                 "needs_human": len(warns),
@@ -3522,6 +4041,9 @@ def run_readiness(args) -> int:
             if c.status in ("fail", "warn") and c.fix:
                 print(f"      → {c.fix}")
         print()
+
+    if dpe_plan is not None:
+        _dpe_print_section(dpe_acc, dpe_align, dpe_disc)
 
     _section("已实测", [c for c in checks if c.evidence_kind == "executed"])
     _section("静态信号（不能单独支撑「通过」）",
@@ -3653,6 +4175,16 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--mutation-check", action="store_true",
                     help="测试强度：把源码改坏，看测试会不会红（变异测试的轻量版）"
                          "—— 要复制工作区并多次跑测试，很贵，默认不跑")
+    ap.add_argument("--lenient", action="store_true",
+                    help="只提醒不阻塞：三条判定点判据的报红一律降成警告")
+    ap.add_argument("--discriminating", choices=("auto", "off", "quick", "full"),
+                    default="auto",
+                    help="钉的区分力自证：auto=只对判定点粒度的计划跑；"
+                         "off=不跑；quick=少跑几条；full=多跑几条（很贵）")
+    ap.add_argument("--analysis-backend", choices=("auto", "b1", "b2", "l2"),
+                    default="auto",
+                    help="判定点推导的后端：auto=有 TS AST 就用；"
+                         "l2=只用词法回退（推导等级会标成 L2，三条判据不硬判）")
     args = ap.parse_args(argv)
     for name, pat in (("--drift-pattern", args.drift_pattern),
                       ("--table-header-pattern", args.table_header_pattern)):

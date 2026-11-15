@@ -25,8 +25,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from decision_points import (  # noqa: E402
-    DpAnalysis, HIGH_RISK_KINDS, ast_analyze, detect_backend, dp_key,
-    lexical_analyze, python_ast_analyze,
+    DpAnalysis, HIGH_RISK_KINDS, analyze_files, dp_key,
 )
 
 # ---------------------------------------------------------------- 常量
@@ -2772,8 +2771,12 @@ def _read_text(p: Path) -> str:
         return ""
 
 
-def _module_source_files(root: Path, modules: list[str]) -> list[str]:
-    """目标模块里的生产源码（相对仓库根）—— 测试文件不算。"""
+def module_source_files(root: Path, modules: list[str]) -> list[str]:
+    """目标模块里的生产源码（相对仓库根）—— 测试文件不算。
+
+    判定点推导与「钉是否碰到目标模块」两处共用这一份清单 ——
+    两边口径不一样 ⇒ 机器矩阵与计划对不齐 ⇒ 满屏假缺口。
+    """
     out: list[str] = []
     exts = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", ".py"}
     for mod in modules:
@@ -2792,34 +2795,20 @@ def _module_source_files(root: Path, modules: list[str]) -> list[str]:
     return sorted(out)
 
 
-def derive_plan_points(root: Path, modules: list[str]) -> tuple[list, str]:
-    """推导目标模块的判定点 ⇒ (判定点列表, 等级说明)。
+def derive_plan_analysis(root: Path, modules: list[str],
+                         prefer: str = "auto") -> DpAnalysis:
+    """目标模块的判定点推导 —— 等级/后端/来源如实报（规格 §7.4）。
 
     规格 §3.2：有 TS AST 后端 ⇒ L3；没有 ⇒ L2 词法；Python ⇒ 标准库 ast。
     """
-    files = _module_source_files(root, modules)
-    ts_files = [f for f in files if not f.endswith(".py")]
-    py_files = [f for f in files if f.endswith(".py")]
-    points: list = []
-    notes: list[str] = []
-    if ts_files:
-        backend = detect_backend(root)
-        an = ast_analyze(root, ts_files, backend) if backend else None
-        if an is not None and an.points:
-            points.extend(an.points)
-            notes.append(f"L3 AST 推导（{an.note}）")
-        else:
-            for rel in ts_files:
-                points.extend(lexical_analyze(rel, _read_text(root / rel)))
-            notes.append("L2 词法推导（启发式，可能有误报）")
-    for rel in py_files:
-        an = python_ast_analyze(rel, _read_text(root / rel))
-        points.extend(an.points)
-        notes.append("L3 Python ast 推导" if an.level == "L3"
-                     else f"Python 源码解析失败（{an.note}）")
-    allp = DpAnalysis(level="L3" if points else "L1", points=points)
-    allp.assign_ids()
-    return allp.points, "；".join(notes) or "没有可分析的源文件"
+    return analyze_files(root, module_source_files(root, modules),
+                         prefer=prefer)
+
+
+def derive_plan_points(root: Path, modules: list[str]) -> tuple[list, str]:
+    """推导目标模块的判定点 ⇒ (判定点列表, 等级说明)。"""
+    an = derive_plan_analysis(root, modules)
+    return an.points, an.note or "没有可分析的源文件"
 
 
 def _dp_desc(root: Path, point) -> str:

@@ -585,13 +585,17 @@ def main() -> int:
     r16 = run("src", "--repo", str(layout), "--json")
     data16 = json.loads(r16.stdout)
     keys16 = [c["key"] for c in data16["checks"]]
-    expect(len(keys16) == 14, f"报告里有 14 条判据（实际 {len(keys16)}）")
+    expect(len(keys16) == 17, f"报告里有 17 条判据（实际 {len(keys16)}）")
     expect("field-compare" not in keys16,
            "字段级比对不是独立判据（并入数据流一致）")
     expect("data-flow" in keys16, "数据流一致这条在")
     expect("oracle" in keys16, "oracle 独立性这条在（G004 加的）")
     expect("test-strength" in keys16, "测试强度这条在（变异测试）")
     expect("vector-schema" in keys16, "向量集合属性这条在")
+    # 判定点引擎新增的三条（规格 §7.1）——
+    expect("plan-alignment" in keys16, "计划与机器推导对齐这条在")
+    expect("decision-coverage" in keys16, "应有判定点覆盖到位这条在")
+    expect("pin-discriminating" in keys16, "钉有区分力这条在")
 
     # SKILL.md 的判据表必须与代码里的 Check 一一对应 ——
     # 这仓库栽过一回："文档 12 条 vs 代码 11 个 Check"，谁都没发现。

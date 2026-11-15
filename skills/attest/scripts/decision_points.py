@@ -1457,3 +1457,66 @@ def python_ast_analyze(file: str, source: str) -> DpAnalysis:
     an.points = visitor.points
     an.assign_ids()
     return an
+
+
+# ------------------------------------------------------- 一组文件的合并推导
+
+
+def _read_source(root: Path, rel: str) -> str:
+    try:
+        return (Path(root) / rel).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+
+
+def analyze_files(root: Path, files: list[str],
+                  prefer: str = "auto") -> DpAnalysis:
+    """一组源文件（TS/JS + Python 混合）的判定点推导。
+
+    等级取**各组里最低的那档**：TS 那边只要退回 L2，整体就只是 L2
+    （规格 §7.4：L2 下新判据一律不硬判 ⇒ 缺能力绝不报绿）。
+    """
+    root = Path(root)
+    ts_files = [f for f in files if not f.endswith(".py")]
+    py_files = [f for f in files if f.endswith(".py")]
+    points: list[DecisionPoint] = []
+    notes: list[str] = []
+    rank = 3
+    backend = "none"
+    backend_source = "none"
+
+    if ts_files:
+        be = detect_backend(root, prefer)
+        an = ast_analyze(root, ts_files, be) if be else None
+        if an is not None and an.points:
+            points.extend(an.points)
+            notes.append(f"L3 AST 推导（{an.note}）")
+            backend, backend_source = an.backend, an.backend_source
+        else:
+            for rel in ts_files:
+                points.extend(lexical_analyze(rel, _read_source(root, rel)))
+            notes.append("L2 词法推导（启发式，可能有误报）")
+            rank = min(rank, 2)
+            backend, backend_source = "lexical", "none"
+    if py_files:
+        parsed = False
+        for rel in py_files:
+            an = python_ast_analyze(rel, _read_source(root, rel))
+            points.extend(an.points)
+            if an.level == "L3":
+                parsed = True
+                notes.append("L3 Python ast 推导")
+            else:
+                notes.append(f"Python 源码解析失败（{an.note}）")
+        if parsed:
+            if backend == "none":
+                backend, backend_source = "py-ast", "stdlib"
+        else:
+            rank = min(rank, 1)
+
+    out = DpAnalysis(level=("L3" if rank == 3 else "L2" if rank == 2 else "L1"),
+                     backend=backend, backend_source=backend_source,
+                     note="；".join(notes) or "没有可分析的源文件",
+                     points=points)
+    out.assign_ids()
+    return out

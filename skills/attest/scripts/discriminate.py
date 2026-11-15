@@ -15,6 +15,7 @@
 """
 from __future__ import annotations
 
+import ast
 import json
 import math
 import os
@@ -29,8 +30,8 @@ from mutation_check import (  # noqa: E402
     match_case, run_mutation_check)
 from req_plan import parse_pins  # noqa: E402
 
-__all__ = ["ImportRef", "Verdict", "parse_imports", "runtime_symbols",
-           "match_case", "run_dpsp"]
+__all__ = ["ImportRef", "Verdict", "file_exports", "parse_imports",
+           "python_imports", "runtime_symbols", "match_case", "run_dpsp"]
 
 #: 不变式超过这个数就抽样（规格 §6.5）
 BUDGET = 20
@@ -58,6 +59,8 @@ class Verdict:
     evidence: list[str] = field(default_factory=list)
     killed: int = 0
     survivors: list[dict] = field(default_factory=list)
+    pin: str = ""                    # 这条不变式的钉（规格 §7.4 的 JSON 要回指）
+    test: str = ""                   # 钉住的那个用例
 
 
 # ---------------------------------------------------------------- 导入解析
@@ -152,7 +155,7 @@ def parse_imports(source: str, file: str, root: Path) -> list[ImportRef]:
              type_only: bool) -> None:
         target, relative = _resolve_specifier(spec, file, root)
         if namespace and target:
-            exports = _file_exports(root / target)
+            exports = file_exports(root / target)
             if exports:
                 symbols = tuple(sorted(exports))
         ref = ImportRef(spec=spec, target=target, symbols=symbols,
@@ -296,7 +299,34 @@ def _resolve_alias(spec: str, file: str, root: Path) -> str | None:
     return None
 
 
-def _file_exports(path: Path) -> set[str]:
+def python_imports(source: str) -> tuple[set[str], set[str]]:
+    """Python 文件的 import ⇒ (被 import 的点号模块名, 绑定进来的名字)。
+
+    `from pkg.core import f` ⇒ ({"pkg.core"}, {"f"})；
+    `import pkg.core` ⇒ ({"pkg.core"}, {"pkg"})。
+    相对 import（`from . import x`）不给模块名 —— 它的根由包结构决定，
+    这里不做路径解析，交给调用方按符号交集判断。
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return set(), set()
+    modules: set[str] = set()
+    names: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                modules.add(alias.name)
+                names.add(alias.asname or alias.name.split(".")[0])
+        elif isinstance(node, ast.ImportFrom) and not node.level:
+            if node.module:
+                modules.add(node.module)
+            for alias in node.names:
+                names.add(alias.asname or alias.name)
+    return modules, names
+
+
+def file_exports(path: Path) -> set[str]:
     """一个文件导出的符号名。"""
     try:
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -342,7 +372,7 @@ def _module_closure(root: Path, entry_rel: str) -> tuple[set[str], set[str]]:
         if not p.is_file():
             continue
         files.add(rel)
-        symbols |= _file_exports(p)
+        symbols |= file_exports(p)
         try:
             text = p.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -518,9 +548,11 @@ def _alias_notes(root: Path, test_rel: str, source_set: set[str]) -> list[str]:
 
 
 def _verdict(inv_id: str, status: str, detail: str, evidence: list[str],
-             killed: int, survivors: list[dict]) -> dict:
+             killed: int, survivors: list[dict], *, pin: str = "",
+             test: str = "") -> dict:
     return asdict(Verdict(invariant_id=inv_id, status=status, detail=detail,
-                           evidence=evidence, killed=killed, survivors=survivors))
+                           evidence=evidence, killed=killed, survivors=survivors,
+                           pin=pin, test=test))
 
 
 def run_dpsp(repo: Path, ws_rel: str,
@@ -528,11 +560,12 @@ def run_dpsp(repo: Path, ws_rel: str,
              runner: list[str], test_rels: list[str],
              *, source_rels: list[str], timeout: int = 120,
              max_mutants: int = 6, level: str = "L3",
-             parse_check=None, classify=None) -> dict:
+             budget: int = BUDGET, parse_check=None, classify=None) -> dict:
     """每条不变式跑一轮「把代码改坏 ⇒ 看钉住的用例会不会红」。
 
     `invariants` 是 (不变式 id, 钉的单元格, 不变式文本) 三元组；
     钉的单元格按 `path::用例名` 解析（规格 §5）。
+    `budget` 是本轮最多抽样多少条不变式（超预算等距抽样，规格 §7.4）。
     返回：
         checked        判了多少条
         total          一共多少条
@@ -544,7 +577,7 @@ def run_dpsp(repo: Path, ws_rel: str,
         notes          说明与阻碍
     """
     total = len(invariants)
-    picked = _sample_invariants(invariants)
+    picked = _sample_invariants(invariants, budget)
     base = repo if ws_rel in (".", "") else repo / ws_rel
     ops = OPERATORS if level == "L3" else L2_OPERATORS
     base_classify = classify if classify is not None else _default_classify
@@ -624,7 +657,8 @@ def run_dpsp(repo: Path, ws_rel: str,
         if status in ("fail", "untested"):
             notes.extend(evidence)
         verdicts.append(_verdict(inv_id, status, detail, evidence,
-                                 res["killed"], surv))
+                                 res["killed"], surv, pin=pin_cell,
+                                 test=test_rel))
 
     if total > len(picked):
         budget_note = (f"共 {total} 条不变式，按预算只判了 {len(picked)} 条"

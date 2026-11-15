@@ -2,6 +2,12 @@
 # 但"composite action 在 GitHub 上真的能跑"这句话，只有真跑一次才算数。
 #
 # 用 `uses: ./` 测**当前 checkout**（不是某个 tag）⇒ 改了 action.yml 立刻能验。
+#
+# 两条 step，把两种行为都断言住：
+#   · strict=false ⇒ job 必须绿（默认不拦合并）
+#   · strict=true  ⇒ job 必须红（阻塞项要能让 CI 失败）
+# 本仓库自己跑判据时确实有阻塞项（skills/attest/scripts 的导出引用判据），
+# 所以 strict=true 应当失败 —— 这正是要断言的行为。
 name: Action smoke test
 
 on:
@@ -22,8 +28,27 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: 跑 action（严格模式：阻塞项应当让 job 失败）
+
+      - name: 默认模式：不拦合并 ⇒ 必须绿
+        uses: ./
+        with:
+          module: skills/attest/scripts
+          strict: 'false'
+          comment: 'false'
+
+      - name: 严格模式：阻塞项 ⇒ 必须红
+        id: strict
+        continue-on-error: true
         uses: ./
         with:
           module: skills/attest/scripts
           strict: 'true'
+          comment: 'false'
+
+      - name: 断言 —— 严格模式确实失败了
+        run: |
+          if [ "${{ steps.strict.outcome }}" != "failure" ]; then
+            echo "::error::严格模式应当让 job 失败（实际 outcome=${{ steps.strict.outcome }}）"
+            exit 1
+          fi
+          echo "严格模式按预期失败了 ✓"

@@ -628,7 +628,13 @@ def _backend_label(pkg_dir: Path) -> str:
 
 def _run_ts_script(script: str, mode: str, pkg_dir: str, payload: dict,
                    cwd: Path, timeout: int = 180) -> tuple[int, str, str]:
-    """在**临时目录**里跑一段 .mjs（绝不写进用户仓库）⇒ (退出码, stdout, stderr)。"""
+    """在**临时目录**里跑一段 .mjs（绝不写进用户仓库）⇒ (退出码, stdout, stderr)。
+
+    stdout/stderr 落**文件**而不是管道：macOS 上管道写是异步的，脚本写完
+    就 `process.exit()` ⇒ 超过管道缓冲（64KB）的尾巴当场丢掉。真实模块的
+    判定点 JSON 早就超过 64KB ⇒ AST 推导会静默退回 L2，整套判定点引擎
+    在真实仓库上失效。文件写是同步的 ⇒ 写完即落盘，丢不了。
+    """
     node = shutil.which("node")
     if not node:
         return 127, "", "找不到 node"
@@ -641,17 +647,22 @@ def _run_ts_script(script: str, mode: str, pkg_dir: str, payload: dict,
         (tdir / "attest-ts.mjs").write_text(script, encoding="utf-8")
         (tdir / "payload.json").write_text(
             json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        out_file = tdir / "stdout.txt"
+        err_file = tdir / "stderr.txt"
         try:
-            proc = subprocess.run(
-                [node, str(tdir / "attest-ts.mjs"), mode, pkg_dir,
-                 str(tdir / "payload.json")],
-                cwd=str(cwd), capture_output=True, text=True, encoding="utf-8",
-                errors="replace", timeout=timeout, env=env)
+            with out_file.open("wb") as fo, err_file.open("wb") as fe:
+                proc = subprocess.run(
+                    [node, str(tdir / "attest-ts.mjs"), mode, pkg_dir,
+                     str(tdir / "payload.json")],
+                    cwd=str(cwd), stdout=fo, stderr=fe,
+                    timeout=timeout, env=env)
         except subprocess.TimeoutExpired:
             return 124, "", f"node 超时（{timeout}s）"
         except (OSError, ValueError) as exc:
             return 127, "", str(exc)
-    return proc.returncode, proc.stdout, proc.stderr
+        out = out_file.read_bytes().decode("utf-8", errors="replace")
+        err = err_file.read_bytes().decode("utf-8", errors="replace")
+    return proc.returncode, out, err
 
 
 def _probe_backend(kind: str, pkg_dir: Path) -> tuple[bool, str]:
@@ -697,6 +708,31 @@ def detect_backend(root: Path, prefer: str = "auto") -> TsBackend | None:
     return None
 
 
+def _parse_ts_json(out: str) -> tuple[dict | None, bool]:
+    """解析 TS 后端的 stdout ⇒ (数据, 输出是否被截断)。
+
+    后端约定「一行一个 JSON」。有一行以 `{` 开头却解析不了 ⇒ 输出被截断
+    （大模块的 JSON 会被管道缓冲截在 64 KiB）—— 这时要说清楚，不能把
+    半截 JSON 当成「后端跑不起来」糊弄过去。
+    """
+    text = out.strip()
+    if not text:
+        return None, False
+    truncated = False
+    for line in reversed(text.splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+        except ValueError:
+            truncated = True
+            continue
+        if isinstance(data, dict):
+            return data, truncated
+    return None, truncated
+
+
 def ast_analyze(root: Path, files: list[str],
                 backend: TsBackend | None) -> DpAnalysis:
     """用 TS AST 后端推导 L3 判定点。
@@ -731,14 +767,13 @@ def ast_analyze(root: Path, files: list[str],
     }
     code, out, err = _run_ts_script(_probe_script(), "analyze",
                                     backend.package_dir, payload, Path(root))
-    data: dict | None = None
-    if out.strip():
-        try:
-            data = json.loads(out.strip().splitlines()[-1])
-        except ValueError:
-            data = None
+    data, truncated = _parse_ts_json(out)
     if code != 0 or not data or not data.get("ok"):
-        reason = str((data or {}).get("error") or err.strip() or out.strip())[:200]
+        if truncated:
+            reason = (f"后端输出被截断（只拿到 {len(out)} 字节，"
+                      "JSON 不完整）")
+        else:
+            reason = str((data or {}).get("error") or err.strip() or out.strip())[:200]
         return DpAnalysis(level="L1", backend="none", backend_source="none",
                           note=f"{label}；后端跑不起来：{reason}")
     points = [
@@ -776,12 +811,7 @@ def structural_points(root: Path, files: list[str],
                "nodePath": str(Path(backend.package_dir).parent)}
     code, out, _err = _run_ts_script(_probe_script(), "mutate",
                                      backend.package_dir, payload, Path(root))
-    data: dict | None = None
-    if out.strip():
-        try:
-            data = json.loads(out.strip().splitlines()[-1])
-        except ValueError:
-            data = None
+    data, _truncated = _parse_ts_json(out)
     if code != 0 or not data or not data.get("ok"):
         return []
     return [p for p in data.get("points", []) if isinstance(p, dict)]
@@ -1221,13 +1251,19 @@ function probeKind(kind, file, dir) {
   }
 }
 
+// stdout 是**异步**管道（macOS）⇒ 写完不能立刻 exit：没刷完的数据会被丢掉
+// （大模块的 JSON 截在 64 KiB ⇒ 解析失败 ⇒ 静默退回 L2，能力凭空少一档）。
+// 退出放进写回调 ⇒ 数据落地后才退。
+function emit(obj, code) {
+  process.stdout.write(JSON.stringify(obj) + "\n", () => process.exit(code));
+}
+
 if (mode === "probe") {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "attest-ts-probe-"));
   const file = path.join(dir, "probe.ts");
   fs.writeFileSync(file, "if (x >= 1) { throw new Error('e'); }\n", "utf8");
   const r = probeKind(payload.kind, file, dir);
-  process.stdout.write(JSON.stringify(r) + "\n");
-  process.exit(r.ok ? 0 : 1);
+  emit(r, r.ok ? 0 : 1);
 } else if (mode === "analyze") {
   try {
     const backend = payload.kind === "B1"
@@ -1235,12 +1271,9 @@ if (mode === "probe") {
       : openB2(payload.files, payload.cwd);
     const points = analyzeFiles(backend, payload.files);
     backend.close();
-    process.stdout.write(JSON.stringify({ ok: true, points: points }) + "\n");
-    process.exit(0);
+    emit({ ok: true, points: points }, 0);
   } catch (e) {
-    process.stdout.write(JSON.stringify({
-      ok: false, error: String((e && e.message) || e) }) + "\n");
-    process.exit(1);
+    emit({ ok: false, error: String((e && e.message) || e) }, 1);
   }
 } else if (mode === "mutate") {
   try {
@@ -1249,16 +1282,12 @@ if (mode === "probe") {
       : openB2(payload.files, payload.cwd);
     const points = collectStructural(backend, payload.files);
     backend.close();
-    process.stdout.write(JSON.stringify({ ok: true, points: points }) + "\n");
-    process.exit(0);
+    emit({ ok: true, points: points }, 0);
   } catch (e) {
-    process.stdout.write(JSON.stringify({
-      ok: false, error: String((e && e.message) || e) }) + "\n");
-    process.exit(1);
+    emit({ ok: false, error: String((e && e.message) || e) }, 1);
   }
 } else {
-  process.stdout.write(JSON.stringify({ ok: false, error: "未知模式 " + mode }) + "\n");
-  process.exit(1);
+  emit({ ok: false, error: "未知模式 " + mode }, 1);
 }
 """
 
@@ -1495,7 +1524,8 @@ def analyze_files(root: Path, files: list[str],
         else:
             for rel in ts_files:
                 points.extend(lexical_analyze(rel, _read_source(root, rel)))
-            notes.append("L2 词法推导（启发式，可能有误报）")
+            notes.append("L2 词法推导（启发式，可能有误报）；"
+                         + (an.note if an is not None else "没有可用的 TS AST 后端"))
             rank = min(rank, 2)
             backend, backend_source = "lexical", "none"
     if py_files:

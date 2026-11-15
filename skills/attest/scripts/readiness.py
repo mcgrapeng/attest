@@ -725,6 +725,8 @@ def _classify_run(code: int, out: str, name: str) -> tuple[list[str], list[str]]
     if code == 0:
         summ = _node_summary(out)
         if summ["tests"] == 0:
+            summ = _pytest_summary(out)      # pytest / tox
+        if summ["tests"] == 0:
             return [], [f"{name}: 没解析出任何用例结果（退出码 0，但没有用例汇总）"]
         return [], []
     # 退出码非 0 —— 这次跑没通过
@@ -3710,7 +3712,7 @@ def _dpe_run_dpsp(m: Module, root: Path, plan, dp, mode: str):
         exe, ptests = python_test_cmd(m, root)
         if not exe:
             return None
-        runner = [exe]
+        runner = [exe, "-rA"]   # -rA：pytest 默认捕获 stderr ⇒ 变异标记被吞掉
         test_rels = list(ptests or [])
         ws_rel = "."
         src_base = root

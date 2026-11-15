@@ -256,6 +256,60 @@ def test_verdict_untested_when_pin_is_broken() -> None:
     expect(res["verdicts"][0]["status"] != "fail", "判不了不报红")
 
 
+def test_monorepo_pin_resolves_against_repo_root() -> None:
+    """monorepo：钉的基准是仓库根，变异检查跑在工作区 ⇒ 两边必须对齐。
+
+    基准错位的后果不是「判红」而是「全判不了」：钉指向的文件在
+    `<仓库根>/service/src/...`，按工作区相对找就是 `<仓库根>/service/service/src/...`
+    ⇒ 每条钉都报「文件不存在」⇒ 区分力一条也测不出来。
+    """
+    root = node_repo({"service/package.json":
+                      '{"name":"svc","version":"1.0.0"}\n'})
+    write(root / "service/src/calc.ts", COVERED_TS)
+    write(root / "service/src/calc.test.ts", COVERED_TEST)
+    res = run_dpsp(root, "service",
+                   [("INV-1", "service/src/calc.test.ts::classifies zero", "x")],
+                   ["node", "--test"], ["src/calc.test.ts"],
+                   source_rels=["src/calc.ts"], level="L2")
+    expect(res["verdicts"][0]["status"] == "pass",
+           "仓库根相对的钉在 monorepo 里也能判出区分力"
+           f"（实际 {res['verdicts'][0]['status']}：{res['verdicts'][0]['detail']}）")
+    expect(res["verdicts"][0]["test"] == "src/calc.test.ts",
+           "结论里记的是工作区相对路径")
+
+
+def test_pin_outside_workspace_is_untested() -> None:
+    """钉指向工作区之外的文件 ⇒ 副本里跑不到 ⇒ 判不了，不报红。"""
+    root = node_repo({"service/package.json":
+                      '{"name":"svc","version":"1.0.0"}\n',
+                      "other/x.test.ts": COVERED_TEST})
+    res = run_dpsp(root, "service",
+                   [("INV-1", "other/x.test.ts::classifies zero", "x")],
+                   ["node", "--test"], ["src/calc.test.ts"],
+                   source_rels=["src/calc.ts"], level="L2")
+    expect(res["verdicts"][0]["status"] == "untested",
+           "工作区外的钉 ⇒ untested")
+    expect(res["verdicts"][0]["status"] != "fail", "判不了不报红")
+
+
+def test_not_applicable_verdict_still_reports_its_pin() -> None:
+    """不适用也必须说清「是哪条钉、哪个测试文件」。
+
+    少了这两个字段，报告里就只剩一句「不适用」⇒ 看的人无从判断
+    是钉指错了还是这条本来就不在判定范围。
+    """
+    repo = node_repo({"src/calc.ts": COVERED_TS, "src/calc.test.ts": COVERED_TEST})
+    # 源文件不可达 ⇒ 走「没有相对路径可达的源文件」那一档
+    res = run_dpsp(repo, ".", [("INV-2", "src/calc.test.ts::classifies zero", "x")],
+                   ["node", "--test"], ["src/calc.test.ts"],
+                   source_rels=["src/other.ts"], level="L2")
+    v = res["verdicts"][0]
+    expect(v["status"] == "not-applicable", "源文件不可达 ⇒ not-applicable")
+    expect(v["pin"] == "src/calc.test.ts::classifies zero",
+           "不适用也报得出钉")
+    expect(v["test"] == "src/calc.test.ts", "不适用也报得出测试文件")
+
+
 def test_match_case_is_the_mutation_check_one() -> None:
     import mutation_check
     expect(match_case is mutation_check.match_case,
@@ -292,6 +346,9 @@ def main() -> int:
     test_mutant_marker_makes_unloaded_code_not_applicable()
     test_package_reachable_file_is_not_mutated()
     test_verdict_untested_when_pin_is_broken()
+    test_monorepo_pin_resolves_against_repo_root()
+    test_pin_outside_workspace_is_untested()
+    test_not_applicable_verdict_still_reports_its_pin()
     test_match_case_is_the_mutation_check_one()
     test_budget_reports_sampled_ratio()
 

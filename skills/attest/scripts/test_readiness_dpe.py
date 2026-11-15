@@ -334,6 +334,36 @@ def test_text_output_has_decision_point_section():
     expect("判定点总数 3" in r.stdout, "节里写了判定点总数")
 
 
+def test_pytest_passing_output_is_understood():
+    """pytest 的「1 passed」必须读得出来——否则钉住用例一跑绿就判不了。"""
+    fails, setup = readiness._classify_run(0, "1 passed in 0.01s\n", "变异")
+    expect(not fails and not setup,
+           f"pytest 全绿 ⇒ 读得出用例结果（实际 fails={fails} setup={setup}）")
+
+
+def test_python_dpsp_lane_produces_signal():
+    """readiness 这条链上，Python 的 DPSP 必须真判出结论。
+
+    之前的 Python 路径恒「不适用」⇒ 判据恒绿（橡皮章）；后来又恒「判不了」
+    （pytest 的汇总读不出来、变异标记被捕获吞掉）⇒ 还是恒绿。
+    """
+    root, m = py_repo()
+    plan_path = write(root / "docs" / "plan.md", V2_PLAN)
+    plan = req_plan.parse_plan(plan_path)
+    dp = req_plan.derive_plan_analysis(root, ["src"])
+    dpsp = readiness._dpe_run_dpsp(m, root, plan, dp, "quick")
+    expect(dpsp is not None, "Python 的 DPSP 跑起来了")
+    if dpsp is None:
+        return
+    verdicts = dpsp.get("verdicts") or []
+    expect(bool(verdicts), "出了一份结论")
+    expect(all(v.get("status") != "not-applicable" for v in verdicts),
+           f"没有恒「不适用」（实际 {[v.get('status') for v in verdicts]}）")
+    c = readiness.check_pin_discriminating(m, str(plan_path), dpsp)
+    expect(c.status == "pass",
+           f"强断言的钉 ⇒ 判据 pass（实际 {c.status}：{c.detail}）")
+
+
 def test_not_judged_gained_two_entries():
     expect("并发正确性" in readiness.NOT_JUDGED,
            "「本工具不判定」清单含「并发正确性」")
@@ -355,6 +385,8 @@ def main() -> int:
     test_zero_coverage_can_be_waived()
     test_json_has_three_new_top_level_segments()
     test_text_output_has_decision_point_section()
+    test_pytest_passing_output_is_understood()
+    test_python_dpsp_lane_produces_signal()
     test_not_judged_gained_two_entries()
 
     print()

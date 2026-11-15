@@ -26,12 +26,13 @@ from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from mutation_check import (  # noqa: E402
-    L2_OPERATORS, MUTANT_MARKER, OPERATORS, _strip_js_code, _strip_py_code,
+    L2_OPERATORS, MUTANT_MARKER, OPERATORS, _strip_js_code,
     match_case, run_mutation_check)
 from req_plan import parse_pins  # noqa: E402
 
 __all__ = ["ImportRef", "Verdict", "file_exports", "parse_imports",
-           "python_imports", "runtime_symbols", "match_case", "run_dpsp"]
+           "python_imports", "python_analysis", "runtime_symbols",
+           "match_case", "run_dpsp"]
 
 #: 不变式超过这个数就抽样（规格 §6.5）
 BUDGET = 20
@@ -326,6 +327,100 @@ def python_imports(source: str) -> tuple[set[str], set[str]]:
     return modules, names
 
 
+def _py_module_file(module: str, source_rels: list[str]) -> str | None:
+    """点号模块名 ⇒ 被测源文件（按**路径后缀**匹配）。
+
+    `pkg.core` ⇒ `pkg/core.py`（或 `pkg/core/__init__.py`）；
+    被测文件在 `src/` 下（`src/pkg/core.py`）也匹配得上。
+    """
+    parts = [p for p in module.split(".") if p]
+    if not parts:
+        return None
+    stem = "/".join(parts)
+    for suffix in (stem + ".py", stem + "/__init__.py"):
+        cands = [r for r in source_rels
+                 if r == suffix or r.endswith("/" + suffix)]
+        if cands:
+            return sorted(cands, key=len)[0]
+    return None
+
+
+def _py_class_methods(path: Path) -> dict[str, set[str]]:
+    """{类名: 方法名} —— Python 的作用域是**方法名**，不是类名。"""
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except (OSError, SyntaxError, ValueError):
+        return {}
+    out: dict[str, set[str]] = {}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ClassDef):
+            out[node.name] = {
+                n.name for n in node.body
+                if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+            }
+    return out
+
+
+def python_analysis(source: str, source_rels: list[str],
+                    base: Path) -> tuple[set[str], set[str]]:
+    """Python 用例 ⇒ (运行时引用的符号, 可达的被测源文件)。
+
+    `parse_imports` 只认 JS/TS ⇒ Python 用例的运行时作用域恒为空 ⇒
+    「钉有区分力」在 Python 仓上恒判「不适用」（橡皮章）。这里按 Python 的
+    import 语义补齐：
+
+      - `from pkg.core import classify`  ⇒ 引用 classify
+      - `import pkg.core` + `pkg.core.classify(...)` ⇒ 引用 classify
+      - `from pkg.core import Rules` ⇒ 引用 Rules 的**方法名**
+    """
+    try:
+        tree = ast.parse(source)
+    except (SyntaxError, ValueError):
+        return set(), set()
+    scope: set[str] = set()
+    reachable: set[str] = set()
+    bindings: set[str] = set()
+    class_cache: dict[str, dict[str, set[str]]] = {}
+
+    def class_map(rel: str) -> dict[str, set[str]]:
+        if rel not in class_cache:
+            class_cache[rel] = _py_class_methods(base / rel)
+        return class_cache[rel]
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                head = alias.name.split(".")[0]
+                bindings.add(alias.asname or head)
+                scope.add(alias.name.split(".")[-1])
+                rel = _py_module_file(alias.name, source_rels)
+                if rel:
+                    reachable.add(rel)
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            for alias in node.names:
+                bindings.add(alias.asname or alias.name)
+                scope.add(alias.name)
+                scope.add(alias.asname or alias.name)
+                rel = (_py_module_file(f"{node.module}.{alias.name}",
+                                       source_rels)
+                       or _py_module_file(node.module, source_rels))
+                if rel:
+                    reachable.add(rel)
+                    scope |= class_map(rel).get(alias.name, set())
+    # 属性链：`pkg.core.classify(...)` ⇒ classify
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Attribute):
+            continue
+        chain: list[str] = []
+        cur: ast.AST = node
+        while isinstance(cur, ast.Attribute):
+            chain.append(cur.attr)
+            cur = cur.value
+        if isinstance(cur, ast.Name) and cur.id in bindings:
+            scope.update(chain)
+    return scope, reachable
+
+
 def file_exports(path: Path) -> set[str]:
     """一个文件导出的符号名。"""
     try:
@@ -506,13 +601,46 @@ def _guarded_classify(base):
     return classify
 
 
-def _default_parse_check(path: Path, text: str) -> bool:
-    """默认解析校验：括号配平（挡不住所有语法错，但能挡住绝大多数）。"""
-    code = _strip_py_code(text) if path.suffix == ".py" else _strip_js_code(text)
-    for op, cl in (("{", "}"), ("(", ")"), ("[", "]")):
-        if code.count(op) != code.count(cl):
-            return False
+def _py_compiles(text: str) -> bool:
+    """这段 Python 能不能编译（真解析器，不是括号配平）。"""
+    try:
+        compile(text, "<attest-mutant>", "exec")
+    except (SyntaxError, ValueError):
+        return False
     return True
+
+
+def _js_shape(text: str) -> tuple[int, int, int]:
+    """JS/TS 的括号结构（开-闭之差）；字符串与注释不算。"""
+    code = _strip_js_code(text)
+    return (code.count("{") - code.count("}"),
+            code.count("(") - code.count(")"),
+            code.count("[") - code.count("]"))
+
+
+def _default_parse_check(path: Path, text: str) -> bool:
+    """默认解析校验：**判变异，不判文件**。
+
+    闸门要回答的是「这次变异有没有把代码改坏」，不是「这段代码本身干不干净」。
+    拿绝对标准（括号配平 / 能不能编译）去判，会把**原文就不标准**的真代码
+    （正则字面量里的括号、跑在旧 Python 上的新语法）判成「解析不过」⇒
+    能判的变异点全被推成「判不了」—— 假的 untested。
+
+      - Python：变异后能编译就算过；编译不过时再看**原文能不能编译**——
+        原文也编译不过 ⇒ 问题不在这次变异上。
+      - JS/TS：比对变异前后的括号结构。我们的算子都是**保结构**的替换
+        （`===`→`!==`、调用→`undefined`、catch 体→`{}`）⇒ 结构没变就是
+        没改坏；结构变了 ⇒ 这次变异坏了代码。
+
+    原文从磁盘上读：调用方保证检查那一刻磁盘上还是原文（变异还没写下去）。
+    """
+    try:
+        original = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        original = text
+    if path.suffix == ".py":
+        return _py_compiles(text) or not _py_compiles(original)
+    return _js_shape(text) == _js_shape(original)
 
 
 # ---------------------------------------------------------------- 主流程
@@ -553,6 +681,24 @@ def _verdict(inv_id: str, status: str, detail: str, evidence: list[str],
     return asdict(Verdict(invariant_id=inv_id, status=status, detail=detail,
                            evidence=evidence, killed=killed, survivors=survivors,
                            pin=pin, test=test))
+
+
+def _pin_to_ws_rel(base: Path, ws_rel: str, test_rel: str) -> str | None:
+    """把钉的路径归一成**工作区相对**（变异检查的契约）。
+
+    钉的路径基准是**仓库根**（规格 §3：判定点的 file 与钉同基准），
+    变异检查却在**工作区**里跑 ⇒ monorepo 里两者错位 ⇒ 每条钉都变成
+    「文件不存在」⇒ 全判不了。这里两种基准各试一次，都不在 ⇒ None。
+    """
+    if (base / test_rel).is_file():
+        return test_rel
+    if ws_rel not in (".", ""):
+        prefix = ws_rel.rstrip("/") + "/"
+        if test_rel.startswith(prefix):
+            rel = test_rel[len(prefix):]
+            if (base / rel).is_file():
+                return rel
+    return None
 
 
 def run_dpsp(repo: Path, ws_rel: str,
@@ -599,14 +745,28 @@ def run_dpsp(repo: Path, ws_rel: str,
                                      f"钉解析不出来：{pin_cell}", [], 0, []))
             continue
         test_rel, case_name = pins[0]
-        if not (base / test_rel).is_file():
+        ws_rel_path = _pin_to_ws_rel(base, ws_rel, test_rel)
+        if ws_rel_path is None:
             untested += 1
             verdicts.append(_verdict(inv_id, "untested",
                                      f"钉的文件不存在：{test_rel}", [], 0, []))
             continue
+        test_rel = ws_rel_path
         alias = _alias_notes(base, test_rel, set(source_rels))
-        closure_files, _ = _module_closure(base, test_rel)
-        rel_sources = [s for s in source_rels if s in closure_files]
+        try:
+            test_text = (base / test_rel).read_text(encoding="utf-8",
+                                                    errors="replace")
+        except OSError:
+            test_text = ""
+        # 变异范围 = 钉住的那个用例**运行时引用的符号**（规格 §6.1 的 S）。
+        # 用整个闭包的导出符号会把「别的函数」的变异也算进来 ⇒ 存活 ⇒ 假红。
+        if test_rel.endswith(".py"):
+            scope, reachable = python_analysis(test_text, source_rels, base)
+            rel_sources = [s for s in source_rels if s in reachable]
+        else:
+            closure_files, _ = _module_closure(base, test_rel)
+            rel_sources = [s for s in source_rels if s in closure_files]
+            scope = runtime_symbols(parse_imports(test_text, test_rel, base))
         if not rel_sources:
             not_applicable += 1
             detail = "没有相对路径可达的源文件"
@@ -614,21 +774,14 @@ def run_dpsp(repo: Path, ws_rel: str,
                 detail += "；" + "；".join(alias)
             notes.extend(alias)
             verdicts.append(_verdict(inv_id, "not-applicable", detail,
-                                     alias, 0, []))
+                                     alias, 0, [], pin=pin_cell, test=test_rel))
             continue
-        # 变异范围 = 钉住的那个用例**运行时引用的符号**（规格 §6.1 的 S）。
-        # 用整个闭包的导出符号会把「别的函数」的变异也算进来 ⇒ 存活 ⇒ 假红。
-        try:
-            test_text = (base / test_rel).read_text(encoding="utf-8",
-                                                    errors="replace")
-        except OSError:
-            test_text = ""
-        scope = runtime_symbols(parse_imports(test_text, test_rel, base))
         if not scope:
             not_applicable += 1
             detail = "钉没有运行时引用目标模块的任何符号 ⇒ 零覆盖"
             notes.append(f"{test_rel}：{detail}")
-            verdicts.append(_verdict(inv_id, "not-applicable", detail, [], 0, []))
+            verdicts.append(_verdict(inv_id, "not-applicable", detail, [], 0, [],
+                                     pin=pin_cell, test=test_rel))
             continue
         if test_rels and test_rel not in test_rels:
             notes.append(f"{test_rel} 不在项目测试文件清单里（钉可能指错）")

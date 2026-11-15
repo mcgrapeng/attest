@@ -39,6 +39,7 @@ L2 只认比较运算符与 `in`，不碰语句边界；L3 需要 AST 后端
 """
 from __future__ import annotations
 
+import ast
 import os
 import re
 import shutil
@@ -147,6 +148,39 @@ class Mutation:
 # ---------------------------------------------------------------- 找变异点
 
 
+def _py_scopes(src: str) -> list[tuple[str, int, int]]:
+    """Python 的具名作用域 ⇒ [(名字, 起始行, 结束行)]。
+
+    `_anchor_at` 是按大括号找包围函数的 ⇒ 只对 JS/TS 有效；Python 恒返回
+    `<toplevel>` ⇒ 作用域过滤会把 Python 的变异点全丢掉。
+    """
+    try:
+        tree = ast.parse(src)
+    except (SyntaxError, ValueError):
+        return []
+    out: list[tuple[str, int, int]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef,
+                             ast.ClassDef)):
+            end = getattr(node, "end_lineno", None) or node.lineno
+            out.append((node.name, node.lineno, end))
+    return out
+
+
+def _py_scope_at(scopes: list[tuple[str, int, int]],
+                 lineno: int) -> str | None:
+    """第 `lineno` 行所在的最内层具名作用域（不在任何 def/class 内 ⇒ None）。"""
+    best: str | None = None
+    best_span: int | None = None
+    for name, start, end in scopes:
+        if not start <= lineno <= end:
+            continue
+        span = end - start
+        if best_span is None or span < best_span:
+            best, best_span = name, span
+    return best
+
+
 def _strip_py_code(src: str) -> str:
     """把 Python 的字符串与注释换成空格（**保持偏移量不变**）。
 
@@ -226,7 +260,7 @@ def _for_in_positions(code: str) -> set[int]:
 
 
 def _find_in_mutations(path: Path, code: str, lines: list[str],
-                       limit: int) -> list[Mutation]:
+                       limit: int | None) -> list[Mutation]:
     """`x in Y` ⇒ `Object.hasOwn(Y, x)`（原型链语义不同 ⇒ 真实缺陷）。
 
     Python 不做：`Object.hasOwn` 是 JS 的 API。
@@ -249,16 +283,21 @@ def _find_in_mutations(path: Path, code: str, lines: list[str],
             mutated=f"Object.hasOwn({right}, {left})",
             kind="in 换成 hasOwn（看不见原型链上的键）",
             op="in-to-hasown", symbol=_anchor_at(lines, line)))
-        if len(out) >= limit:
+        if limit is not None and len(out) >= limit:
             break
     return out
 
 
-def find_mutations(path: Path, limit: int = DEFAULT_MAX_PER_FILE) -> list[Mutation]:
+def find_mutations(path: Path,
+                   limit: int | None = DEFAULT_MAX_PER_FILE) -> list[Mutation]:
     """在文件里找可注入的变异点（只认代码位置，不碰字符串与注释）。
 
     比较运算符与 `in` **分两族各取上限** —— 否则一堆比较运算符会把
     `in` 挤掉（要什么算子由调用方按 `op` 过滤）。
+
+    `limit=None` = 不设上限。调用方（`run_mutation_check`）要按**作用域**
+    挑点时必须用不限的：先截断再过滤的话，作用域外的点会把名额占光，
+    作用域内的点压根到不了 ⇒ 假的「不适用」。
     """
     try:
         src = path.read_text(encoding="utf-8", errors="replace")
@@ -269,6 +308,13 @@ def find_mutations(path: Path, limit: int = DEFAULT_MAX_PER_FILE) -> list[Mutati
     else:
         code = _strip_js_code(src)
     lines = code.split("\n")
+    py_scopes = _py_scopes(src) if path.suffix == ".py" else None
+
+    def symbol_at(line: int) -> str | None:
+        if py_scopes is not None:
+            return _py_scope_at(py_scopes, line)
+        return _anchor_at(lines, line)
+
     out: list[Mutation] = []
     for mm in _OP_RE.finditer(code):
         op = mm.group(1)
@@ -279,8 +325,8 @@ def find_mutations(path: Path, limit: int = DEFAULT_MAX_PER_FILE) -> list[Mutati
         out.append(Mutation(path=path, line=line, col=col, offset=start,
                             length=len(op), original=op, mutated=mutated,
                             kind=kind, op=_OP_NAMES[op],
-                            symbol=_anchor_at(lines, line)))
-        if len(out) >= limit:
+                            symbol=symbol_at(line)))
+        if limit is not None and len(out) >= limit:
             break
     out.extend(_find_in_mutations(path, code, lines, limit))
     return out
@@ -350,10 +396,14 @@ def _u16_to_cp(off: int, starts: list[int]) -> int:
 
 
 def find_structural_mutations(path: Path,
-                              limit: int = DEFAULT_MAX_PER_FILE) -> list[Mutation]:
+                              limit: int | None = DEFAULT_MAX_PER_FILE
+                              ) -> list[Mutation]:
     """L3 结构算子（throw / 调用 / 谓词 / catch 体）。
 
     没有 TypeScript 后端 ⇒ 空列表（不是报错）—— 调用方据此退回 L2。
+
+    `limit=None` = 不设上限（同 `find_mutations`：先截断再按作用域过滤
+    会让作用域内的点压根到不了）。
     """
     if path.suffix not in (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"):
         return []
@@ -397,7 +447,7 @@ def find_structural_mutations(path: Path,
             path=path, line=line, col=col, offset=start, length=end - start,
             original=src[start:end], mutated=mutated, kind=_STRUCT_KIND[op],
             op=op, symbol=str(fact.get("symbol") or "") or None))
-        if len(out) >= limit:
+        if limit is not None and len(out) >= limit:
             break
     return out
 
@@ -406,10 +456,11 @@ def find_structural_mutations(path: Path,
 
 
 def match_case(case: str, full_path: str) -> bool:
-    """用例名是否命中某个失败项（**严格**，只有两条规则）。
+    """用例名是否命中某个失败项（**严格**，只有三条规则）。
 
     1. 归一化（折叠空白、去首尾）后完全相等；
-    2. 否则按 `>` 切段，取 `full_path` 的**末尾 k 段**（k = case 的段数）
+    2. pytest 的 node id（`tests/test_x.py::test_x`）取最后一段比；
+    3. 否则按 `>` 切段，取 `full_path` 的**末尾 k 段**（k = case 的段数）
        与 case 逐段完全相等。
 
     不做「去前缀」「包含」「去标点」—— 那些宽松规则会把别的用例的失败
@@ -421,6 +472,13 @@ def match_case(case: str, full_path: str) -> bool:
         return False
     if a == b:
         return True
+    if "::" in b:
+        tail = b.rsplit("::", 1)[-1].strip()
+        if tail == a:
+            return True
+        # 参数化用例：`test_x[param]` ⇒ 去掉参数段再比
+        if tail.split("[", 1)[0].strip() == a:
+            return True
     a_parts = [p.strip() for p in a.split(">")]
     b_parts = [p.strip() for p in b.split(">")]
     if len(b_parts) < len(a_parts):
@@ -543,6 +601,8 @@ def run_mutation_check(repo: Path, ws_rel: str,
     `case_name` 只让**这个用例**的失败算数（钉的用例有没有区分力）。
     `parse_check(path, text) -> bool` 判断变异后的代码还解析不解析得过；
     解析不过 ⇒ 记"判不了"，**不进分母**（跑了也测不出东西）。
+    检查那一刻 `path` 指向的文件**还是原文**（变异还没写下去）——
+    要判断"这次变异有没有把代码改坏"的校验器得能拿到原文。
     `inject(rel, text, mut) -> text` 可选：在副本里给改坏的文件打标记
     （`__ATTEST_MUTANT__:<rel>`）；跑完输出里没有标记 ⇒ 这次变异没生效 ⇒
     记**不适用**（不是存活），同样不进分母。
@@ -573,11 +633,13 @@ def run_mutation_check(repo: Path, ws_rel: str,
             continue
         res["scanned"] += 1
         if want_l2:
-            for mut in find_mutations(src):
+            # 不设上限：每文件的上限在**作用域过滤之后**才施加（见下），
+            # 先截断会让作用域外的点把名额占光。
+            for mut in find_mutations(src, None):
                 if mut.op in want_l2:
                     candidates.append((rel, mut))
         if want_l3:
-            for mut in find_structural_mutations(src):
+            for mut in find_structural_mutations(src, None):
                 if mut.op in want_l3:
                     candidates.append((rel, mut))
     if scope_symbols:

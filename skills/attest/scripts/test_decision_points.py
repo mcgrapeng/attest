@@ -14,6 +14,7 @@ DP 是「源码里一个会改变行为的选择」—— 机器从代码反向�
 from __future__ import annotations
 
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -486,6 +487,43 @@ def test_both_backends_agree_on_the_same_points() -> None:
            f"B2 独有 {sorted(keys[1] - keys[0])}）")
 
 
+def test_large_module_output_is_not_truncated() -> None:
+    print("\n大模块：判定点 JSON 超过管道缓冲也不能被截断")
+    backend = _find_backend()
+    if backend is None:
+        print("  skip 本机没有可用的 TypeScript 后端")
+        return
+    # 40 文件 × 20 函数 × 3 个判定点 ≈ 2400 点 ⇒ JSON 约 190 KiB，
+    # 远超管道缓冲（64 KiB）。macOS 上 stdout 是异步的：写完立刻 exit
+    # 会把没刷完的数据丢掉 ⇒ JSON 半截 ⇒ 解析失败 ⇒ 静默退回 L2。
+    with tempfile.TemporaryDirectory() as td:
+        root = Path(td)
+        rels = []
+        for i in range(40):
+            rel = f"src/mod{i}.ts"
+            _write_sample(root, rel, "".join(
+                f"export function f{j}(x: number) {{\n"
+                f"  if (x >= {j}) {{ throw new Error('e'); }}\n"
+                f"  return x;\n"
+                f"}}\n" for j in range(20)))
+            rels.append(rel)
+        an = ast_analyze(root, rels, backend)
+    expect(an.level == "L3", f"level 是 L3（实际 {an.level}：{an.note}）")
+    expect(len(an.points) >= 2000,
+           f"判定点不少于 2000 个（实际 {len(an.points)}）")
+
+
+def test_ts_script_exits_only_after_stdout_flush() -> None:
+    print("\nTS 后端脚本：只能在 stdout 刷完之后退出")
+    src = decision_points._TS_SCRIPT
+    exits = [m.start() for m in re.finditer(r"process\.exit\(", src)]
+    expect(len(exits) == 1, f"脚本里只有一处 process.exit（实际 {len(exits)} 处）")
+    if exits:
+        before = src[max(0, exits[0] - 120):exits[0]]
+        expect("=>" in before,
+               f"process.exit 在写回调里（实际 {before.strip()[-60:]!r}）")
+
+
 # ---------------------------------------------------------------- Python L3
 
 
@@ -607,6 +645,8 @@ def main() -> int:
     test_cross_backend_l2_subset_of_l3()
     test_l3_and_l2_agree_on_dp_ids()
     test_both_backends_agree_on_the_same_points()
+    test_large_module_output_is_not_truncated()
+    test_ts_script_exits_only_after_stdout_flush()
     test_python_ast_finds_kinds()
     test_python_ast_anchor_is_function_name()
     test_python_ast_concurrency_io_and_imports()

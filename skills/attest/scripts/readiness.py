@@ -2019,7 +2019,7 @@ def check_data_accuracy(m: Module, root: Path) -> Check:
     cands = find_baseline_scripts(m, root)
     if not cands:
         return Check("data-accuracy", "数据准确（基线对拍）", "skipped",
-                     "项目里没有基线对拍脚本",
+                     "本模块没有基线对拍脚本（仓库里别的包的基线脚本不算数）",
                      fix="加一个：当前指标对拍已提交基线，低于阈值就红",
                      evidence_kind="untested")
     import shlex
@@ -3858,14 +3858,38 @@ def check_open_source(m: Module) -> Check:
 # ---------------------------------------------------------------- 主流程
 
 
+def _baseline_matches_module(m: Module, ws: Path, cmd: str) -> bool:
+    """这个基线脚本是不是**这个模块**的？
+
+    跟对账车道同一个口径：脚本要么在模块自己的 workspace 里，要么脚本正文/命令
+    提到这个模块（表名或模块路径）。少了这一步，多包仓库里会给记忆域模块跑上
+    RAG 域的基线脚本 —— 指标口径根本不是一回事，报出来的差异是别的域的。
+    """
+    if m.workspace and ws == m.workspace:
+        return True
+    body = ""
+    for tok in cmd.split():
+        if tok.endswith((".ts", ".js", ".mjs", ".tsx")):
+            try:
+                body = (ws / tok).read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                body = ""
+            break
+    if not body:
+        return False
+    return (bool(m.tables) and any(t in body for t in m.tables)) or m.path in body
+
+
 def find_baseline_scripts(m: Module, root: Path) -> list[tuple[Path, str, str]]:
-    """找仓库自己的基线对拍脚本（白名单精确名）。"""
+    """找仓库自己的基线对拍脚本（白名单精确名 + 收口到本模块）。"""
     cands: list[tuple[Path, str, str]] = []
     for ws, pkg in _workspace_manifests(root):
         for name, cmd in (pkg.get("scripts") or {}).items():
             if not isinstance(cmd, str) or not isinstance(name, str):
                 continue
             if not script_allowed("baseline", name, cmd):
+                continue
+            if not _baseline_matches_module(m, ws, cmd):
                 continue
             cands.append((ws, name, cmd))
     return cands

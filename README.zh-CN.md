@@ -179,6 +179,35 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 attest 还被拿去跑了五个公开仓库，并**把结论公开了 —— 包括让工具显得难看的那些**：
 [docs/self-test-report.md](docs/self-test-report.md)。
 
+## FAQ
+
+**我需要准备什么才能跑？**
+Python 3.11+，别的都不要。attest **零第三方依赖**：它驱动的是**你仓库自己的**工具链
+（node、pytest……），不自带一套。你的仓库要先装好它自己的依赖 —— 因为 attest 跑的是
+那个仓库的 test 命令。
+
+**我的 test 脚本是复合的（`xo && c8 node --test … && tsc`），attest 认得吗？**
+认得。它会把脚本拆开，跑**真正调用测试 runner** 的那一段，把你的测试文件追加在那里。
+认不出来是哪一段在跑测试时，它会直说，而不是猜一条命令去跑。
+
+**退出码 1 在我的 CI 里意味着什么？**
+要么某条实测判据没达标，要么某条关键判据**根本没测到**。GitHub Action 默认不会因此
+让 job 变红（`strict: false`）；改成 `strict: true` 才会。
+
+**attest 会往我的仓库里写东西吗？**
+不会。它读你的仓库、跑你的脚本。有两个命令会写，都是你主动调用且有边界的：
+`req_plan.py scaffold` 在 `--out-dir` 里写测试文件；`--self-check` / `--mutation-check`
+在临时副本上工作。
+
+**它能替代我的覆盖率看板吗？**
+不能替代，它是用它。attest 驱动你仓库自己的覆盖率闸门，报的是你 CI 本来就产出的那个
+数字。
+
+**这个项目有人在维护吗？**
+它有正式版本、有发版记录：见 [CHANGELOG.md](CHANGELOG.md)，[路线图](docs/roadmap.md)
+写了接下来做什么。attest 还公开了它在五个公开仓库上跑出来的结论 —— **包括让工具显得
+难看的那些**（[自测报告](docs/self-test-report.md)）。
+
 ## 参与共建
 
 [CONTRIBUTING.md](CONTRIBUTING.md) 里有环境准备、一个 PR 要过的闸门、以及外部帮忙

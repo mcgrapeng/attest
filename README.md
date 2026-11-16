@@ -200,6 +200,40 @@ attest has also been run against five public repositories and **published the
 verdicts, including the ones that made the tool look wrong**:
 [docs/self-test-report.md](docs/self-test-report.md).
 
+## FAQ
+
+**What do I need to run it?**
+Python 3.11+ and nothing else. attest has no third-party dependencies: it drives
+your repository's own toolchain (node, pytest, …) instead of installing one of
+its own. The target repository needs its own dependencies installed, because
+attest runs that repository's test command.
+
+**My test script is compound (`xo && c8 node --test … && tsc`). Does attest cope?**
+Yes. It splits the script and runs the component that actually invokes a test
+runner, with your file appended there. If it cannot tell which component runs
+the tests, it says so instead of guessing.
+
+**What does exit code 1 mean in my CI?**
+Either a measured criterion is below the bar, or a key criterion could not be
+measured at all. The GitHub Action does not fail the job on it by default
+(`strict: false`); with `strict: true` it does.
+
+**Does attest write to my repository?**
+No. It reads your repository and runs your scripts. Two commands write, both
+opt-in and both bounded: `req_plan.py scaffold` writes test files under
+`--out-dir`, and `--self-check` / `--mutation-check` work on a temporary copy.
+
+**Does it replace my coverage dashboard?**
+No, it reads it. attest drives your repository's own coverage gate and reports
+the number your CI already produces.
+
+**Is this maintained?**
+It is released, versioned, and the changes to it are published:
+[CHANGELOG.md](CHANGELOG.md), and [the roadmap](docs/roadmap.md) says what is
+being built next. attest also publishes its own verdicts on five public
+repositories — including the ones that made the tool look wrong
+([self-test report](docs/self-test-report.md)).
+
 ## Contributing
 
 [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the gates a pull request has

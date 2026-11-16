@@ -53,7 +53,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from decision_points import (  # noqa: E402
-    _anchor_at, detect_backend, structural_points)
+    _anchor_at, detect_backend, scope_stacks, structural_points)
 
 #: 变异算子全集（规格 §6.3 的表，顺序即报告里的展示顺序）
 OPERATORS: tuple[str, ...] = (
@@ -140,6 +140,9 @@ class Mutation:
     kind: str
     op: str = ""              # 算子名（规格 §6.3 的 7 个之一）
     symbol: str | None = None  # 所属具名符号（作用域限定用）
+    #: 所在的**全部**具名作用域（外 → 内）。`symbol` 只是最内层那个 ——
+    #: 调用方 import 的是外层符号（工厂）时，光看 `symbol` 会把整个文件滤空。
+    scopes: tuple[str, ...] = ()
 
     def where(self) -> str:
         return f"{self.path.name}:{self.line}"
@@ -266,7 +269,9 @@ def _for_in_positions(code: str) -> set[int]:
 
 
 def _find_in_mutations(path: Path, code: str, lines: list[str],
-                       limit: int | None) -> list[Mutation]:
+                       limit: int | None,
+                       stacks: list[tuple[str, ...]] | None = None,
+                       ) -> list[Mutation]:
     """`x in Y` ⇒ `Object.hasOwn(Y, x)`（原型链语义不同 ⇒ 真实缺陷）。
 
     Python 不做：`Object.hasOwn` 是 JS 的 API。
@@ -288,7 +293,9 @@ def _find_in_mutations(path: Path, code: str, lines: list[str],
             original=f"{left} in {right}",
             mutated=f"Object.hasOwn({right}, {left})",
             kind="in 换成 hasOwn（看不见原型链上的键）",
-            op="in-to-hasown", symbol=_anchor_at(lines, line)))
+            op="in-to-hasown", symbol=_anchor_at(lines, line),
+            scopes=((stacks[line - 1] if stacks and line - 1 < len(stacks)
+                     else ()) or ())))
         if limit is not None and len(out) >= limit:
             break
     return out
@@ -315,11 +322,21 @@ def find_mutations(path: Path,
         code = _strip_js_code(src)
     lines = code.split("\n")
     py_scopes = _py_scopes(src) if path.suffix == ".py" else None
+    js_stacks = None if py_scopes is not None else scope_stacks(lines)
 
     def symbol_at(line: int) -> str | None:
         if py_scopes is not None:
             return _py_scope_at(py_scopes, line)
         return _anchor_at(lines, line)
+
+    def scopes_at(line: int) -> tuple[str, ...]:
+        if py_scopes is not None:
+            name = _py_scope_at(py_scopes, line)
+            return (name,) if name else ()
+        idx = max(line - 1, 0)
+        if js_stacks is None or idx >= len(js_stacks):
+            return ()
+        return js_stacks[idx]
 
     out: list[Mutation] = []
     for mm in _OP_RE.finditer(code):
@@ -331,10 +348,11 @@ def find_mutations(path: Path,
         out.append(Mutation(path=path, line=line, col=col, offset=start,
                             length=len(op), original=op, mutated=mutated,
                             kind=kind, op=_OP_NAMES[op],
-                            symbol=symbol_at(line)))
+                            symbol=symbol_at(line),
+                            scopes=scopes_at(line)))
         if limit is not None and len(out) >= limit:
             break
-    out.extend(_find_in_mutations(path, code, lines, limit))
+    out.extend(_find_in_mutations(path, code, lines, limit, js_stacks))
     return out
 
 
@@ -425,6 +443,7 @@ def find_structural_mutations(path: Path,
     except (OSError, ValueError):
         return []
     starts = _astral_u16_starts(src)
+    js_stacks = scope_stacks(_strip_js_code(src).split("\n"))
     out: list[Mutation] = []
     for fact in structural_points(root, [rel], backend):
         op = str(fact.get("op") or "")
@@ -452,7 +471,8 @@ def find_structural_mutations(path: Path,
         out.append(Mutation(
             path=path, line=line, col=col, offset=start, length=end - start,
             original=src[start:end], mutated=mutated, kind=_STRUCT_KIND[op],
-            op=op, symbol=str(fact.get("symbol") or "") or None))
+            op=op, symbol=str(fact.get("symbol") or "") or None,
+            scopes=(js_stacks[line - 1] if line - 1 < len(js_stacks) else ())))
         if limit is not None and len(out) >= limit:
             break
     return out
@@ -584,6 +604,7 @@ def run_mutation_check(repo: Path, ws_rel: str,
                        timeout: int = 120, classify=None,
                        case_name: str | None = None,
                        scope_symbols: set[str] | None = None,
+                       prefer_symbols: set[str] | None = None,
                        ops: tuple[str, ...] | None = None,
                        parse_check=None, inject=None) -> dict:
     """对目标模块跑一轮变异检查。
@@ -604,6 +625,8 @@ def run_mutation_check(repo: Path, ws_rel: str,
     `ops` 要哪些算子（默认全部 L2 词法算子）；先按算子过滤**再**按文件
     取上限 —— 否则比较运算符会把点名要的其他算子挤掉。
     `scope_symbols` 只保留这些具名符号里的变异点。
+    `prefer_symbols` 是**钉住那条用例真正提到的**符号 —— 抽样时优先挑它们，
+    否则名额会被同一个文件里毫不相干的函数吃光 ⇒ 判成「杀不死」是假的。
     `case_name` 只让**这个用例**的失败算数（钉的用例有没有区分力）。
     `parse_check(path, text) -> bool` 判断变异后的代码还解析不解析得过；
     解析不过 ⇒ 记"判不了"，**不进分母**（跑了也测不出东西）。
@@ -649,12 +672,23 @@ def run_mutation_check(repo: Path, ws_rel: str,
                 if mut.op in want_l3:
                     candidates.append((rel, mut))
     if scope_symbols:
+        # 命中条件：变异点所在的**任一层**具名作用域被测试引用。
+        # 只看最内层会滤空「工厂返回的对象字面量里的方法」——
+        # 测试 import 的是工厂，方法的锚点是方法名，两边对不上。
         candidates = [(rel, mut) for rel, mut in candidates
-                      if mut.symbol and mut.symbol in scope_symbols]
+                      if (mut.symbol and mut.symbol in scope_symbols)
+                      or any(s in scope_symbols for s in mut.scopes)]
     if not candidates:
         res["notes"].append("源码里没找到可注入的变异点"
                             f"（要的算子：{'、'.join(sorted(wanted))}）")
         return res
+
+    if prefer_symbols:
+        # 钉住那条用例提到的符号排前面（稳定排序 ⇒ 同组内仍是文件/行序）。
+        candidates.sort(
+            key=lambda rm: not (
+                rm[1].symbol in prefer_symbols
+                or any(s in prefer_symbols for s in rm[1].scopes)))
 
     per_file: Counter = Counter()
     picked: list[tuple[str, Mutation]] = []

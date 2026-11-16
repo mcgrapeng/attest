@@ -175,6 +175,74 @@ def test_toplevel_const_object_keeps_its_export_name():
            f"对象里的方法仍是内层作用域（实际 {stacks[2]}）")
 
 
+def test_const_object_method_is_reachable_for_scope_filter():
+    print("\ntest_const_object_method_is_reachable_for_scope_filter")
+    sys.path.insert(0, str(HERE))
+    from mutation_check import run_mutation_check  # noqa: E402
+    src = ("export const node = {\n"
+           "  async run(ctx) {\n"
+           "    if (ctx.flag === false) return;\n"
+           "  },\n"
+           "};\n")
+    root = node_repo({
+        "src/a.ts": src,
+        "src/a.test.ts": (
+            "import test from 'node:test';\n"
+            "import assert from 'node:assert';\n"
+            "import { node } from './a.ts';\n"
+            "test('run', async () => {\n"
+            "  const ctx = { flag: false };\n"
+            "  await node.run(ctx);\n"
+            "  assert.strictEqual(ctx.seen, undefined);\n"
+            "});\n"),
+    })
+    res = run_mutation_check(
+        repo=root, ws_rel=".", source_rels=["src/a.ts"],
+        test_rels=["src/a.test.ts"], runner=["node", "--test"],
+        ops=("cmp-negate",), scope_symbols={"node"})
+    expect(res["attempted"] >= 1,
+           f"const 对象里的方法被作用域过滤放行（实际 {res['attempted']}）")
+
+
+# ----------------------------------------------- G 抽样按钉住用例排序
+
+
+def test_preferred_symbols_are_sampled_first():
+    print("\ntest_preferred_symbols_are_sampled_first")
+    sys.path.insert(0, str(HERE))
+    from mutation_check import run_mutation_check  # noqa: E402
+    src = ""
+    for i, name in enumerate("abcd"):
+        src += (f"function {name}(x) {{\n"
+                f"  return x === {i + 1};\n"
+                f"}}\n")
+    root = node_repo({
+        "src/a.js": src + "module.exports = { a, b, c, d };\n",
+        "src/a.test.js": (
+            "const test = require('node:test');\n"
+            "const assert = require('node:assert');\n"
+            "const { d } = require('./a.js');\n"
+            "test('d', () => { assert.strictEqual(d(4), true); });\n"),
+    })
+    # 不给优先符号 ⇒ 抽到文件里第一个（a）⇒ 用例照样绿 ⇒ 存活
+    blind = run_mutation_check(
+        repo=root, ws_rel=".", source_rels=["src/a.js"],
+        test_rels=["src/a.test.js"], runner=["node", "--test"],
+        ops=("cmp-negate",), scope_symbols={"a", "b", "c", "d"},
+        max_mutants=1)
+    expect(blind["killed"] == 0 and blind["survivors"],
+           "没有优先符号时抽到不相干的函数 ⇒ 判成杀不死")
+    # 给了优先符号 ⇒ 抽到用例真正提到的 d ⇒ 被杀死
+    res = run_mutation_check(
+        repo=root, ws_rel=".", source_rels=["src/a.js"],
+        test_rels=["src/a.test.js"], runner=["node", "--test"],
+        ops=("cmp-negate",), scope_symbols={"a", "b", "c", "d"},
+        prefer_symbols={"d"}, max_mutants=1)
+    expect(res["attempted"] == 1, "只试了一个变异点")
+    expect(res["killed"] == 1,
+           f"抽到的是用例真正提到的 d（killed={res['killed']}）")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -185,6 +253,8 @@ def main() -> int:
     test_parse_check_judges_the_mutation_not_the_file()
     test_parse_gate_uses_a_real_parser_not_bracket_balance()
     test_toplevel_const_object_keeps_its_export_name()
+    test_const_object_method_is_reachable_for_scope_filter()
+    test_preferred_symbols_are_sampled_first()
 
     print()
     for d in TMPDIRS:

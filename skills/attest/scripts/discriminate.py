@@ -779,6 +779,39 @@ def _pin_to_ws_rel(base: Path, ws_rel: str, test_rel: str) -> str | None:
     return None
 
 
+def _case_body(test_text: str, case_name: str) -> str:
+    """取钉住那条用例的函数体文本（找不到 ⇒ 空串）。"""
+    idx = test_text.find(case_name)
+    if idx < 0:
+        return ""
+    brace = test_text.find("{", idx)
+    if brace < 0:
+        return ""
+    depth = 0
+    for i in range(brace, len(test_text)):
+        if test_text[i] == "{":
+            depth += 1
+        elif test_text[i] == "}":
+            depth -= 1
+            if depth == 0:
+                return test_text[brace:i + 1]
+    return test_text[brace:]
+
+
+def _case_symbols(test_text: str, case_name: str,
+                  scope: set[str]) -> set[str]:
+    """钉住那条用例**正文里提到**的符号（粗粒度，不做 AST）。
+
+    只用来给变异点抽样排序：同一个文件里不相干的函数（也 import 了、
+    也在作用域内）会把名额吃光 ⇒ 判成「杀不死」是假的。
+    """
+    body = _case_body(test_text, case_name)
+    if not body:
+        return set()
+    return {s for s in scope
+            if re.search(r"\b" + re.escape(s) + r"\b", body)}
+
+
 def run_dpsp(repo: Path, ws_rel: str,
              invariants: list[tuple[str, str, str]],
              runner: list[str], test_rels: list[str],
@@ -863,10 +896,12 @@ def run_dpsp(repo: Path, ws_rel: str,
             continue
         if test_rels and test_rel not in test_rels:
             notes.append(f"{test_rel} 不在项目测试文件清单里（钉可能指错）")
+        prefer = _case_symbols(test_text, case_name, scope)
         res = run_mutation_check(repo, ws_rel, rel_sources, [test_rel], runner,
                                  max_mutants=max_mutants, timeout=timeout,
                                  classify=judge, case_name=case_name,
-                                 scope_symbols=scope, ops=ops,
+                                 scope_symbols=scope, prefer_symbols=prefer,
+                                 ops=ops,
                                  parse_check=check, inject=_inject_marker)
         surv = list(res["survivors"])
         survivors.extend(surv)

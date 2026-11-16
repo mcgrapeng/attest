@@ -689,6 +689,20 @@ def run_mutation_check(repo: Path, ws_rel: str,
             key=lambda rm: not (
                 rm[1].symbol in prefer_symbols
                 or any(s in prefer_symbols for s in rm[1].scopes)))
+        # 只排前面不够：同文件里另一个函数的变异点照样把名额吃光 ⇒ 判成
+        # 「杀不死」是假的（docstring 里写过这句）。所以**用例提到的符号有
+        # 候选时只取它们**；一个都没有 ⇒ 这轮变异点只能来自别的符号，
+        # 说清「判不了」，别把「不在这条用例范围内」说成「这条钉没区分力」。
+        picked_scope = [rm for rm in candidates
+                        if rm[1].symbol in prefer_symbols
+                        or any(s in prefer_symbols for s in rm[1].scopes)]
+        if picked_scope:
+            candidates = picked_scope
+        else:
+            res["outside_case_scope"] = True
+            res["notes"].append(
+                "钉住的那条用例没提到任何可变异符号 ⇒ 这轮变异点只能取自"
+                "同文件（或同作用域）的别的符号 ⇒ 不能据此判这条钉没区分力")
 
     per_file: Counter = Counter()
     picked: list[tuple[str, Mutation]] = []

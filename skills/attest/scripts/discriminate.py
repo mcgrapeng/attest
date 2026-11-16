@@ -913,6 +913,12 @@ def run_dpsp(repo: Path, ws_rel: str,
             status = "pass"
             killed_inv += 1
             detail = f"杀死 {res['killed']} 个变异"
+        elif surv and res.get("outside_case_scope"):
+            # 变异点全都落在这条用例**没提到**的符号上 ⇒ 它们本来就杀不死
+            # 这条钉 —— 这不是「这条钉没区分力」，是「判不了」。
+            status = "untested"
+            detail = ("判不了：钉住的那条用例没提到任何可变异符号，"
+                      "这轮变异点只能取自别的符号")
         elif surv:
             status = "fail"
             detail = f"{len(surv)} 个变异全部存活 ⇒ 这条钉发现不了这类缺陷"

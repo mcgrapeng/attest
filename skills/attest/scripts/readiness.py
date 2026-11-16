@@ -2099,6 +2099,12 @@ _AFTER_HOOK_RE = re.compile(
 _BEFORE_ONLY_RE = re.compile(
     r"\bbeforeEach\b|\bbeforeAll\b|\bbefore\(|setup_function|"
     r"@pytest\.fixture")
+# 测试把 DB 层 mock 掉了 ⇒ 那些「写库动作」根本没落库 ⇒ 不会留残留。
+# 不看这个 ⇒ 用假 tx 的单测会被误判成「不清理的写库测试」。
+_MOCKED_DB_RE = re.compile(
+    r"mock\.module\(\s*['\"][^'\"]*"
+    r"(?:tenant-?db|/db/|database|db\.[a-z]+)"
+    r"[^'\"]*['\"]", re.I)
 # 字面量的固定等待（flaky 的来源）
 _FIXED_WAIT_RE = re.compile(
     r"sleep\(\s*\d{3,}|time\.sleep\(\s*\d|"
@@ -2111,6 +2117,7 @@ def check_test_hygiene(m: Module) -> Check:
     findings: list[str] = []
     sleeps: list[str] = []
     dirty: list[str] = []
+    mocked_db = 0
     for t in m.tests + m.itests:
         try:
             text = t.read_text(encoding="utf-8", errors="replace")
@@ -2120,6 +2127,10 @@ def check_test_hygiene(m: Module) -> Check:
         for mm in _FIXED_WAIT_RE.finditer(text):
             line = text[:mm.start()].count("\n") + 1
             sleeps.append(f"{rel}:{line} 固定等待 {mm.group(0)!r}")
+        if _DB_WRITE_RE.search(text) and _MOCKED_DB_RE.search(text):
+            # DB 层被 mock ⇒ 写库动作没落库 ⇒ 不会留残留，不算这条
+            mocked_db += 1
+            continue
         if _DB_WRITE_RE.search(text):
             hook = _AFTER_HOOK_RE.search(text)
             if not _CLEANUP_RE.search(text):
@@ -2132,8 +2143,11 @@ def check_test_hygiene(m: Module) -> Check:
     findings += sleeps[:8]
     findings += dirty[:8]
     if not findings:
-        return Check("hygiene", "测试卫生（不留残留、不靠 sleep）", "pass",
-                     "没有固定等待，也没发现不清理的写库测试")
+        msg = "没有固定等待，也没发现不清理的写库测试"
+        if mocked_db:
+            msg += (f"（{mocked_db} 个文件的 DB 层被 mock ⇒ 那些写库动作"
+                    "没落库，不算残留）")
+        return Check("hygiene", "测试卫生（不留残留、不靠 sleep）", "pass", msg)
     status = "fail" if dirty else "warn"
     return Check("hygiene", "测试卫生（不留残留、不靠 sleep）", status,
                  f"{len(sleeps)} 处固定等待、{len(dirty)} 处不清理的写库测试",

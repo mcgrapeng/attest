@@ -80,6 +80,9 @@ python3 install.py
 卸载：`python3 install.py --uninstall`，只删软链。Windows 上 `os.symlink` 可能需要
 管理员权限或开发者模式。
 
+只需要 Python 3.11+，**没有任何第三方依赖** —— 它驱动的是**你仓库自己的**工具链
+（node、pytest……），不自带一套。
+
 然后，对着任意仓库：
 
 ```bash
@@ -101,7 +104,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.3
+      - uses: mcgrapeng/attest@v0.1.7
         with:
           module: src/auth
 ```
@@ -115,7 +118,8 @@ jobs:
 | `comment` | `true` | 是否把报告发成 PR 评论 |
 
 它把证据清单写进 job summary 和 PR 评论，**默认不拦合并**（`strict: false`）——
-attest 给证据，仓库自己决定。跑 action 之前先装好仓库自己的依赖：attest 跑的是
+attest 给证据，仓库自己决定。attest 即使退出 1（有阻塞项，或关键判据没测到），
+job 仍然是绿的；改成 `strict: true` 才会让那次退出码把 job 判红。跑 action 之前先装好仓库自己的依赖：attest 跑的是
 仓库自己的 test 命令。
 
 ## 命令行开关
@@ -132,7 +136,8 @@ attest 给证据，仓库自己决定。跑 action 之前先装好仓库自己�
 
 ## 报告长什么样
 
-attest 自己 fixture（`fixtures/ts-colocated`）的真实输出：
+attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输出是中文 ——
+判据名与结论行就是你终端里看到的东西：
 
 ```
 将执行的仓库脚本：测试车道（逐个测试文件跑 $ node --test <测试文件>）
@@ -147,7 +152,13 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出：
 退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到
 ```
 
-看最后一行：**7 项无信号**，不是「7 项通过」。没测到的判据报的是「未实测」，
+<div align="center">
+  <img alt="完整报告：四段（已实测 / 静态信号 / 未实测 / 本工具不判定）加三档结论 —— 由 attest 自己 fixture 的真实运行渲染"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.svg"
+       width="574">
+</div>
+
+看最后一行：**10 项无信号**，不是「10 项通过」。没测到的判据报的是「未实测」，
 而退出码是 1 —— 因为有一项关键判据根本没测到。
 
 `--json` 给同一份东西的机器可读版（checks + 结论计数）。`--dry-run` 只列出**将要**
@@ -170,15 +181,17 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出：
 
 ## 它测什么
 
-17 条判据。完整的表、四档证据的说明和语言支持矩阵在
-**[docs/criteria.md](docs/criteria.md)**。一段话概括：仓库自己的测试、自己的覆盖率
-闸门、测试到底会不会红、PG 表结构、跨存储漂移、基线对拍，外加静态信号 —— 测试卫生、
-没人用的导出、过度抽象、重复造轮子、依赖选择、断言的期望值是否独立 —— 外加从
-源码反推出来的判定点，与计划里的清单对账。
+17 条判据，名字列在这里：测试全绿 · 核心逻辑测试到位 · 测试能发现缺陷 · 表结构基本合规 ·
+数据流一致（跨存储对账）· 数据准确（基线对拍）· 钉有区分力 · 需求覆盖到位 ·
+向量集合属性自洽 · 测试卫生 · 导出的逻辑都有测试 · 不过度抽象 · 没有重复造轮子 ·
+使用主流开源库 · 断言的期望值独立 · 计划与机器推导对齐 · 应有判定点覆盖到位。
+
+每一条怎么测、四档证据的说明和语言支持矩阵在
+**[docs/criteria.md](docs/criteria.md)**。
 
 ## 状态
 
-**在维护中，已发 `v0.1.3`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
+**在维护中，已发 `v0.1.7`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
 不会悄悄变。MIT 许可。
 
 仓库里的每个数字都来自一条你能重跑的命令：**32 / 32** 回归套件、**10 / 10** 黄金 fixture、**6 / 6** 行为 eval、allowlist 之外 **0** 条安全发现。
@@ -192,6 +205,35 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出：
 
 attest 还被拿去跑了五个公开仓库，并**把结论公开了 —— 包括让工具显得难看的那些**：
 [docs/self-test-report.md](docs/self-test-report.md)。
+
+## FAQ
+
+**我需要准备什么才能跑？**
+Python 3.11+，别的都不要。attest **零第三方依赖**：它驱动的是**你仓库自己的**工具链
+（node、pytest……），不自带一套。你的仓库要先装好它自己的依赖 —— 因为 attest 跑的是
+那个仓库的 test 命令。
+
+**我的 test 脚本是复合的（`xo && c8 node --test … && tsc`），attest 认得吗？**
+认得。它会把脚本拆开，跑**真正调用测试 runner** 的那一段，把你的测试文件追加在那里。
+认不出来是哪一段在跑测试时，它会直说，而不是猜一条命令去跑。
+
+**退出码 1 在我的 CI 里意味着什么？**
+要么某条实测判据没达标，要么某条关键判据**根本没测到**。GitHub Action 默认不会因此
+让 job 变红（`strict: false`）；改成 `strict: true` 才会。
+
+**attest 会往我的仓库里写东西吗？**
+不会。它读你的仓库、跑你的脚本。有两个命令会写，都是你主动调用且有边界的：
+`req_plan.py scaffold` 在 `--out-dir` 里写测试文件；`--self-check` / `--mutation-check`
+在临时副本上工作。
+
+**它能替代我的覆盖率看板吗？**
+不能替代，它是用它。attest 驱动你仓库自己的覆盖率闸门，报的是你 CI 本来就产出的那个
+数字。
+
+**这个项目有人在维护吗？**
+它有正式版本、有发版记录：见 [CHANGELOG.md](CHANGELOG.md)，[路线图](docs/roadmap.md)
+写了接下来做什么。attest 还公开了它在五个公开仓库上跑出来的结论 —— **包括让工具显得
+难看的那些**（[自测报告](docs/self-test-report.md)）。
 
 ## 参与共建
 

@@ -229,6 +229,11 @@ _RE_CLASS_FIELD = re.compile(
     r"(?:function\b|\([^()]*\)\s*=>|[A-Za-z_$][\w$]*\s*=>)")
 # `NAME(...)` / `NAME(...): Type` —— 方法（类方法与对象字面量里的方法）与函数声明
 _RE_METHOD = re.compile(r"([A-Za-z_$][\w$]*)\s*\([^()]*\)\s*(?::[^;{}]*)?$")
+# 顶层常量赋的对象字面量：`export const memoryInjectionNode: ChatNode = {`。
+# 不给它名字 ⇒ 对象里的方法（`run`）成了孤儿作用域，而调用方 import 的是
+# `memoryInjectionNode` ⇒ 两边对不上 ⇒ 变异点被作用域过滤滤光。
+_RE_CONST_OBJECT = re.compile(
+    r"\b(?:const|let|var)\s+([A-Za-z_$][\w$]*)\s*(?::[^=]*)?=\s*$")
 
 
 @dataclass
@@ -302,6 +307,12 @@ def _scope_name_for_brace(lines: list[str], lineno: int, col: int) -> str | None
     if name:
         return name
     return _folded_scope_name(lines, lineno, col)
+
+
+def _const_object_name(head: str) -> str | None:
+    """`const X = {` 里的 X（顶层对象字面量 ⇒ 它的导出名就是 X）。"""
+    m = _RE_CONST_OBJECT.search(_cut_head(head))
+    return m.group(1) if m else None
 
 
 def _innermost(stack: list[_Scope]) -> str:
@@ -413,16 +424,23 @@ def _line_events(line: str) -> list[tuple[int, str, str]]:
     return events
 
 
-def _scan_lines(lines: list[str]) -> tuple[list[_Scope], list[tuple[int, str, str, str]]]:
+def _scan_lines(lines: list[str],
+               stack_sink: list[tuple[str, ...]] | None = None,
+               ) -> tuple[list[_Scope], list[tuple[int, str, str, str]]]:
     """扫一遍源码行 ⇒ (最终作用域栈, [(行号, kind, 锚点, 详情), ...])。
 
     作用域靠花括号深度跟踪，不是「往上看找最近一个函数」——
     后者会把已经闭合的函数里的调用算到那个函数头上。
+
+    `stack_sink` 给了就把**每一行开始处**的具名作用域栈（外 → 内）记下来，
+    下标 = 行号 - 1。逐行问作用域时用这个，别逐行重扫（那是 O(n²)）。
     """
     stack: list[_Scope] = []
     hits: list[tuple[int, str, str, str]] = []
     depth = 0
     for lineno, line in enumerate(lines, start=1):
+        if stack_sink is not None:
+            stack_sink.append(tuple(s.name for s in stack if s.name))
         events = _line_events(line)
         braces = [(i, ch) for i, ch in enumerate(line) if ch in "{}"]
         merged = sorted(
@@ -437,6 +455,9 @@ def _scan_lines(lines: list[str]) -> tuple[list[_Scope], list[tuple[int, str, st
             elif kind == "open":
                 depth += 1
                 name = _scope_name_for_brace(lines, lineno, col)
+                if name is None and depth == 1:
+                    # 顶层 `const X = {…}`：对象字面量本身是导出的那个符号
+                    name = _const_object_name(lines[lineno - 1][:col])
                 if name is None:
                     name = pending
                 pending = None
@@ -457,6 +478,19 @@ def _anchor_at(lines: list[str], lineno: int) -> str:
     """第 `lineno` 行**开始处**所在的最内层具名作用域；不在任何函数内 ⇒ `<toplevel>`。"""
     stack, _ = _scan_lines(lines[:max(lineno - 1, 0)])
     return _innermost(stack)
+
+
+def scope_stacks(lines: list[str]) -> list[tuple[str, ...]]:
+    """每一行开始处的具名作用域栈（外 → 内）；下标 = 行号 - 1。
+
+    只看**最内层**会漏掉「工厂返回的对象字面量里的方法」：
+    `createMilvusMemoryStore` 里的 `upsert`，锚点是 `upsert`，
+    而调用方 import 的是 `createMilvusMemoryStore` ⇒ 作用域过滤全落空
+    ⇒ 钉被判成「没有可判的变异点」（假的）。
+    """
+    sink: list[tuple[str, ...]] = []
+    _scan_lines(lines, sink)
+    return sink
 
 
 def lexical_analyze(file: str, source: str) -> list[DecisionPoint]:

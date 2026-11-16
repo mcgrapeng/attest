@@ -156,6 +156,25 @@ def test_parse_gate_uses_a_real_parser_not_bracket_balance():
            "正则字面量里的括号变化不误判合法变异")
 
 
+# ------------------------------------- F 顶层 const 对象字面量的作用域名
+
+
+def test_toplevel_const_object_keeps_its_export_name():
+    print("\ntest_toplevel_const_object_keeps_its_export_name")
+    sys.path.insert(0, str(HERE))
+    from decision_points import scope_stacks  # noqa: E402
+    src = ("export const node: Handler = {\n"
+           "  async run(ctx) {\n"
+           "    if (ctx.flag === false) return;\n"
+           "  },\n"
+           "};\n")
+    stacks = scope_stacks(src.split("\n"))
+    expect(stacks[2][:1] == ("node",),
+           f"顶层 const 对象字面量的作用域名是 node（实际 {stacks[2]}）")
+    expect("run" in stacks[2],
+           f"对象里的方法仍是内层作用域（实际 {stacks[2]}）")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -165,6 +184,7 @@ def main() -> int:
     test_scope_relevant_mutation_is_selectable()
     test_parse_check_judges_the_mutation_not_the_file()
     test_parse_gate_uses_a_real_parser_not_bracket_balance()
+    test_toplevel_const_object_keeps_its_export_name()
 
     print()
     for d in TMPDIRS:

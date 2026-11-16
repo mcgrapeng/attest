@@ -21,11 +21,22 @@
 npx skills add mcgrapeng/attest
 ```
 
+<div align="center">
+  <img alt="attest 的两条线：线A 生成计划（req_plan.py new → 填不变式与判定点归属 → scaffold + check），线B 验收交付（readiness.py 跑目标仓库自己的测试车道、覆盖率闸与对账脚本，然后报出四档证据）"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-flow.svg"
+       width="820">
+</div>
 
 ## 它做什么
 
 覆盖率数字只说明代码跑过了。它不说明：断言会不会红、计划里钉的文件是不是真的存在、
 两个存储是不是已经漂了。`attest` 用**证据**回答交付问题，证据分四档：
+
+<div align="center">
+  <img alt="attest 报告里的四档证据：已实测、静态信号、未实测、本工具不判定"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/evidence-kinds.svg"
+       width="794">
+</div>
 
 | 证据种类 | 什么意思 |
 | --- | --- |
@@ -108,7 +119,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.10
+      - uses: mcgrapeng/attest@v0.1.11
         with:
           module: src/auth
 ```
@@ -159,7 +170,7 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 
 <div align="center">
   <img alt="完整报告：四段（已实测 / 静态信号 / 未实测 / 本工具不判定）加三档结论 —— 由 attest 自己 fixture 的真实运行渲染"
-       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.svg"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero-animated.svg"
        width="574">
 </div>
 
@@ -199,7 +210,7 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 
 ## 状态
 
-**在维护中，已发 `v0.1.10`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
+**在维护中，已发 `v0.1.11`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
 不会悄悄变。MIT 许可。
 
 仓库里的每个数字都来自一条你能重跑的命令：**36 / 36** 回归套件、**10 / 10** 黄金 fixture、**6 / 6** 行为 eval、allowlist 之外 **0** 条安全发现。

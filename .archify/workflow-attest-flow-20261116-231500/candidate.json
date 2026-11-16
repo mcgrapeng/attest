@@ -1,0 +1,148 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "attest：一条需求的两条线",
+    "locale": "zh-CN",
+    "visual_preset": "signal-flow",
+    "quality_profile": "showcase",
+    "output": ".archify/workflow-attest-flow-20261116-231500/attest-flow.html",
+    "repository": {
+      "url": "https://github.com/mcgrapeng/attest.git",
+      "provider": "github",
+      "revision": "0013ed624cecb54681e47f7570b374829aee0917"
+    }
+  },
+  "lanes": [
+    { "id": "req", "label": "需求" },
+    { "id": "gen", "label": "线A 生成" },
+    { "id": "ver", "label": "线B 验收" },
+    { "id": "repo", "label": "目标仓库" }
+  ],
+  "phases": [
+    { "id": "p1", "label": "起计划", "fromCol": 0, "toCol": 1 },
+    { "id": "p2", "label": "钉与骨架", "fromCol": 2, "toCol": 3 },
+    { "id": "p3", "label": "实测与结论", "fromCol": 4, "toCol": 5 }
+  ],
+  "groups": [
+    { "id": "g_gen", "label": "线A：写计划", "lane": "gen", "fromCol": 1, "toCol": 3, "variant": "emphasis" },
+    { "id": "g_ver", "label": "线B：验收", "lane": "ver", "fromCol": 4, "toCol": 5, "variant": "emphasis" }
+  ],
+  "mainPath": ["req", "new", "fill", "scaffold", "readiness", "verdict"],
+  "nodes": [
+    {
+      "id": "req",
+      "lane": "req",
+      "col": 0,
+      "type": "external",
+      "label": "一条需求",
+      "sublabel": "要交付的一个模块"
+    },
+    {
+      "id": "new",
+      "lane": "gen",
+      "col": 1,
+      "type": "backend",
+      "label": "req_plan.py new",
+      "sublabel": "扫约定 · 存储 · 判定点",
+      "tag": "出计划骨架",
+      "sources": [
+        { "path": "skills/attest/scripts/req_plan.py", "line": 2867, "end_line": 2900, "label": "cmd_new 生成计划骨架" }
+      ]
+    },
+    {
+      "id": "fill",
+      "lane": "gen",
+      "col": 2,
+      "type": "backend",
+      "label": "填不变式与归属",
+      "sublabel": "钉到真实用例或写豁免",
+      "tag": "人 / AI 判",
+      "sources": [
+        { "path": "skills/attest/SKILL.md", "line": 436, "end_line": 470, "label": "4b 判定点归属的填法" },
+        { "path": "skills/attest/scripts/req_plan.py", "line": 3157, "end_line": 3165, "label": "cmd_assign 拉清单与写回" }
+      ]
+    },
+    {
+      "id": "scaffold",
+      "lane": "gen",
+      "col": 3,
+      "type": "backend",
+      "label": "scaffold + check",
+      "sublabel": "生成骨架 · 核对钉",
+      "tag": "唯一会写盘",
+      "sources": [
+        { "path": "skills/attest/scripts/req_plan.py", "line": 2566, "end_line": 2572, "label": "cmd_scaffold 写测试骨架" },
+        { "path": "skills/attest/scripts/req_plan.py", "line": 3037, "end_line": 3045, "label": "cmd_check 核对钉" }
+      ]
+    },
+    {
+      "id": "readiness",
+      "lane": "ver",
+      "col": 4,
+      "type": "backend",
+      "label": "readiness.py",
+      "sublabel": "跑仓库自己的车道",
+      "tag": "实测",
+      "sources": [
+        { "path": "skills/attest/scripts/readiness.py", "line": 818, "end_line": 826, "label": "run_gates 跑仓库脚本" },
+        { "path": "skills/attest/scripts/readiness.py", "line": 1355, "end_line": 1362, "label": "find_gate_scripts 找闸门" },
+        { "path": "skills/attest/scripts/readiness.py", "line": 1499, "end_line": 1506, "label": "find_reconcilers 找对账脚本" }
+      ]
+    },
+    {
+      "id": "repoown",
+      "lane": "repo",
+      "col": 4,
+      "type": "database",
+      "label": "仓库自己的入口",
+      "sublabel": "测试车道 · 覆盖率闸 · 对账脚本 · PG catalog",
+      "tag": "attest 只驱动",
+      "sources": [
+        { "path": "skills/attest/scripts/readiness.py", "line": 1355, "end_line": 1362, "label": "闸门来自项目自己的 scripts" },
+        { "path": "skills/attest/scripts/readiness.py", "line": 1499, "end_line": 1506, "label": "对账脚本来自项目自己" }
+      ]
+    },
+    {
+      "id": "verdict",
+      "lane": "ver",
+      "col": 5,
+      "type": "backend",
+      "label": "四档结论",
+      "sublabel": "已实测 · 静态信号 · 未实测 · 不判定",
+      "tag": "退出码 1 = 有阻塞",
+      "sources": [
+        { "path": "skills/attest/scripts/readiness.py", "line": 4080, "end_line": 4090, "label": "退出码规则" },
+        { "path": "skills/attest/scripts/readiness.py", "line": 4120, "end_line": 4128, "label": "本工具不判定的那八项" }
+      ]
+    }
+  ],
+  "edges": [
+    { "id": "e_req_new", "from": "req", "to": "new", "label": "需求进来", "variant": "default" },
+    { "id": "e_new_fill", "from": "new", "to": "fill", "label": "骨架 + 判定点", "variant": "default" },
+    { "id": "e_fill_scaffold", "from": "fill", "to": "scaffold", "variant": "default" },
+    { "id": "e_scaffold_readiness", "from": "scaffold", "to": "readiness", "label": "带 --plan 跑", "variant": "emphasis" },
+    { "id": "e_readiness_verdict", "from": "readiness", "to": "verdict", "label": "证据", "variant": "emphasis" },
+    { "id": "e_readiness_repo", "from": "readiness", "to": "repoown", "label": "驱动它跑自己的", "variant": "dashed", "role": "branch" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "计划里的三列是人写的",
+      "items": [
+        "归属哪条不变式",
+        "钉到哪个用例（文件::用例名）",
+        "或写明为什么豁免"
+      ]
+    },
+    {
+      "dot": "rose",
+      "title": "17 条判据 · 四类证据",
+      "items": [
+        "已实测 = 真的跑过，命令和输出都在报告里",
+        "静态信号永远不能单独支撑通过",
+        "缺前置条件 ⇒ 未实测，不是通过"
+      ]
+    }
+  ]
+}

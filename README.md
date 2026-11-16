@@ -21,6 +21,11 @@
 npx skills add mcgrapeng/attest
 ```
 
+<div align="center">
+  <img alt="attest's two lines: line A writes the requirement test plan (req_plan.py new → fill the invariants and the decision-point ownership → scaffold + check), line B verifies the delivery (readiness.py runs the target repository's own test lane, coverage gate and reconciliation script, then reports four kinds of evidence)"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-flow.svg"
+       width="820">
+</div>
 
 ## What it does
 
@@ -28,6 +33,12 @@ A coverage number tells you the code ran. It does not tell you that an
 assertion would fail, that the plan's pins point at files that exist, or that
 two stores have not drifted apart. `attest` answers the delivery question with
 **evidence**, sorted into four kinds:
+
+<div align="center">
+  <img alt="The four kinds of evidence attest reports: measured, static signal, not measured, not judged"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/evidence-kinds.svg"
+       width="794">
+</div>
 
 | Evidence kind | What it means |
 | --- | --- |
@@ -120,7 +131,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.10
+      - uses: mcgrapeng/attest@v0.1.11
         with:
           module: src/auth
 ```
@@ -175,7 +186,7 @@ terminal:
 
 <div align="center">
   <img alt="The full report: four sections (measured, static signals, not measured, not judged) and a three-tier verdict: rendered from a real run of attest's own fixture"
-       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.svg"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero-animated.svg"
        width="574">
 </div>
 
@@ -228,7 +239,7 @@ How each one is measured, the four evidence kinds and the language matrix are in
 
 ## Status
 
-**Actively developed. Released as `v0.1.10`.** The criteria and the skill
+**Actively developed. Released as `v0.1.11`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 

@@ -1,0 +1,953 @@
+<svg width="927" height="676" data-theme="dark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 927 676" data-reader-fit="width-first" data-layout-contract="readable-v2" role="img" lang="zh-CN" aria-labelledby="archify-diagram-title archify-diagram-description" data-animation="trace" data-preset="signal-flow" data-quality-profile="showcase" data-node-ui=""><style>
+          svg[data-node-ui] [data-node-id] > rect:not(.c-mask) { stroke-width: 1.25px; }
+
+          svg[data-node-ui] .phase-rule { opacity: .5; stroke-dasharray: none; }
+
+          svg[data-node-ui] .phase-chip { stroke: var(--lane-stroke); stroke-width: .75px; }
+
+          svg[data-node-ui] g[data-edge-from] > rect.c-mask { rx: 7px; stroke: var(--lane-stroke); stroke-width: .75px; }
+
+        
+
+
+    /* ==========================================================
+       SIGNAL FLOW — an opt-in, motion-forward visual preset.
+       The variables also target a standalone exported SVG, whose
+       root carries data-preset and data-theme directly.
+       ========================================================== */
+    [data-preset="signal-flow"][data-theme="dark"] {
+      --bg: #030711;
+      --grid: #15233a;
+      --panel: rgba(6, 14, 28, 0.78);
+      --panel-border: #1d3350;
+      --lane-fill: rgba(9, 22, 40, 0.5);
+      --lane-stroke: #2c4564;
+      --text: #f5fbff;
+      --text-muted: #9eb0c7;
+      --text-dim: #52667f;
+      --text-faint: #7890ad;
+      --mask: #07101e;
+      --frontend-fill: rgba(6, 182, 212, 0.14);
+      --frontend-stroke: #67e8f9;
+      --backend-fill: rgba(16, 185, 129, 0.14);
+      --backend-stroke: #5eead4;
+      --database-fill: rgba(139, 92, 246, 0.16);
+      --database-stroke: #c4b5fd;
+      --cloud-fill: rgba(245, 158, 11, 0.13);
+      --cloud-stroke: #fcd34d;
+      --security-fill: rgba(244, 63, 94, 0.13);
+      --security-stroke: #fda4af;
+      --messagebus-fill: rgba(249, 115, 22, 0.13);
+      --messagebus-stroke: #fdba74;
+      --external-fill: rgba(71, 85, 105, 0.24);
+      --external-stroke: #a5b4c7;
+      --arrow: #7890ad;
+      --arrow-emphasis: #2dd4bf;
+      --toolbar-bg: rgba(7, 16, 30, 0.86);
+      --toolbar-border: #29415f;
+      --toolbar-menu-bg: #07101e;
+    }
+
+
+    /* ==========================================================
+       BLUEPRINT — a review-first drafting preset for deployment,
+       infrastructure, and technical design documentation. It keeps
+       the same semantic palette and geometry while trading glow for
+       precise grid contrast, squared materials, and drafting marks.
+       ========================================================== */
+    [data-preset="blueprint"][data-theme="dark"] {
+      --bg: #06131f;
+      --grid: #17425a;
+      --panel: rgba(7, 27, 43, 0.9);
+      --panel-border: #27627f;
+      --lane-fill: rgba(10, 43, 66, 0.36);
+      --lane-stroke: #34799a;
+      --text: #e3f6ff;
+      --text-muted: #91b8ca;
+      --text-dim: #557e92;
+      --text-faint: #739caf;
+      --mask: #0a2031;
+      --frontend-fill: rgba(26, 157, 193, 0.14);
+      --frontend-stroke: #66d9ef;
+      --backend-fill: rgba(31, 155, 124, 0.13);
+      --backend-stroke: #69dfbd;
+      --database-fill: rgba(120, 105, 196, 0.14);
+      --database-stroke: #b4a8ff;
+      --cloud-fill: rgba(197, 145, 43, 0.13);
+      --cloud-stroke: #ffd166;
+      --security-fill: rgba(199, 76, 104, 0.13);
+      --security-stroke: #ff8da1;
+      --messagebus-fill: rgba(207, 112, 49, 0.13);
+      --messagebus-stroke: #ffad66;
+      --external-fill: rgba(84, 119, 139, 0.18);
+      --external-stroke: #a7cad9;
+      --arrow: #78a3b7;
+      --arrow-emphasis: #64dfc1;
+      --toolbar-bg: rgba(7, 28, 45, 0.92);
+      --toolbar-border: #34799a;
+      --toolbar-text: #d8f3ff;
+      --toolbar-hover: rgba(18, 58, 83, 0.95);
+      --toolbar-menu-bg: #0a2031;
+    }
+
+
+    /* ==========================================================
+       EDITORIAL — a warm, publication-minded preset for design
+       reviews, launch notes, and documentation. The diagram keeps
+       the same semantic palette and exact geometry, but trades
+       software chrome for paper, ink, ruled structure, and one
+       restrained vermilion accent.
+       ========================================================== */
+    [data-preset="editorial"][data-theme="dark"] {
+      --bg: #181611;
+      --grid: #39342a;
+      --panel: rgba(35, 31, 24, 0.96);
+      --panel-border: #625a4a;
+      --lane-fill: rgba(52, 46, 35, 0.46);
+      --lane-stroke: #726957;
+      --text: #f4eddf;
+      --text-muted: #b9ae9b;
+      --text-dim: #776e60;
+      --text-faint: #9d917e;
+      --mask: #231f18;
+      --frontend-fill: rgba(43, 133, 142, 0.16);
+      --frontend-stroke: #7fc6c7;
+      --backend-fill: rgba(63, 132, 92, 0.16);
+      --backend-stroke: #8fc29e;
+      --database-fill: rgba(117, 91, 141, 0.17);
+      --database-stroke: #c0a4d0;
+      --cloud-fill: rgba(170, 119, 49, 0.16);
+      --cloud-stroke: #d8ad68;
+      --security-fill: rgba(157, 69, 65, 0.17);
+      --security-stroke: #df9085;
+      --messagebus-fill: rgba(174, 79, 42, 0.16);
+      --messagebus-stroke: #df946f;
+      --external-fill: rgba(126, 115, 96, 0.18);
+      --external-stroke: #b8ad99;
+      --arrow: #948978;
+      --arrow-emphasis: #dd6b3d;
+      --toolbar-bg: rgba(35, 31, 24, 0.92);
+      --toolbar-border: #625a4a;
+      --toolbar-text: #eee5d5;
+      --toolbar-hover: #302a20;
+      --toolbar-menu-bg: #231f18;
+    }
+
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+svg {
+      --archify-page-top: 2rem;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', 'Noto Sans', Roboto, 'Helvetica Neue', Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      background: var(--bg);
+      min-height: 100vh;
+      padding: var(--archify-page-top) 2rem 2rem;
+      color: var(--text);
+      /* Theme surfaces change together; animating the page background leaves it
+         visibly out of sync with the SVG and panel for the first 200ms. */
+    }
+
+
+    /* Presentation Stage is a viewer-only layer: it gives the live diagram
+       the viewport while keeping guided views, theme, focus, and exports real.
+       Embed mode wins when both query parameters are present. */
+    [data-present="true"]:not([data-embed="true"]) body {
+      --archify-page-top: 1rem;
+      height: 100dvh;
+      min-height: 0;
+      padding: 1rem;
+      overflow: hidden;
+    }
+
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+
+
+    h1 {
+      font-size: 1.5rem;
+      font-weight: 650;
+      line-height: 1.25;
+      letter-spacing: -0.015em;
+    }
+
+
+    svg {
+      font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, 'DejaVu Sans Mono', 'Liberation Mono', 'Noto Sans Mono CJK SC', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', monospace;
+      width: 100%;
+      min-width: min(900px, 100%);
+      display: block;
+      transform-origin: 0 0;
+      transition: transform 0.18s ease;
+    }
+
+
+    /* Semantic Radar is a deliberately simplified, viewer-only overview. It
+       uses authored node bounds and the live camera viewport rather than
+       cloning the canonical SVG, so IDs, filters, animation, and export state
+       stay singular and deterministic. */
+    .overview-map {
+      position: absolute;
+      right: 1rem;
+      bottom: calc(4.15rem + var(--archify-nav-reserve));
+      z-index: 12;
+      width: 11.25rem;
+      overflow: hidden;
+      border: 1px solid color-mix(in srgb, var(--frontend-stroke) 52%, var(--toolbar-border));
+      border-radius: 0.78rem;
+      background: var(--toolbar-menu-bg);
+      color: var(--toolbar-text);
+      box-shadow: 0 16px 42px rgba(0, 0, 0, 0.3);
+      backdrop-filter: blur(16px);
+      font-size: 0.625rem;
+    }
+
+    @keyframes archify-lens-in {
+      from { opacity: 0; transform: translateY(5px) scale(0.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* Picking needs one line of guidance, not a wide empty card; the panel
+       widens only when there is a traced route to show. */
+    .route-probe:not([data-state="result"]) { width: min(22rem, calc(100% - 2rem)); min-width: 0; }
+
+    @keyframes archify-guide-in {
+      from { opacity: 0; transform: translateY(-5px) scale(0.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* A zero count is absence, not information — let it recede. */
+    .node-finder-result em[data-zero] { color: var(--text-faint); }
+
+
+    /* Preserve the one-screen guarantee on ordinary laptop displays. The
+       high-screen expansion above must not trade a fuller canvas for page
+       scrolling at 900–1080px heights. */
+    @media (min-width: 768px) and (max-height: 1100px) {
+      .header { margin-bottom: 1rem; }
+      .diagram-container {
+        padding: 0.875rem;
+        padding-bottom: calc(0.875rem + var(--archify-nav-reserve));
+      }
+      .cards { margin-top: 1rem; }
+      .card { padding: 1rem; }
+    }
+@media (min-width: 768px) and (max-height: 920px){svg { padding-block: 1.25rem; }
+svg { --archify-page-top: 1.25rem; }
+
+    }
+
+    /* The rail is at least the diagram's height and may run on to the viewport
+       floor (--archify-rail-max, set by the reader); past that, notes scroll and
+       the index keeps a usable share instead of collapsing to its header. */
+    [data-reader-rail="true"] .reader-rail {
+      display: flex;
+      flex-direction: column;
+      grid-column: 2;
+      align-self: stretch;
+      min-height: 0;
+      max-height: var(--archify-rail-max, none);
+    }
+
+    /* Collapsed: only the reveal control remains, so the diagram takes the width. */
+    [data-reader-rail="collapsed"] .reader-rail { display: none; }
+
+    @keyframes rail-drawer-in {
+      from { opacity: 0; transform: translateX(0.75rem); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+
+    /* Bottom (default): the notes keep their full-width card row and the index
+       follows as one panel whose groups flow into columns, so nothing scrolls
+       inside it. The placement toggle sits in the index header. */
+    [data-reader-rail="bottom"] .reader-rail {
+      display: grid;
+      grid-template-areas: "cards" "index";
+      grid-template-columns: minmax(0, 1fr);
+      row-gap: 1rem;
+      margin-top: 1rem;
+    }
+
+    /* The rail frees the vertical budget, so compact viewports keep the normal
+       title spacing instead of the stacked layout's tight stage rail. */
+    [data-reader-rail]:not([data-reader-rail="bottom"]) body { --archify-page-top: 1.5rem; padding-block: 1.5rem; }
+
+    /* Swatches echo the diagram's node cards: tinted fill, hairline stroke. */
+    .node-outline-dot {
+      width: 0.625rem;
+      height: 0.5rem;
+      border: 1.25px solid var(--outline-tone);
+      border-radius: 0.15rem;
+      background: color-mix(in srgb, var(--outline-tone) 16%, var(--bg));
+      transition: background 0.16s ease, transform 0.16s ease, box-shadow 0.16s ease;
+    }
+
+
+    /* ==========================================================
+       Print stylesheet — hide interactive controls, force light,
+       drop the grid so the diagram doesn't waste ink, use landscape
+       so wide diagrams fit, pack summary cards into 2 columns to
+       avoid an orphan card on a trailing page.
+       ========================================================== */
+    @page { size: landscape; margin: 1.5cm; }
+@media print{
+      /* Force the FULL light palette — including component fills/strokes and
+         lane/arrow colors — so printing from dark theme doesn't put neon
+         strokes and translucent dark fills on white paper. */
+      :root, [data-theme="dark"], [data-theme="light"] {
+        --bg: #ffffff;
+        --grid: transparent;
+        --panel: #ffffff;
+        --panel-border: #e2e8f0;
+        --text: #0f172a;
+        --text-muted: #475569;
+        --text-dim: #94a3b8;
+        --text-faint: #64748b;
+        --mask: #ffffff;
+        --lane-fill: rgba(248, 250, 252, 0.65);
+        --lane-stroke: #cbd5e1;
+        --arrow: #94a3b8;
+        --arrow-emphasis: #059669;
+        --frontend-fill:    rgba(34, 211, 238, 0.15);
+        --frontend-stroke:  #0891b2;
+        --backend-fill:     rgba(52, 211, 153, 0.18);
+        --backend-stroke:   #059669;
+        --database-fill:    rgba(167, 139, 250, 0.2);
+        --database-stroke:  #7c3aed;
+        --cloud-fill:       rgba(251, 191, 36, 0.18);
+        --cloud-stroke:     #d97706;
+        --security-fill:    rgba(251, 113, 133, 0.15);
+        --security-stroke:  #e11d48;
+        --messagebus-fill:  rgba(251, 146, 60, 0.15);
+        --messagebus-stroke:#ea580c;
+        --external-fill:    rgba(148, 163, 184, 0.18);
+        --external-stroke:  #64748b;
+      }
+svg { background: #ffffff !important; padding: 0; }
+
+      h1, .subtitle { color: #0f172a; }
+
+    }
+
+
+    /* ==========================================================
+       TOOLBAR (theme toggle + export menu)
+       ========================================================== */
+    /* The toolbar tracks the centered reader column and the title row, so
+       an adaptive narrow reader does not leave its controls stranded at the
+       viewport edge. */
+    .toolbar {
+      position: absolute;
+      top: var(--archify-page-top);
+      right: max(1rem, calc((100vw - min(100vw - 4rem, var(--archify-reader-width, 1440px))) / 2));
+      display: flex;
+      align-items: center;
+      gap: 0.125rem;
+      padding: 0;
+      border: 0;
+      background: transparent;
+      box-shadow: none;
+      z-index: 100;
+    }
+
+    @keyframes toolbar-menu-in {
+      from { opacity: 0; transform: translateY(-0.25rem) scale(0.985); }
+      to { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* The motion button breathes on the relay cycle, so the chrome keeps time
+       with the wave it controls. Motion Governor mirrors the planned cycle from
+       the diagram SVG onto the document. */
+    [data-ambient-motion="running"][data-motion="live"]:not([data-motion-owner]):not([data-embed]):not([data-share-playback]):not([data-document-hidden]) #btn-motion .motion-control-dot {
+      animation: archify-motion-dot-breathe var(--flow-cycle-chrome, 6.4s) ease-in-out infinite;
+    }
+
+    @keyframes archify-motion-dot-breathe {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      46% { opacity: 0.55; transform: scale(0.72); }
+    }
+
+    /* Name and format hint share one line, so each row stays compact. */
+    .export-item-copy {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 0.75rem;
+      min-width: 0;
+    }
+@media (max-width: 720px){svg { padding: 1rem; }
+
+      h1 {
+        font-size: 1.25rem;
+        line-height: 1.25;
+      }
+
+      /* While a mobile reader previews one relationship, turn the full Lens
+         into a compact peek card. This keeps the exact source and target on
+         canvas instead of covering them with a long, scrollable list. */
+      .focus-chip[data-relationship-previewing="true"] .relationship-lens-list {
+        max-height: none;
+        padding: 0.35rem;
+        overflow: hidden;
+      }
+
+    }
+
+
+    /* ==========================================================
+       SVG SEMANTIC CLASSES — use these instead of inline fill/stroke
+       ========================================================== */
+    .c-grid       { stroke: var(--grid); fill: none; }
+
+    .c-mask       { fill: var(--mask); stroke: none; }
+
+    .c-backend    { fill: var(--backend-fill);    stroke: var(--backend-stroke); }
+
+    .c-database   { fill: var(--database-fill);   stroke: var(--database-stroke); }
+
+    .c-external   { fill: var(--external-fill);   stroke: var(--external-stroke); }
+
+
+    /* Text helpers */
+    .t-primary { fill: var(--text); }
+
+    .t-muted   { fill: var(--text-muted); }
+
+    .t-backend    { fill: var(--backend-stroke); }
+
+    .t-database   { fill: var(--database-stroke); }
+
+    .t-edge-emphasis { fill: var(--arrow-emphasis); }
+
+    .t-edge-dashed   { fill: var(--database-stroke); }
+
+
+    /* Classic canvas: a quiet dot field replaces drafting grid lines, and nodes
+       read as lifted cards with hairline strokes. Paint only; authored geometry,
+       hit areas and exports keep their canonical shapes. */
+    [data-preset="classic"] .diagram-container {
+      background:
+        radial-gradient(circle at 1px 1px, var(--canvas-dot) 1px, transparent 1.4px) 0 0 / 20px 20px,
+        var(--panel);
+    }
+
+    [data-preset="classic"] .diagram-container > svg .c-grid { stroke: transparent; }
+
+    [data-preset="classic"][data-theme="light"] .diagram-container > svg [data-node-id] > rect:not(.c-mask) {
+      --ambient-node-base-filter: drop-shadow(0 1px 1px rgba(17, 24, 39, 0.05)) drop-shadow(0 6px 12px rgba(17, 24, 39, 0.06));
+      filter: var(--ambient-node-base-filter);
+    }
+
+    [data-preset="classic"][data-theme="dark"] .diagram-container > svg [data-node-id] > rect:not(.c-mask) {
+      --ambient-node-base-filter: drop-shadow(0 8px 16px rgba(0, 0, 0, 0.35));
+      filter: var(--ambient-node-base-filter);
+    }
+
+
+    /* Semantic Sigils are small authored role stamps, not icons from a brand
+       pack and not viewer controls. Prefix selectors with svg so the canonical
+       export's SVG-only stylesheet collector keeps them automatically. */
+    svg .semantic-sigil {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 1.35;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      opacity: 0.76;
+      pointer-events: none;
+    }
+
+    svg .semantic-sigil > * { vector-effect: non-scaling-stroke; }
+
+    svg .semantic-sigil .sigil-fill { fill: currentColor; stroke: none; }
+
+    svg .s-backend    { color: var(--backend-stroke); }
+
+    svg .s-database   { color: var(--database-stroke); }
+
+    svg .s-external   { color: var(--external-stroke); }
+
+
+    /* Reading Depth is a viewer-only level-of-detail layer. MAP preserves the
+       authored structure and primary labels, READ restores relationship labels
+       and node context, and FULL restores tags and fine annotations. Semantic
+       intent can reveal the relevant detail without moving any geometry. */
+    svg [data-detail] { transition: opacity 160ms ease; }
+
+
+    /* Focus, lens, preview, route, and story states are stronger reader intent than
+       the global zoom level. Reveal only their exact semantic matches. */
+    svg[data-focus-active] [data-focus-match][data-detail],
+    svg[data-focus-active] [data-focus-match] [data-detail],
+    svg[data-reach-active] [data-reach-match][data-detail],
+    svg[data-reach-active] [data-reach-match] [data-detail],
+    svg[data-lens-active] [data-lens-match][data-detail],
+    svg[data-lens-active] [data-lens-match] [data-detail],
+    svg[data-legend-preview-active] [data-legend-preview-match][data-detail],
+    svg[data-legend-preview-active] [data-legend-preview-match] [data-detail],
+    svg[data-intent-trace-active] [data-intent-trace-match][data-detail],
+    svg[data-intent-trace-active] [data-intent-trace-match] [data-detail],
+    svg[data-route-active] [data-route-match][data-detail],
+    svg[data-route-active] [data-route-match] [data-detail],
+    svg[data-relationship-preview-active] [data-relationship-preview][data-detail],
+    svg[data-relationship-preview-active] [data-relationship-preview] [data-detail],
+    svg [data-node-id]:hover [data-detail],
+    svg [data-node-id]:focus-visible [data-detail] {
+      opacity: 1;
+      pointer-events: auto;
+    }
+
+
+    /* Arrows */
+    .a-default   { stroke: var(--arrow); fill: none; }
+
+    .a-emphasis  { stroke: var(--arrow-emphasis); fill: none; }
+
+    .a-dashed    { stroke: var(--database-stroke); fill: none; stroke-dasharray: 4,4; }
+
+
+    /* Arrowhead markers reference these */
+    .m-default   { fill: var(--arrow); }
+
+    .m-emphasis  { fill: var(--arrow-emphasis); }
+
+    .m-security  { fill: var(--security-stroke); }
+
+    .m-dashed    { fill: var(--database-stroke); }
+
+    /* Automatic crossover masks are visual companions of their one semantic
+       edge. Keep the mask free of data-edge-* identity so graph traversal and
+       export still observe exactly one edge, then mirror reader emphasis from
+       the paired foreground path in this presentation-only wrapper. */
+    svg[data-legend-preview-active] [data-graph-role="automatic-crossover"] > [data-graph-role="automatic-crossover-underlay"],
+    svg[data-lens-active] [data-graph-role="automatic-crossover"] > [data-graph-role="automatic-crossover-underlay"] { opacity: 0.11; }
+
+
+    /* Authored Reachability is a bounded graph query over the relationships
+       already present in the artifact. Upstream walks incoming edges;
+       downstream walks outgoing edges. It never claims runtime causality and
+       changes only viewer emphasis, not canonical geometry or export bytes. */
+    svg[data-reach-active] [data-node-id],
+    svg[data-reach-active] [data-edge-from] { opacity: 0.09; }
+
+
+    /* Intent Trace is a temporary, pre-click exploration layer. Related
+       topology stays readable while a short viewer-only signal runs over
+       cloned edge geometry; the authored edge remains untouched underneath. */
+    /* Keep the node's opaque backing mask intact while its visible ink dims.
+       Fading the whole group also fades that mask and briefly exposes arrows
+       routed underneath the node when the pointer leaves. */
+    svg[data-intent-trace-active] [data-node-id] { fill-opacity: 0.2; stroke-opacity: 0.2; }
+
+    svg [data-node-id] > .c-mask { fill-opacity: 1; }
+
+    /* Direction names describe each edge relative to the focused node only.
+       The cloned geometry already runs from the authored source to target, so
+       incoming and outgoing signals must share the same playback direction. */
+    .intent-trace-flow[data-direction="out"] {
+      stroke: var(--frontend-stroke);
+      filter: drop-shadow(0 0 4px var(--frontend-stroke));
+    }
+
+
+    svg[data-preset="editorial"] .c-grid {
+      stroke-dasharray: 1 4;
+      opacity: 0.48;
+    }
+
+
+    svg[data-preset="blueprint"] .c-grid {
+      stroke-dasharray: 1 3;
+      opacity: 0.78;
+    }
+
+    .c-lane           { fill: var(--lane-fill); stroke: var(--lane-stroke); stroke-dasharray: 6,6; }
+
+
+    /* Live plays one relay per cycle: a comet (halo, tail, head) leaves each
+       source when the signal reaches it, travels at one shared speed, leaves a
+       soft wake, and lands as a ripple while its target glows. Downstream edges
+       depart only after their source is reached, so the reader sees the path the
+       diagram describes rather than every edge shimmering at once. Sequence
+       messages relay in authored chronological order. Motion Governor plans the
+       timeline and its per-edge keyframes; this stylesheet owns appearance.
+       Original line language and markers remain static. Node entry is bounded to
+       one pass per document. */
+    svg[data-animation="trace"] {
+      --flow-cycle: 6.4s;
+      --flow-halo-peak: 0.17;
+      --flow-glow-peak: 0.5;
+      --flow-tail-peak: 0.42;
+      --flow-head-peak: 0.95;
+      --flow-wake-peak: 0.3;
+      --flow-ripple-peak: 0.65;
+    }
+
+    /* Stream packets trail the comet head as smaller, dimmer beads. */
+    .ambient-flow-head.packet {
+      --flow-peak: calc(var(--flow-head-peak, 0.95) * 0.62);
+      stroke-width: 3.4;
+    }
+
+    /* Waterfall spans fill in proportion to their measured time, then settle. */
+    .ambient-flow-fill {
+      --flow-peak: 0.5;
+      fill: color-mix(in srgb, var(--flow-fill, var(--arrow-emphasis)) 55%, white);
+      stroke: none;
+      transform-box: fill-box;
+      transform-origin: left center;
+    }
+
+    /* On light canvases the relay reads by saturation instead of bloom: the head
+       and ripple mix toward ink instead of white, and every layer's peak rises so
+       the wave survives the bright background. */
+    [data-theme="light"] svg[data-animation="trace"] {
+      --flow-halo-peak: 0.22;
+      --flow-glow-peak: 0.4;
+      --flow-tail-peak: 0.5;
+      --flow-wake-peak: 0.34;
+    }
+
+    /* Each node glows in its planned windows: when the relay reaches it, while a
+       walk token rests on it, as a message lands, or as the playhead passes.
+       During the bounded entrance all three animations run; the entrance pulse is
+       listed after the repeating glow and wins on filter until it completes. */
+    [data-ambient-motion="running"][data-motion="live"]:not([data-motion-owner]):not([data-embed]):not([data-share-playback]):not([data-document-hidden]) svg[data-animation="trace"] [data-animate="node"] {
+      animation: var(--flow-node-name, none) var(--flow-cycle, 6.4s) linear infinite;
+    }
+
+    @keyframes archify-node-enter {
+      from { opacity: 0; }
+      to { opacity: 1; }
+    }
+
+    @keyframes archify-node-pulse {
+      0%, 72%, 100% { filter: none; stroke-width: 1.5; }
+      18%, 36% {
+        filter: drop-shadow(0 0 8px var(--arrow-emphasis));
+        stroke-width: 2.4;
+      }
+    }
+
+    @keyframes archify-blueprint-node-pulse {
+      0%, 72%, 100% { opacity: 1; filter: none; }
+      18%, 36% { opacity: 0.72; filter: drop-shadow(0 0 2px var(--frontend-stroke)); }
+    }
+
+    @keyframes archify-editorial-node-pulse {
+      0%, 72%, 100% { opacity: 1; filter: none; }
+      18%, 36% { opacity: 0.78; filter: drop-shadow(0 2px 2px color-mix(in srgb, var(--text) 18%, transparent)); }
+    }
+
+    @keyframes archify-signal-scan {
+      0%, 18% { opacity: 1; transform: translateX(-70%); }
+      70% { opacity: 1; transform: translateX(70%); }
+      100% { opacity: 0; transform: translateX(70%); }
+    }
+
+    @keyframes archify-radar-live {
+      0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--backend-stroke) 52%, transparent); }
+      55%, 100% { box-shadow: 0 0 0 0.32rem transparent; }
+    }
+
+
+    @keyframes archify-intent-trace-flow {
+      0% { opacity: 0.28; stroke-dashoffset: 0; }
+      12%, 78% { opacity: 0.94; }
+      100% { opacity: 0; stroke-dashoffset: -1; }
+    }
+
+    @keyframes archify-route-probe-flow {
+      0% { stroke-dashoffset: 0; opacity: 0.96; }
+      78% { stroke-dashoffset: -1; opacity: 0.96; }
+      100% { stroke-dasharray: none; stroke-dashoffset: 0; opacity: 0.58; }
+    }
+
+    @keyframes archify-route-journey-flow {
+      0% { opacity: 0.16; stroke-dashoffset: 0; }
+      14%, 76% { opacity: 1; }
+      100% { opacity: 0; stroke-dashoffset: -1; }
+    }
+
+    @keyframes archify-semantic-lens-flow {
+      0% { opacity: 0.2; stroke-dashoffset: 0; }
+      12%, 78% { opacity: 0.9; }
+      100% { opacity: 0; stroke-dashoffset: -1; }
+    }
+
+    @keyframes archify-relationship-pulse {
+      0% { opacity: 0.18; stroke-dashoffset: 0; }
+      10%, 76% { opacity: 0.98; }
+      100% { opacity: 0; stroke-dashoffset: -1; }
+    }
+
+    @keyframes archify-relationship-token-life {
+      0%, 7% { opacity: 0; }
+      13%, 82% { opacity: 1; }
+      100% { opacity: 0; }
+    }
+
+
+    @keyframes archify-share-cue-enter {
+      from { opacity: 0; transform: translate(-50%, -0.45rem); }
+      to { opacity: 1; transform: translate(-50%, 0); }
+    }
+
+    @keyframes archify-share-cue-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.48; transform: scale(0.78); }
+    }
+
+  
+
+/* ---- attest 自己加的动画层（Archify 的 trace 由 viewer 的 JS 驱动，嵌不进 README） ----
+   原则：图在任何时刻都完整可读 —— 动的是光与呼吸，不是「逐行画出来」。
+   README 里的读者可能只看一眼就滚过去，不能让他撞见半张图。 */
+@keyframes att-glow {
+  0%, 100% { stroke-opacity: .58; }
+  50%      { stroke-opacity: 1; }
+}
+@keyframes att-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-1.5px); }
+}
+@keyframes att-comet {
+  0%   { stroke-dashoffset: 80; opacity: 0; }
+  14%  { opacity: .9; }
+  72%  { opacity: .9; }
+  100% { stroke-dashoffset: -80; opacity: 0; }
+}
+@keyframes att-chip {
+  0%, 100% { fill-opacity: .55; }
+  50%      { fill-opacity: 1; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  g[data-node-id] {
+    animation: att-float 9s ease-in-out infinite;
+    animation-delay: calc(var(--d, 0) * 260ms);
+  }
+  g[data-node-id] rect {
+    animation: att-glow 6s ease-in-out infinite;
+    animation-delay: calc(var(--d, 0) * 400ms);
+  }
+  path.att-comet {
+    stroke-dasharray: 2 26;
+    animation: att-comet 5.5s linear infinite;
+    animation-delay: calc(var(--d, 0) * 620ms);
+  }
+  .phase-chip {
+    animation: att-chip 7s ease-in-out infinite;
+  }
+}
+</style>
+        <title id="archify-diagram-title">attest：一条需求的两条线</title>
+        <desc id="archify-diagram-description">由 Archify 生成的工作流图。</desc>
+        <!-- Definitions -->
+        <defs>
+          <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-default" />
+          </marker>
+          <marker id="arrowhead-emphasis" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-emphasis" />
+          </marker>
+          <marker id="arrowhead-security" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-security" />
+          </marker>
+          <marker id="arrowhead-dashed" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+            <polygon points="0 0, 10 3.5, 0 7" class="m-dashed" />
+          </marker>
+          <pattern id="grid" width="40" height="40" patternUnits="userSpaceOnUse">
+            <path d="M 40 0 L 0 0 0 40" class="c-grid" stroke-width="0.5"/>
+          </pattern>
+        </defs>
+        <style>
+          svg[data-node-ui] [data-node-id] > rect:not(.c-mask) { stroke-width: 1.25px; }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] > rect:not(.c-mask).c-frontend { fill: color-mix(in srgb, var(--frontend-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--frontend-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] > rect:not(.c-mask).c-backend { fill: color-mix(in srgb, var(--backend-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--backend-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] > rect:not(.c-mask).c-database { fill: color-mix(in srgb, var(--database-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--database-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] > rect:not(.c-mask).c-cloud { fill: color-mix(in srgb, var(--cloud-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--cloud-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] > rect:not(.c-mask).c-security { fill: color-mix(in srgb, var(--security-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--security-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] > rect:not(.c-mask).c-messagebus { fill: color-mix(in srgb, var(--messagebus-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--messagebus-stroke) 72%, var(--mask)); }
+          :is([data-theme="dark"] svg[data-node-ui], svg[data-node-ui][data-theme="dark"]) [data-node-id] > rect:not(.c-mask).c-external { fill: color-mix(in srgb, var(--external-stroke) 13%, var(--mask)); stroke: color-mix(in srgb, var(--external-stroke) 72%, var(--mask)); }
+          svg[data-node-ui]:is([data-preset="classic"], [data-preset="signal-flow"], [data-preset="editorial"]) .c-region { fill: color-mix(in srgb, var(--cloud-stroke) 3%, transparent); stroke: color-mix(in srgb, var(--cloud-stroke) 42%, var(--lane-stroke)); stroke-dasharray: none; }
+          svg[data-node-ui] .c-security-group { stroke: color-mix(in srgb, var(--security-stroke) 58%, var(--lane-stroke)); }
+          svg[data-node-ui]:is([data-preset="classic"], [data-preset="signal-flow"], [data-preset="editorial"]) .c-security-group { stroke-dasharray: 4 3; }
+          svg[data-node-ui]:is([data-preset="classic"], [data-preset="signal-flow"], [data-preset="editorial"]) .c-lane { stroke: var(--lane-stroke); stroke-dasharray: none; }
+          svg[data-node-ui] [data-graph-role="structural-frame-label-mask"] { rx: 5px; fill: color-mix(in srgb, var(--cloud-stroke) 10%, var(--mask)); stroke: color-mix(in srgb, var(--cloud-stroke) 38%, var(--mask)); stroke-width: .8px; }
+          svg[data-node-ui] [data-composition-frame-kind="security-group"] > [data-graph-role="structural-frame-label-mask"] { fill: color-mix(in srgb, var(--security-stroke) 9%, var(--mask)); stroke: color-mix(in srgb, var(--security-stroke) 36%, var(--mask)); }
+          svg[data-node-ui] .phase-rule { opacity: .5; stroke-dasharray: none; }
+          svg[data-node-ui] .phase-chip { stroke: var(--lane-stroke); stroke-width: .75px; }
+          svg[data-node-ui] g[data-edge-from] > rect.c-mask { rx: 7px; stroke: var(--lane-stroke); stroke-width: .75px; }
+          svg[data-node-ui][data-preset="blueprint"] :is([data-graph-role="structural-frame-label-mask"], g[data-edge-from] > rect.c-mask, .phase-chip) { rx: 2px; }
+          svg[data-node-ui][data-preset="editorial"] :is([data-graph-role="structural-frame-label-mask"], g[data-edge-from] > rect.c-mask, .phase-chip) { rx: 3px; }
+        </style>
+
+        <!-- Background Grid -->
+        <rect width="100%" height="100%" fill="url(#grid)" />
+
+        <!-- Swimlanes -->
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-0" x="40" y="52" width="871" height="106" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="74" class="t-muted" font-size="10" font-weight="600">01 / 需求</text>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-1" x="40" y="178" width="871" height="114" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="200" class="t-muted" font-size="10" font-weight="600">02 / 线A 生成</text>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-2" x="40" y="312" width="871" height="114" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="334" class="t-muted" font-size="10" font-weight="600">03 / 线B 验收</text>
+
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="lane" data-composition-frame-id="lane-3" x="40" y="446" width="871" height="106" rx="10" class="c-lane" stroke-width="1"/>
+        <text x="54" y="468" class="t-muted" font-size="10" font-weight="600">04 / 目标仓库</text>
+
+        <!-- Phase headers -->
+        <path d="M 56 35 H 252" class="a-default phase-rule" stroke-width="1" stroke-linecap="round" fill="none"/>
+        <rect x="129.6" y="27" width="48.8" height="16" rx="8" class="c-mask phase-chip"/>
+        <text x="154" y="38.5" class="t-muted" font-size="8" font-weight="600" text-anchor="middle" letter-spacing=".04em">起计划</text>
+        <path d="M 350.4 35 H 556.4" class="a-default phase-rule" stroke-width="1" stroke-linecap="round" fill="none"/>
+        <rect x="424.2" y="27" width="58.4" height="16" rx="8" class="c-mask phase-chip"/>
+        <text x="453.4" y="38.5" class="t-muted" font-size="8" font-weight="600" text-anchor="middle" letter-spacing=".04em">钉与骨架</text>
+        <path d="M 600.4 35 H 848.4" class="a-default phase-rule" stroke-width="1" stroke-linecap="round" fill="none"/>
+        <rect x="690.4" y="27" width="68" height="16" rx="8" class="c-mask phase-chip"/>
+        <text x="724.4" y="38.5" class="t-muted" font-size="8" font-weight="600" text-anchor="middle" letter-spacing=".04em">实测与结论</text>
+
+        <!-- Workflow groups -->
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="group" data-composition-frame-id="group-0" x="162" y="216" width="412.4" height="72" rx="9" class="c-lane" stroke-width="1"/>
+        <text x="172" y="214" class="t-backend" font-size="7" font-weight="600">线A：写计划</text>
+        <rect data-graph-role="structural-frame" data-composition-frame-kind="group" data-composition-frame-id="group-1" x="588.4" y="350" width="314" height="72" rx="9" class="c-lane" stroke-width="1"/>
+        <text x="598.4" y="348" class="t-backend" font-size="7" font-weight="600">线B：验收</text>
+
+        <!-- Edge paths -->
+        <path data-edge-from="fill" data-edge-to="scaffold" data-edge-key="0" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="434.4,253;466.4,253" d="M 434.4 253 L 466.4 253" class="att-comet a-default" data-animate="edge" style="--step:2" data-comet="1" stroke-width="1.4" marker-end="url(#arrowhead)"/><path data-edge-from="fill" data-edge-to="scaffold" data-edge-key="0" data-edge-id="e_fill_scaffold" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="434.4,253;466.4,253" d="M 434.4 253 L 466.4 253" class="a-default" data-animate="edge" style="--step:2;--d:1" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="new" data-edge-to="fill" data-edge-label="骨架 + 判定点" data-edge-key="1" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="262,253;342.4,253" d="M 262 253 L 342.4 253" class="att-comet a-default" data-animate="edge" style="--step:1" data-comet="1" stroke-width="1.4" marker-end="url(#arrowhead)"/><path data-edge-from="new" data-edge-to="fill" data-edge-label="骨架 + 判定点" data-edge-key="1" data-edge-id="e_new_fill" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="262,253;342.4,253" d="M 262 253 L 342.4 253" class="a-default" data-animate="edge" style="--step:1;--d:2" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="readiness" data-edge-to="repoown" data-edge-label="驱动它跑自己的" data-edge-key="2" data-composition-routing="workflow-v2-auto" data-edge-role="branch" data-composition-points="638.4,421;638.4,480" d="M 638.4 421 L 638.4 480" class="att-comet a-dashed" data-animate="edge" style="--step:8" data-comet="1" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/><path data-edge-from="readiness" data-edge-to="repoown" data-edge-label="驱动它跑自己的" data-edge-key="2" data-edge-id="e_readiness_repo" data-composition-routing="workflow-v2-auto" data-edge-role="branch" data-composition-points="638.4,421;638.4,480" d="M 638.4 421 L 638.4 480" class="a-dashed" data-animate="edge" style="--step:8;--d:3" stroke-width="1.4" marker-end="url(#arrowhead-dashed)"/>
+        <path data-edge-from="readiness" data-edge-to="verdict" data-edge-label="证据" data-edge-key="3" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="684.4,387;722.4,387" d="M 684.4 387 L 722.4 387" class="att-comet a-emphasis" data-animate="edge" style="--step:4" data-comet="1" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/><path data-edge-from="readiness" data-edge-to="verdict" data-edge-label="证据" data-edge-key="3" data-edge-id="e_readiness_verdict" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="684.4,387;722.4,387" d="M 684.4 387 L 722.4 387" class="a-emphasis" data-animate="edge" style="--step:4;--d:4" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+        <path data-edge-from="req" data-edge-to="new" data-edge-label="需求进来" data-edge-key="4" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="94,146;94,168;150,168;150,253;166,253" d="M 94 146 L 94 160 Q 94 168 102 168 L 142 168 Q 150 168 150 176 L 150 245 Q 150 253 158 253 L 166 253" class="att-comet a-default" data-animate="edge" style="--step:0" data-comet="1" stroke-width="1.4" marker-end="url(#arrowhead)"/><path data-edge-from="req" data-edge-to="new" data-edge-label="需求进来" data-edge-key="4" data-edge-id="e_req_new" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="94,146;94,168;150,168;150,253;166,253" d="M 94 146 L 94 160 Q 94 168 102 168 L 142 168 Q 150 168 150 176 L 150 245 Q 150 253 158 253 L 166 253" class="a-default" data-animate="edge" style="--step:0;--d:5" stroke-width="1.4" marker-end="url(#arrowhead)"/>
+        <path data-edge-from="scaffold" data-edge-to="readiness" data-edge-label="带 --plan 跑" data-edge-key="5" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="518.4,287;518.4,387;592.4,387" d="M 518.4 287 L 518.4 379 Q 518.4 387 526.4 387 L 592.4 387" class="att-comet a-emphasis" data-animate="edge" style="--step:3" data-comet="1" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/><path data-edge-from="scaffold" data-edge-to="readiness" data-edge-label="带 --plan 跑" data-edge-key="5" data-edge-id="e_scaffold_readiness" data-composition-routing="workflow-v2-auto" data-edge-role="" data-composition-points="518.4,287;518.4,387;592.4,387" d="M 518.4 287 L 518.4 379 Q 518.4 387 526.4 387 L 592.4 387" class="a-emphasis" data-animate="edge" style="--step:3;--d:6" stroke-width="1.8" marker-end="url(#arrowhead-emphasis)"/>
+
+        <!-- Nodes -->
+        <g id="node-req" data-node-id="req" data-node-label="一条需求" tabindex="0" role="button" aria-label="聚焦一条需求，要交付的一个模块, 需求 › 起计划" aria-pressed="false" data-node-kind="external" data-node-sublabel="要交付的一个模块" data-node-context="需求 › 起计划" style="--d:1">
+          <title>一条需求 · 要交付的一个模块 · 需求 › 起计划</title>
+          <rect x="48" y="94" width="92" height="52" rx="8" class="c-mask"/>
+          <rect x="48" y="94" width="92" height="52" rx="8" class="c-external" data-animate="node" style="--step:0" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="external" class="semantic-sigil s-external" transform="translate(54 100) scale(0.6875)">
+            <rect x="2.5" y="5" width="8.5" height="8" rx="1.5"/>
+            <path d="M8 2.5h5.5V8M13.5 2.5 7.5 8.5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="94" y="115" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">一条需求</text>
+          <text data-detail="context" x="94" y="132" class="t-muted" font-size="8" text-anchor="middle">要交付的一个模块</text>
+        </g>
+
+        <g id="node-new" data-node-id="new" data-node-label="req_plan.py new" tabindex="0" role="button" aria-label="聚焦req_plan.py new，扫约定 · 存储 · 判定点, 线A 生成 › 线A：写计划 › 起计划" aria-pressed="false" data-node-kind="backend" data-node-sublabel="扫约定 · 存储 · 判定点" data-node-tag="出计划骨架" data-node-context="线A 生成 › 线A：写计划 › 起计划" style="--d:2">
+          <title>req_plan.py new · 扫约定 · 存储 · 判定点 · 线A 生成 › 线A：写计划 › 起计划 · 出计划骨架</title>
+          <rect x="166" y="219" width="96" height="68" rx="8" class="c-mask"/>
+          <rect x="166" y="219" width="96" height="68" rx="8" class="c-backend" data-animate="node" style="--step:1" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(172 225) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="214" y="251.7" class="t-primary" font-size="9.7" font-weight="600" text-anchor="middle">req_plan.py new</text>
+          <text data-detail="context" x="214" y="264.6" class="t-muted" font-size="6.6" text-anchor="middle">扫约定 · 存储 · 判定点</text>
+        <text data-detail="fine" x="214" y="277" class="t-backend" font-size="7" text-anchor="middle">出计划骨架</text>
+        </g>
+
+        <g id="node-fill" data-node-id="fill" data-node-label="填不变式与归属" tabindex="0" role="button" aria-label="聚焦填不变式与归属，钉到真实用例或写豁免, 线A 生成 › 线A：写计划 › 钉与骨架" aria-pressed="false" data-node-kind="backend" data-node-sublabel="钉到真实用例或写豁免" data-node-tag="人 / AI 判" data-node-context="线A 生成 › 线A：写计划 › 钉与骨架" style="--d:3">
+          <title>填不变式与归属 · 钉到真实用例或写豁免 · 线A 生成 › 线A：写计划 › 钉与骨架 · 人 / AI 判</title>
+          <rect x="342.4" y="219" width="92" height="68" rx="8" class="c-mask"/>
+          <rect x="342.4" y="219" width="92" height="68" rx="8" class="c-backend" data-animate="node" style="--step:2" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(348.4 225) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="388.4" y="252" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">填不变式与归属</text>
+          <text data-detail="context" x="388.4" y="265.4" class="t-muted" font-size="7" text-anchor="middle">钉到真实用例或写豁免</text>
+        <text data-detail="fine" x="388.4" y="277.9" class="t-backend" font-size="7" text-anchor="middle">人 / AI 判</text>
+        </g>
+
+        <g id="node-scaffold" data-node-id="scaffold" data-node-label="scaffold + check" tabindex="0" role="button" aria-label="聚焦scaffold + check，生成骨架 · 核对钉, 线A 生成 › 线A：写计划 › 钉与骨架" aria-pressed="false" data-node-kind="backend" data-node-sublabel="生成骨架 · 核对钉" data-node-tag="唯一会写盘" data-node-context="线A 生成 › 线A：写计划 › 钉与骨架" style="--d:4">
+          <title>scaffold + check · 生成骨架 · 核对钉 · 线A 生成 › 线A：写计划 › 钉与骨架 · 唯一会写盘</title>
+          <rect x="466.4" y="219" width="104" height="68" rx="8" class="c-mask"/>
+          <rect x="466.4" y="219" width="104" height="68" rx="8" class="c-backend" data-animate="node" style="--step:3" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(472.4 225) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="518.4" y="252" class="t-primary" font-size="10" font-weight="600" text-anchor="middle">scaffold + check</text>
+          <text data-detail="context" x="518.4" y="266.6" class="t-muted" font-size="8" text-anchor="middle">生成骨架 · 核对钉</text>
+        <text data-detail="fine" x="518.4" y="279.4" class="t-backend" font-size="7" text-anchor="middle">唯一会写盘</text>
+        </g>
+
+        <g id="node-readiness" data-node-id="readiness" data-node-label="readiness.py" tabindex="0" role="button" aria-label="聚焦readiness.py，跑仓库自己的车道, 线B 验收 › 线B：验收 › 实测与结论" aria-pressed="false" data-node-kind="backend" data-node-sublabel="跑仓库自己的车道" data-node-tag="实测" data-node-context="线B 验收 › 线B：验收 › 实测与结论" style="--d:5">
+          <title>readiness.py · 跑仓库自己的车道 · 线B 验收 › 线B：验收 › 实测与结论 · 实测</title>
+          <rect x="592.4" y="353" width="92" height="68" rx="8" class="c-mask"/>
+          <rect x="592.4" y="353" width="92" height="68" rx="8" class="c-backend" data-animate="node" style="--step:4" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(598.4 359) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="638.4" y="387.2" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">readiness.py</text>
+          <text data-detail="context" x="638.4" y="402.1" class="t-muted" font-size="8" text-anchor="middle">跑仓库自己的车道</text>
+        <text data-detail="fine" x="638.4" y="414.9" class="t-backend" font-size="7" text-anchor="middle">实测</text>
+        </g>
+
+        <g id="node-verdict" data-node-id="verdict" data-node-label="四档结论" tabindex="0" role="button" aria-label="聚焦四档结论，已实测 · 静态信号 · 未实测 · 不判定, 线B 验收 › 线B：验收 › 实测与结论" aria-pressed="false" data-node-kind="backend" data-node-sublabel="已实测 · 静态信号 · 未实测 · 不判定" data-node-tag="退出码 1 = 有阻塞" data-node-context="线B 验收 › 线B：验收 › 实测与结论" style="--d:6">
+          <title>四档结论 · 已实测 · 静态信号 · 未实测 · 不判定 · 线B 验收 › 线B：验收 › 实测与结论 · 退出码 1 = 有阻塞</title>
+          <rect x="722.4" y="353" width="176" height="68" rx="8" class="c-mask"/>
+          <rect x="722.4" y="353" width="176" height="68" rx="8" class="c-backend" data-animate="node" style="--step:5" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="backend" class="semantic-sigil s-backend" transform="translate(728.4 359) scale(0.6875)">
+            <path d="M6 3 3 8l3 5M10 3l3 5-3 5"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="810.4" y="374" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">四档结论</text>
+          <text data-detail="context" x="810.4" y="391" class="t-muted" font-size="8" text-anchor="middle">已实测 · 静态信号 · 未实测 · 不判定</text>
+        <text data-detail="fine" x="810.4" y="409" class="t-backend" font-size="7" text-anchor="middle">退出码 1 = 有阻塞</text>
+        </g>
+
+        <g id="node-repoown" data-node-id="repoown" data-node-label="仓库自己的入口" tabindex="0" role="button" aria-label="聚焦仓库自己的入口，测试车道 · 覆盖率闸 · 对账脚本 · PG catalog, 目标仓库 › 实测与结论" aria-pressed="false" data-node-kind="database" data-node-sublabel="测试车道 · 覆盖率闸 · 对账脚本 · PG catalog" data-node-tag="attest 只驱动" data-node-context="目标仓库 › 实测与结论" style="--d:7">
+          <title>仓库自己的入口 · 测试车道 · 覆盖率闸 · 对账脚本 · PG catalog · 目标仓库 › 实测与结论 · attest 只驱动</title>
+          <rect x="538.4" y="480" width="200" height="68" rx="8" class="c-mask"/>
+          <rect x="538.4" y="480" width="200" height="68" rx="8" class="c-database" data-animate="node" style="--step:12" stroke-width="1.5"/>
+          <g aria-hidden="true" data-semantic-sigil="database" class="semantic-sigil s-database" transform="translate(544.4 486) scale(0.6875)">
+            <ellipse cx="8" cy="4" rx="5" ry="2"/>
+            <path d="M3 4v8c0 1.1 2.2 2 5 2s5-.9 5-2V4M3 8c0 1.1 2.2 2 5 2s5-.9 5-2"/>
+          </g>
+          <text data-node-label="" data-detail-anchor="" x="638.4" y="501" class="t-primary" font-size="11" font-weight="600" text-anchor="middle">仓库自己的入口</text>
+          <text data-detail="context" x="638.4" y="518" class="t-muted" font-size="7.4" text-anchor="middle">测试车道 · 覆盖率闸 · 对账脚本 · PG catalog</text>
+        <text data-detail="fine" x="638.4" y="536" class="t-database" font-size="7" text-anchor="middle">attest 只驱动</text>
+        </g>
+
+        <!-- Edge labels -->
+
+        <g data-detail="context" data-edge-from="new" data-edge-to="fill" data-edge-label="骨架 + 判定点" data-edge-key="1" data-edge-id="e_new_fill">
+          <rect x="266" y="233" width="72.4" height="14" rx="3" class="c-mask"/>
+          <text x="302.2" y="243" class="t-muted" font-size="8" text-anchor="middle">骨架 + 判定点</text>
+        </g>
+        <g data-detail="context" data-edge-from="readiness" data-edge-to="repoown" data-edge-label="驱动它跑自己的" data-edge-key="2" data-edge-id="e_readiness_repo">
+          <rect x="599.8" y="440.5" width="77.2" height="14" rx="3" class="c-mask"/>
+          <text x="638.4" y="450.5" class="t-edge-dashed" font-size="8" text-anchor="middle">驱动它跑自己的</text>
+        </g>
+        <g data-detail="context" data-edge-from="readiness" data-edge-to="verdict" data-edge-label="证据" data-edge-key="3" data-edge-id="e_readiness_verdict">
+          <rect x="688.4" y="367" width="30" height="14" rx="3" class="c-mask"/>
+          <text x="703.4" y="377" class="t-edge-emphasis" font-size="8" text-anchor="middle">证据</text>
+        </g>
+        <g data-detail="context" data-edge-from="req" data-edge-to="new" data-edge-label="需求进来" data-edge-key="4" data-edge-id="e_req_new">
+          <rect x="97.8" y="148" width="48.4" height="14" rx="3" class="c-mask"/>
+          <text x="122" y="158" class="t-muted" font-size="8" text-anchor="middle">需求进来</text>
+        </g>
+        <g data-detail="context" data-edge-from="scaffold" data-edge-to="readiness" data-edge-label="带 --plan 跑" data-edge-key="5" data-edge-id="e_scaffold_readiness">
+          <rect x="521.6" y="367" width="67.6" height="14" rx="3" class="c-mask"/>
+          <text x="555.4" y="377" class="t-edge-emphasis" font-size="8" text-anchor="middle">带 --plan 跑</text>
+        </g>
+
+        <!-- Legend -->
+        <g data-legend="" data-legend-bridge="">
+          <text x="20" y="576" class="t-primary" font-size="12" font-weight="650">图例</text>
+          <g data-legend-semantic-kind="backend" data-legend-kind="backend" data-legend-label="Agent 逻辑" data-legend-x="20" data-legend-baseline="596" data-legend-width="90">
+            <rect x="20" y="588" width="14" height="9" rx="2" class="c-backend" stroke-width="1"/>
+            <text x="42" y="596" class="t-muted" font-size="7.5" font-weight="500">Agent 逻辑</text>
+          </g>
+          <g data-legend-semantic-kind="database" data-legend-kind="database" data-legend-label="上下文 / 追踪" data-legend-x="117" data-legend-baseline="596" data-legend-width="104">
+            <rect x="117" y="588" width="14" height="9" rx="2" class="c-database" stroke-width="1"/>
+            <text x="139" y="596" class="t-muted" font-size="7.5" font-weight="500">上下文 / 追踪</text>
+          </g>
+          <g data-legend-semantic-kind="external" data-legend-kind="external" data-legend-label="外部系统" data-legend-x="228" data-legend-baseline="596" data-legend-width="81">
+            <rect x="228" y="588" width="14" height="9" rx="2" class="c-external" stroke-width="1"/>
+            <text x="250" y="596" class="t-muted" font-size="7.5" font-weight="500">外部系统</text>
+          </g>
+        </g>
+      </svg>

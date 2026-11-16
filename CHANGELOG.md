@@ -7,6 +7,31 @@
 
 （暂无）
 
+## [0.1.11] - 2026-11-16
+
+**README 改成图：流程图、活终端、四档证据条，三张都会动。**
+
+- **流程图**（`skills/attest/assets/attest-flow.svg`）：一条需求的**两条线** —— 线A 生成
+  计划（`new` → 填不变式与判定点归属 → `scaffold` + `check`），线B 验收交付
+  （`readiness.py` 跑目标仓库自己的车道 → 四档结论）。用 Archify 画的，四道闸
+  （validate / deliver / check / browser-check）全过。
+- **活终端**（`skills/attest/assets/hero-animated.svg`）：报告那一段不再是静态截图，
+  而是一条亮带沿着报告往下扫、末尾光标在闪、结论行缓慢呼吸。内容仍是**一次真实
+  运行**的原样输出。
+- **四档证据条**（`skills/attest/assets/evidence-kinds.svg`）：已实测 / 静态信号 /
+  未实测 / 本工具不判定，四个卡片按顺序被扫亮。
+- **三个生成器入库**：`tools/render_flow_svg.py`、`tools/render_hero_animated.py`、
+  `tools/render_kinds_svg.py` —— 图是产物，不是手画的。
+- **为什么动画是自己加的一层**：Archify 的 trace 动画由 viewer 的 JS 驱动，而 GitHub
+  的 README 不跑 HTML 里的 JS ⇒ 抽出来的静态 SVG 不会动。所以自己加一层 CSS
+  keyframes（节点呼吸、连线有光点流过）。原则是**图在任何时刻都完整可读** ——
+  动的是光与呼吸，不是「逐行画出来」。
+- **SVG 是 XML，不是 HTML**：三件手术 —— 补 `xmlns`（HTML 内联 SVG 不需要，独立文件
+  必须）、转义 CSS 里的 `<` 与 `&`（CSS 注释里的 `<html>` 会被当成子元素）、裁掉
+  viewer 的界面样式（只留选择器可能命中 SVG 标记的规则，CSS 从 200KB 降到 26KB）。
+- **尊重减弱动效**：所有动画包在 `@media (prefers-reduced-motion: no-preference)`
+  里 —— 关了动效的人看到的是完整静态图。
+
 ## [0.1.10] - 2026-11-16
 
 **判定点引擎（DPE）：把「需求覆盖」从模块级升到判定点粒度。**

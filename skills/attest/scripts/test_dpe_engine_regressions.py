@@ -156,6 +156,27 @@ def test_parse_gate_uses_a_real_parser_not_bracket_balance():
            "正则字面量里的括号变化不误判合法变异")
 
 
+# --------------------------------------------------- E 跨行的动态 import
+
+
+def test_dynamic_import_across_lines_is_found():
+    print("\ntest_dynamic_import_across_lines_is_found")
+    sys.path.insert(0, str(HERE))
+    from discriminate import parse_imports, runtime_symbols  # noqa: E402
+    root = mkdtemp()
+    write(root / "src" / "a.ts", "export const a = 1;\n")
+    src = ("const mod = await import(\n"
+           "  './a.ts'\n"
+           ");\n")
+    path = write(root / "src" / "b.ts", src)
+    refs = parse_imports(src, "src/b.ts", root)
+    expect(any(r.spec == "./a.ts" for r in refs),
+           "说明符写在下一行的动态 import 被认出来")
+    expect("a" in runtime_symbols(refs),
+           "跨行动态 import 的导出符号算运行时引用")
+    expect(path.is_file(), "夹具写盘成功")
+
+
 # ------------------------------------- F 顶层 const 对象字面量的作用域名
 
 
@@ -252,6 +273,7 @@ def main() -> int:
     test_scope_relevant_mutation_is_selectable()
     test_parse_check_judges_the_mutation_not_the_file()
     test_parse_gate_uses_a_real_parser_not_bracket_balance()
+    test_dynamic_import_across_lines_is_found()
     test_toplevel_const_object_keeps_its_export_name()
     test_const_object_method_is_reachable_for_scope_filter()
     test_preferred_symbols_are_sampled_first()

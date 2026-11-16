@@ -78,12 +78,15 @@ _SIDE_EFFECT_RE = re.compile(
     re.M)
 
 #: 动态 import：`await import('./x')`
+#: 空白用 `\s`（含换行）—— 说明符写在下一行是常见写法（prettier 会折行）：
+#: `await import(\n  './x.ts'\n)`。用 `[ \t]` 时整条 import 看不见 ⇒
+#: 模块既不在闭包里、也不在运行时作用域里 ⇒ 钉被判成「没有可达的源文件」。
 _DYNAMIC_RE = re.compile(
-    r"(?P<kw>import)[ \t]*\([ \t]*(?P<q>['\"])(?P<spec>[^'\"]+)(?P=q)[ \t]*\)")
+    r"(?P<kw>import)\s*\(\s*(?P<q>['\"])(?P<spec>[^'\"]+)(?P=q)\s*\)")
 
 #: `mock.module('./x.ts')` —— 点名了那个模块 ⇒ 算引用（规格 §5.1.1）
 _MOCK_MODULE_RE = re.compile(
-    r"mock\s*\.\s*module[ \t]*\([ \t]*(?P<q>['\"])(?P<spec>[^'\"]+)(?P=q)")
+    r"mock\s*\.\s*module\s*\(\s*(?P<q>['\"])(?P<spec>[^'\"]+)(?P=q)")
 
 #: 解构：`const { a, b } = await import(`
 _DESTRUCTURE_RE = re.compile(

@@ -169,8 +169,8 @@ def main() -> int:
     concl = json.loads(out.stdout)["conclusion"]
     for label, text, pat in (
             ("英文", en,
-             r"(\d+)\s+measured pass\s*\+\s*(\d+)\s+with no signal"
-             r"\s*\+\s*(\d+)\s+static signals"),
+             r"(\d+)\s+measured\s+pass\s*\+\s*(\d+)\s+with\s+no\s+signal"
+             r"\s*\+\s*(\d+)\s+static\s+signals"),
             ("中文", zh,
              r"(\d+)\s+项实测通过\s*\+\s*(\d+)\s+项无信号"
              r"\s*\+\s*(\d+)\s+条静态信号")):

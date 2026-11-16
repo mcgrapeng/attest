@@ -119,6 +119,12 @@ def main() -> int:
     for label, text in (("英文", en), ("中文", zh)):
         expect("docs/criteria.md" in text,
                f"{label} README 链到了判据表所在文档")
+    # 判据名：README 上写的名字要跟终端里打印的**逐字一致**，
+    # 否则读者对着自己的运行结果对不上号（冷读提过的那个失分点）。
+    titles = [c["title"] for c in json.loads(out.stdout)["checks"]]
+    for label, text in (("英文", en), ("中文", zh)):
+        miss = [t for t in titles if t not in text]
+        expect(not miss, f"{label} README 里的判据名 == 工具打印的名字（缺：{miss}）")
 
     print("\nREADME 里的数字与仓库实况一致")
     tests = sorted(p.name for p in SKILL_DIR.joinpath("scripts").glob("test_*.py"))
@@ -157,6 +163,26 @@ def main() -> int:
     for label, text in (("英文", en), ("中文", zh)):
         expect("结论：0 项阻塞" in text,
                f"{label} README 引用了真实结论行")
+
+    # 结论行里那几个数字是重叠的（待人工确认的那条也在静态信号里）⇒ 加起来会大于
+    # 判据条数。README 得说清真正的拆分，且那三个数 == 实跑。
+    concl = json.loads(out.stdout)["conclusion"]
+    for label, text, pat in (
+            ("英文", en,
+             r"(\d+)\s+measured pass\s*\+\s*(\d+)\s+with no signal"
+             r"\s*\+\s*(\d+)\s+static signals"),
+            ("中文", zh,
+             r"(\d+)\s+项实测通过\s*\+\s*(\d+)\s+项无信号"
+             r"\s*\+\s*(\d+)\s+条静态信号")):
+        m = re.search(pat, text)
+        expect(m is not None, f"{label} README 说清了结论行里几个数字为什么对不上")
+        if m:
+            got = tuple(int(x) for x in m.groups())
+            expect(got == (concl["measured_pass"], concl["no_signal"],
+                           concl["static_signals"]),
+                   f"{label} README 的三项拆分 == 实跑 {got}")
+            expect(sum(got) == code_n,
+                   f"{label} README 的三项拆分加起来 == {code_n} 条")
 
     print("\nREADME 说的退出码语义与代码一致")
     # 代码侧的机器可读规则（JSON 里带的那条）
@@ -253,8 +279,10 @@ def main() -> int:
                 continue
             if "*" in tok:
                 continue
-            # 装完的 skill 在 ~/.agents/skills/attest/ —— 它就是仓库里的 skills/attest/
-            p = tok.replace("~/.agents/skills/attest/", "skills/attest/").lstrip("~/")
+            # 装完的 skill 在 ~/.agents/skills/attest/（install.py）或
+            # .agents/skills/attest/（skills CLI）—— 两者都是仓库里的 skills/attest/
+            p = (tok.replace("~/.agents/skills/attest/", "skills/attest/")
+                     .replace(".agents/skills/attest/", "skills/attest/")).lstrip("~/")
             if p == "SKILL.md":
                 p = "skills/attest/SKILL.md"
             if p.startswith(("github.com", "img.shields")):

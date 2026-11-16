@@ -386,3 +386,53 @@ python3 /tmp/dpe-roundtrip/selfprove_report_pin.py  # 期望退出码 1
 
 探针与自证脚本都在 scratchpad（`/tmp/dpe-roundtrip/`），不进仓库；自证脚本把
 `skills/attest/scripts/*.py` 复制到临时目录、回退指定代码块，再跑 `test_discriminate.py`。
+
+## 11. 合并 main 之后的复测（2026-11-16）
+
+### 11.1 合并
+
+`origin/main`（`11d824f`）并进 `feat/dpe-engine`，合并提交 `4bd4aee`。冲突 5 处，解法：
+
+| 文件 | 解法 |
+| --- | --- |
+| `docs/criteria.md` | 取本分支侧 —— 本分支 = main + 3 条 DPE 判据行 + L2 降级段，main 侧没有本分支缺的内容 |
+| `README.md` / `README.zh-CN.md` | 取并集：main 的新版行文（FAQ、英雄图、版本/环境白名单守卫）+ 本分支的 DPE「命令行开关 / Command-line flags」段 |
+| `CHANGELOG.md` | 两条都留：main 的版本条目 + 本分支的 DPE 条目 |
+| `skills/attest/scripts/test_readme_sync.py` | 取 main 的 `faq_answer` 辅助函数 + 本分支的 `code_n == 17` 期望 |
+
+### 11.2 合并后的全量复测
+
+干净导出（`git archive HEAD`）后跑全部 34 个 `test_*.py` 脚本，按各脚本自己的退出码判定
+（attest 的 `expect()` 只记账不抛异常，直接 import 会假绿 ⇒ 一律按子进程跑）：
+
+| 结果 | 数量 | 说明 |
+| --- | --- | --- |
+| 绿 | 33 | 含合并前就已绿的 31 条 + `test_readiness_r2.py`、`test_readme_sync.py` 转绿 |
+| 红 | 1 | `test_req_plan_r4.py` 的「不可读目录不崩」 |
+
+唯一那条红与 attest 无关：它断言的是**机器级外部工具** `testkit_audit.py`（ai-testing-system
+装的）遇到 `chmod 000` 的目录不崩，而那个工具自己抛 Traceback ⇒ 断的是外部工具。CI 上没有
+这个工具 ⇒ 该用例跳过 ⇒ 绿。合并前后的基线一致，不是本次引入。
+
+### 11.3 顺带收口的两件事
+
+- `skills/attest/SKILL.md` 的判据表从 14 条补到 17 条（判定点引擎落地后判据数变了，那张表
+  一直没同步 ⇒ `test_readiness_r2.py` 一直红）。
+- 并行车道的缺陷 D：JS/TS 的「变异有没有把代码改坏」闸原来只比括号结构 ⇒ 改成用仓库那份
+  TypeScript 真解析一遍（B1 走内存文本、B2 走磁盘并在 finally 里还原）。
+
+### 11.4 退出码语义的三档实测
+
+README 里写的那行是**规则**不是结论，规则本身由三个 fixture 各验一次：
+
+| fixture | 档位 | 实退 |
+| --- | --- | --- |
+| `ts-colocated` | 两条成因都没有 | 0 |
+| `english-reconciler` | 有阻塞项 | 1 |
+| `no-tests` | 关键判据没测到 | 1 |
+
+### 11.5 遗留（不在本车道）
+
+- `SKILL.md` 的判据表原属集成者职责，本车道只补了内容，没动它的结构。
+- 合并时并行车道另有一批 README/CHANGELOG 文案改动留在工作区未提交（它当时仍在编辑），
+  本车道不代提。

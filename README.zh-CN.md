@@ -202,7 +202,7 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 **在维护中，已发 `v0.1.7`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
 不会悄悄变。MIT 许可。
 
-仓库里的每个数字都来自一条你能重跑的命令：**35 / 35** 回归套件、**10 / 10** 黄金 fixture、**6 / 6** 行为 eval、allowlist 之外 **0** 条安全发现。
+仓库里的每个数字都来自一条你能重跑的命令：**36 / 36** 回归套件、**10 / 10** 黄金 fixture、**6 / 6** 行为 eval、allowlist 之外 **0** 条安全发现。
 
 已知缺口全文见 [CHANGELOG.md](CHANGELOG.md)（已知遗留）。最要紧的三条：
 

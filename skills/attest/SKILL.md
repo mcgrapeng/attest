@@ -325,6 +325,12 @@ python3 "$SKILL_DIR/scripts/req_plan.py new <feature> \
 
 # 2. 填完不变式与矩阵后，核对计划 vs 代码实况
 python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <项目根>
+
+# 3.（可选）把模块级维度表升级成判定点粒度，再分批填归属
+python3 "$SKILL_DIR/scripts/req_plan.py upgrade <计划文件> --repo <项目根> \
+  --module <子路径>
+python3 "$SKILL_DIR/scripts/req_plan.py assign <计划文件> --repo <项目根> \
+  [--limit 30]
 ```
 
 计划落到 `docs/<feature>-test-plan.md`（入库、可评审）。`check` 有错误时退出码 1。
@@ -444,6 +450,66 @@ python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <项目根>
 不适用这个需求的维度**根本不会出现**。
 
 计划里可以补：`本需求额外涉及：资源上限、审计留痕`（这些维度也要答）。
+
+### 4b. 判定点归属（v2 计划：升级后的那张表）
+
+`upgrade` 把上面这张模块级维度表换成**判定点粒度**的表，一行一个代码里真正要选的
+分支/边界/错误路径：
+
+```bash
+python3 "$SKILL_DIR/scripts/req_plan.py upgrade <计划文件> --repo <项目根> \
+  [--module <子路径>...]
+```
+
+升级后表是六列：`| 维度 | DP ID | 判定点 | 归属的不变式 | 落点（文件::用例名） | 豁免理由 |`。
+前两列机器填好（DP ID 与判定点），**后三列要人来判断**：这条判定点归属哪条不变式、
+钉到哪个用例，或者写明为什么豁免。
+
+**只有高危四类会报红**：错误路径 / 资源上限 / 状态 / 丢弃（error-path、resource、
+state、drop）。常规判定点（分支、边界、并发）**只计数**，不报红。所以实际要填的是
+高危那一批 —— 一个 25 个文件的模块，高危通常一百多条，不是几千条。
+
+**三列各填什么**
+
+| 列 | 填什么 |
+| --- | --- |
+| 归属的不变式 | 不变式清单里真实存在的编号（`I1`、`I2`…）。认领一条就必须给落点 |
+| 落点（文件::用例名） | 钉到**真实存在**的用例：`service/src/agent-memory/lifecycle.itest.ts::某条用例`。只写文件会被提醒 |
+| 豁免理由 | 认领不了时的出路：写清楚这个判定点为什么不用测。「不适用」三个字会被提醒 |
+
+**用 `assign` 分批填，别手改表格**
+
+上千行 markdown 表格手改既慢又容易错。`assign` 把填表变成一个可分批、可校验、
+可增量提交的循环：
+
+```bash
+# 1. 拉待填清单（JSONL，一行一个判定点；高危在前）
+python3 "$SKILL_DIR/scripts/req_plan.py assign <计划文件> --repo <项目根> \
+  [--kinds drop,error-path,resource,state] [--offset 0] [--limit 30]
+
+# 2. 回答写进 JSONL，一行一个：
+#    {"dp_id":"…（原样抄回来）","invariant":"I3","pin":"path/to/x.itest.ts::用例名"}
+#    或 {"dp_id":"…","waiver":"为什么这个判定点不用测"}
+
+# 3. 写回：校验不过的不写，报出原因
+python3 "$SKILL_DIR/scripts/req_plan.py assign <计划文件> --repo <项目根> \
+  --apply answers.jsonl
+
+# 4. 看缺口还剩几条
+python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <项目根>
+```
+
+清单第一行是元数据：计划里全部不变式的编号与描述（认领时要用）、
+待填总数、高危类型、答案格式。之后每行给 DP ID、类型、维度、源码那一句、
+以及**候选测试文件**（同目录下源码里提到这个符号的测试文件）—— 用例名从候选
+文件里读，别编。
+
+`--apply` 会挡住四类错：归属的不变式不在清单里、豁免理由太笼统
+（只有「不适用」这种）、落点文件不存在、落点用例在文件里不存在（报错时会把
+该文件真实存在的用例名列出来）。被挡下的不写盘，其余照写。
+
+填完跑 `check`：高危缺口会一条一条往下掉，没填的会继续报红。
+**别为了让 `check` 过而改钉** —— 钉该指哪就指哪。
 
 每个维度**要么有测试落点，要么写「不适用」+理由**。默默跳过 = 没测到
 （`check` 会提醒哪些维度没考虑到）。

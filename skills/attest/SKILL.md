@@ -1,24 +1,6 @@
 ---
 name: attest
-description: >-
-  Requirement-level test planning and delivery verification. Generate a test plan
-  covering every test type and key flow detail, pin each invariant to a real
-  test case, reuse the helpers the project already has instead of reinventing
-  them, and scaffold the test files the plan calls for. Then run a one-command
-  delivery-readiness check that actually executes the project's own tests,
-  coverage gates, cross-store reconciliation and baseline scripts, and reports
-  which premises are proven (已实测), which are only static signals (静态信号),
-  which are untested (无信号), and which it does not judge at all (本工具不判定).
-  Use it when starting a feature, when a requirement needs a test toolset, when
-  writing or reviewing a feature's test plan, when a teammate claims a feature
-  is tested but the pinned file or test case is not actually there, when data
-  drifts between two stores (Postgres vs a vector DB) and you need to know which
-  tenant drifted, when asked whether a module is ready to ship, deliver or hand
-  to a customer, or when you need to know which test dimensions to cover and
-  which existing helpers to reuse. Triggers include 写测试计划、覆盖哪些测试维度、
-  哪些 helper 能复用、核一遍测试覆盖、这个模块能不能交付、能不能上线、
-  交付就绪度、交付就绪度分析、测试就绪度、跨存储数据有没有漂、两边对不上、
-  生成测试骨架。
+description: Requirement-level test planning and delivery verification. Generate a test plan covering every test type and key flow detail, pin each invariant to a real test case, reuse the helpers the project already has instead of reinventing them, and scaffold the test files the plan calls for. Use it when starting a feature, when a requirement needs a test toolset, when writing or reviewing a feature's test plan, when a teammate claims a feature is tested but the pinned file or test case is not actually there, when data drifts between two stores (Postgres vs a vector DB) and you need to know which tenant drifted, when asked whether a module is ready to ship, deliver or hand to a customer, or when you need to know which test dimensions to cover and which existing helpers to reuse. Triggers include 写测试计划、覆盖哪些测试维度、 哪些 helper 能复用、核一遍测试覆盖、这个模块能不能交付、能不能上线、 交付就绪度、交付就绪度分析、测试就绪度、跨存储数据有没有漂、两边对不上、 生成测试骨架。
 license: MIT
 metadata:
   author: mcgrapeng

@@ -2099,6 +2099,15 @@ _AFTER_HOOK_RE = re.compile(
 _BEFORE_ONLY_RE = re.compile(
     r"\bbeforeEach\b|\bbeforeAll\b|\bbefore\(|setup_function|"
     r"@pytest\.fixture")
+# 测试文件可以**显式声明**它不写真库：<!-- attest:no-db-writes reason="…" -->
+# 为什么是显式标记而不是启发式：写库动作是**文本**上看出来的（insert/update/delete），
+# 而"这个文件其实不写库"只有作者知道 —— 猜（看有没有 mock 掉 db 层）既可能猜错，
+# 又把猜的结果藏起来。声明式的豁免带理由、理由进报告 ⇒ 可评审。
+# 跟判定点的豁免（attest:waive）一个路子：理由必填，缺理由就是错。
+# 标记写在**测试文件**里 ⇒ 两种注释形式都认：代码里的 /* … */ 与 markdown 里的 <!-- … -->。
+_NO_DB_WRITES_RE = re.compile(
+    r"(?:<!--|/\*)\s*attest:no-db-writes\s+reason=\"(?P<reason>[^\"]*)\""
+    r"\s*(?:-->|\*/)")
 # 字面量的固定等待（flaky 的来源）
 _FIXED_WAIT_RE = re.compile(
     r"sleep\(\s*\d{3,}|time\.sleep\(\s*\d|"
@@ -2107,10 +2116,15 @@ _FIXED_WAIT_RE = re.compile(
 
 
 def check_test_hygiene(m: Module) -> Check:
-    """测试卫生：固定等待（flaky 源）与不清理（残留源）。"""
+    """测试卫生：固定等待（flaky 源）与不清理（残留源）。
+
+    写库动作是文本上看出来的，所以"这个文件其实不写真库"只能由作者声明
+    （`<!-- attest:no-db-writes reason="…" -->`）。声明带理由，理由进报告。
+    """
     findings: list[str] = []
     sleeps: list[str] = []
     dirty: list[str] = []
+    exempted: list[tuple[str, str]] = []
     for t in m.tests + m.itests:
         try:
             text = t.read_text(encoding="utf-8", errors="replace")
@@ -2120,6 +2134,16 @@ def check_test_hygiene(m: Module) -> Check:
         for mm in _FIXED_WAIT_RE.finditer(text):
             line = text[:mm.start()].count("\n") + 1
             sleeps.append(f"{rel}:{line} 固定等待 {mm.group(0)!r}")
+        waiver = _NO_DB_WRITES_RE.search(text)
+        if waiver:
+            reason = waiver.group("reason").strip()
+            if not reason:
+                findings.append(
+                    f"{rel}：attest:no-db-writes 没给理由 —— "
+                    "写清楚这个文件为什么不留残留")
+                continue
+            exempted.append((rel, reason))
+            continue
         if _DB_WRITE_RE.search(text):
             hook = _AFTER_HOOK_RE.search(text)
             if not _CLEANUP_RE.search(text):
@@ -2132,15 +2156,24 @@ def check_test_hygiene(m: Module) -> Check:
     findings += sleeps[:8]
     findings += dirty[:8]
     if not findings:
-        return Check("hygiene", "测试卫生（不留残留、不靠 sleep）", "pass",
-                     "没有固定等待，也没发现不清理的写库测试")
+        msg = "没有固定等待，也没发现不清理的写库测试"
+        ev: list[str] = []
+        if exempted:
+            ev = [f"{rel}：attest:no-db-writes — {reason}" for rel, reason in exempted]
+            shown = "；".join(f"{rel}（{reason}）" for rel, reason in exempted[:3])
+            more = f"等 {len(exempted)} 处" if len(exempted) > 3 else ""
+            msg += f"（{len(exempted)} 个文件声明了 attest:no-db-writes：{shown}{more}）"
+        return Check("hygiene", "测试卫生（不留残留、不靠 sleep）", "pass", msg, ev)
     status = "fail" if dirty else "warn"
+    ev = findings[:8] + [f"{rel}：attest:no-db-writes — {reason}"
+                         for rel, reason in exempted]
     return Check("hygiene", "测试卫生（不留残留、不靠 sleep）", status,
                  f"{len(sleeps)} 处固定等待、{len(dirty)} 处不清理的写库测试",
-                 findings[:10],
+                 ev[:10],
                  "固定等待 ⇒ 换成等结果（等条件成立）；"
                  "不清理 ⇒ 测试要自己收场（after 钩子清干净），"
-                 "否则共享库里留的残留会让下一个测试看到别人的数据")
+                 "否则共享库里留的残留会让下一个测试看到别人的数据；"
+                 "确实不写库的文件 ⇒ 声明 attest:no-db-writes 并写清理由")
 
 
 def check_tests_green(failed: list[str],

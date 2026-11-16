@@ -299,6 +299,42 @@ def main() -> int:
     expect("测试卫生" in r16.stdout, "有测试卫生判据")
     expect("固定等待" in r16.stdout, "固定等待被报出来")
     expect("残留" in r16.stdout, "不清理被报出来")
+
+    print("\n测试卫生：显式声明 attest:no-db-writes 的文件不算写库残留")
+    hyg2 = mkdtemp()
+    write(hyg2 / "package.json", json.dumps({
+        "scripts": {"test": "node --test 'src/**/*.test.ts'"}}))
+    write(hyg2 / "src" / "store.ts",
+          "import { pgTable } from 'drizzle-orm/pg-core';\n"
+          "export const widgets = pgTable('widgets', {});\n")
+    # 假 tx：每个用例重建，不写真库 ⇒ 声明豁免
+    write(hyg2 / "src" / "faketx.test.ts",
+          "import test from 'node:test';\n"
+          "/* attest:no-db-writes reason=\"假 tx 每个用例重建，不写真库\" */\n"
+          "test('fake tx', async () => {\n"
+          "  await tx.insert(widgets).values({ id: '1' });\n"
+          "});\n")
+    r17 = run("src", "--repo", str(hyg2))
+    expect("有写库动作" not in _block(r17.stdout, "测试卫生"),
+           "声明了豁免 ⇒ 不报写库残留")
+    expect("attest:no-db-writes" in r17.stdout, "豁免标记进报告（可评审）")
+    expect("假 tx 每个用例重建" in r17.stdout, "豁免理由进报告")
+
+    print("\n测试卫生：豁免没给理由 ⇒ 报错")
+    hyg3 = mkdtemp()
+    write(hyg3 / "package.json", json.dumps({
+        "scripts": {"test": "node --test 'src/**/*.test.ts'"}}))
+    write(hyg3 / "src" / "store.ts",
+          "import { pgTable } from 'drizzle-orm/pg-core';\n"
+          "export const widgets = pgTable('widgets', {});\n")
+    write(hyg3 / "src" / "noreason.test.ts",
+          "import test from 'node:test';\n"
+          "<!-- attest:no-db-writes reason=\"\" -->\n"
+          "test('no reason', async () => {\n"
+          "  await tx.insert(widgets).values({ id: '1' });\n"
+          "});\n")
+    r18 = run("src", "--repo", str(hyg3))
+    expect("没给理由" in r18.stdout, "豁免缺理由被报出来")
     expect("dirty.test.ts" in r16.stdout, "点名了哪个文件")
 
     print("\n真后端车道：环境没就绪 ≠ 用例失败")

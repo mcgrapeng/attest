@@ -2825,11 +2825,15 @@ def _dp_desc(root: Path, point) -> str:
     return text[:77] + "…" if len(text) > 78 else text
 
 
-def _detail_table(root: Path, points: list, required: dict[str, list[str]]) -> str:
+def _detail_table(root: Path, points: list, required: dict[str, list[str]],
+                  keep: dict[tuple, tuple[str, str, str]] | None = None) -> str:
     """生成 6 列「核心逻辑细节」表的行。
 
     机器填 DP ID 与判定点两列；后三列留空 —— 归属是人的判断，工具不代劳。
+    `keep` 是已经填好的归属（DP 键 → 归属/落点/豁免）：重跑 upgrade 时
+    别把人填过的擦掉。
     """
+    keep = keep or {}
     by_dim: dict[str, list] = {}
     for p in points:
         by_dim.setdefault(_DP_KIND_DIMENSION.get(p.kind, p.kind), []).append(p)
@@ -2843,8 +2847,11 @@ def _detail_table(root: Path, points: list, required: dict[str, list[str]]) -> s
         ev = required.get(dim) or []
         suffix = f"（触发证据：{ev[0]}）" if ev else ""
         for p in dps:
+            key = dp_key(p.dp_id)
+            inv, pin, waiver = keep.get(key, ("", "", "")) if key else ("", "", "")
             lines.append(
-                f"| {dim}{suffix} | {p.dp_id} | {_dp_desc(root, p)} |  |  |  |")
+                f"| {dim}{suffix} | {p.dp_id} | {_dp_desc(root, p)} | "
+                f"{inv} | {pin} | {waiver} |")
         covered.add(dim)
     # 推导出的维度里没有判定点 ⇒ 给一行空 DP（规格 §4.1 的第四行那种）
     for dim in _DETAIL_DIMENSIONS:
@@ -2967,6 +2974,8 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
     plan = parse_plan(plan_path)
     modules = args.module or plan.modules
     points, dp_level = derive_plan_points(root, modules)
+    # 已经填好的归属要留着 —— 重跑 upgrade 别把人填的擦掉
+    keep = _existing_assignments(plan)
 
     # 旧表里写过的维度也要出现在新表里（人自己声明过的，机器推导不出来）
     required = derive_dimensions(root, modules) if modules else {}
@@ -3009,7 +3018,7 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
         "",
         "| 维度 | DP ID | 判定点 | 归属的不变式 | 落点（文件::用例名） | 豁免理由 |",
         "| --- | --- | --- | --- | --- | --- |",
-        *_detail_table(root, points, required).splitlines(),
+        *_detail_table(root, points, required, keep).splitlines(),
         "",
         "## 附录：旧的模块级维度表（保留作参考）",
         "",
@@ -3020,7 +3029,8 @@ def cmd_upgrade(args: argparse.Namespace) -> int:
         encoding="utf-8")
     print(f"已升级: {plan_path}")
     print(f"判定点 {len(points)} 个（{dp_level}）—— "
-          "DP ID 与判定点两列已填好，后三列请人工补")
+          "DP ID 与判定点两列已填好，后三列请人工补"
+          "（可用 req_plan.py assign 分批填）")
     return 0
 
 
@@ -3050,6 +3060,301 @@ def cmd_check(args: argparse.Namespace) -> int:
     print(f"\n{len(findings)} 项：{errs} 个错误 / "
           f"{len(findings) - errs} 个提醒")
     return 1 if errs else 0
+
+
+# ---------------------------------------------------------------- 判定点归属（assign）
+
+# assign 要写回的三列，按表头前缀匹配（表头允许带括号说明）
+_ASSIGN_COL_NAMES = {
+    "invariant": ("归属",),
+    "pin": ("落点",),
+    "waiver": ("豁免",),
+}
+
+
+def _norm_cell(c: str) -> str:
+    return re.sub(r"\s+", "", c)
+
+
+def _assign_col_index(header: list[str], key: str) -> int | None:
+    for j, c in enumerate(header):
+        n = _norm_cell(c)
+        for nm in _ASSIGN_COL_NAMES[key]:
+            if n.startswith(nm):
+                return j
+    return None
+
+
+def _assign_table(lines: list[str]) -> tuple[int, int, list[int]] | None:
+    """判定点表的位置：返回 (表头行号, DP ID 列号, 数据行行号)。
+
+    找法：第一个表头里有「DP ID」列、且有「归属」列的表 —— v1 的模块级
+    维度表没有这两列，所以不会认错。
+    """
+    for i, ln in enumerate(lines):
+        if not ln.lstrip().startswith("|"):
+            continue
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        dp_idx = next((j for j, c in enumerate(cells)
+                       if _norm_cell(c).lower() == "dpid"), None)
+        if dp_idx is None:
+            continue
+        if _assign_col_index(cells, "invariant") is None:
+            continue
+        rows: list[int] = []
+        for j in range(i + 2, len(lines)):     # i+1 是分隔行
+            if not lines[j].lstrip().startswith("|"):
+                break
+            rows.append(j)
+        return i, dp_idx, rows
+    return None
+
+
+def _existing_assignments(plan: Plan) -> dict[tuple, tuple[str, str, str]]:
+    """计划里已经填好的归属（DP 键 → 归属/落点/豁免）。
+
+    重跑 upgrade 时别把人填的擦掉。
+    """
+    if detect_plan_format(plan) == PLAN_FORMAT_V1:
+        return {}
+    out: dict[tuple, tuple[str, str, str]] = {}
+    for row in parse_detail_rows(plan):
+        key = dp_key(row.dp_id) if row.dp_id.strip() else None
+        if key is None:
+            continue
+        inv = row.invariant.strip()
+        pin = row.pin.strip()
+        wv = row.waiver.strip()
+        if inv or pin or wv:
+            out[key] = (inv, pin, wv)
+    return out
+
+
+def _assign_candidates(root: Path, rows: list[dict]) -> dict[str, list[str]]:
+    """候选测试文件：同一目录下、源码里提到这个符号的测试文件。"""
+    by_dir: dict[str, list[str]] = {}
+    for tf in existing_test_files(root):
+        by_dir.setdefault(str(Path(tf).parent), []).append(tf)
+    cache: dict[str, str] = {}
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        d = str(Path(r["key"][0]).parent)
+        sym = r["key"][1]
+        hits: list[str] = []
+        for tf in by_dir.get(d, []):
+            if tf not in cache:
+                try:
+                    cache[tf] = (root / tf).read_text(
+                        encoding="utf-8", errors="replace")
+                except OSError:
+                    cache[tf] = ""
+            if sym and re.search(rf"\b{re.escape(sym)}\b", cache[tf]):
+                hits.append(tf)
+        out[r["dp_id"]] = hits
+    return out
+
+
+def cmd_assign(args: argparse.Namespace) -> int:
+    """判定点归属：拉待填清单（默认）/ 校验并写回答案（--apply）。
+
+    为什么有这条命令：判定点表的三列（归属/落点/豁免）是**人的判断**，
+    工具不代劳 —— 但让人手改上千行 markdown 表格既慢又容易错。这条命令把
+    「填表」变成一个可分批、可校验、可增量提交的循环：拉清单 → 回答 →
+    写回 → check 看缺口还剩几条。
+    """
+    root = Path(args.repo).resolve()
+    plan_path = Path(args.plan)
+    if not plan_path.is_absolute() and not plan_path.exists():
+        alt = root / plan_path
+        if alt.exists():
+            plan_path = alt
+    if not plan_path.exists():
+        print(f"读不了计划文件: {plan_path}", file=sys.stderr)
+        return 1
+    plan_path = plan_path.resolve()
+    plan = parse_plan(plan_path)
+    raw = plan_path.read_text(encoding="utf-8")
+    trailing_nl = raw.endswith("\n")
+    lines = raw.splitlines()
+
+    tbl = _assign_table(lines)
+    if tbl is None:
+        print("这份计划里没有判定点表（表头没有 DP ID 列）"
+              "—— 先跑 req_plan.py upgrade", file=sys.stderr)
+        return 1
+    head_i, dp_idx, row_ids = tbl
+    header = [c.strip() for c in lines[head_i].strip().strip("|").split("|")]
+    inv_i = _assign_col_index(header, "invariant")
+    pin_i = _assign_col_index(header, "pin")
+    wv_i = _assign_col_index(header, "waiver")
+
+    cells_of: dict[int, list[str]] = {}
+    rows: list[dict] = []
+    for ln_i in row_ids:
+        cells = [c.strip() for c in lines[ln_i].strip().strip("|").split("|")]
+        if dp_idx >= len(cells) or not cells[dp_idx]:
+            continue
+        key = dp_key(cells[dp_idx])
+        if key is None:
+            continue
+        cells_of[ln_i] = cells
+
+        def cell(idx: int | None) -> str:
+            if idx is None or idx >= len(cells):
+                return ""
+            return cells[idx]
+
+        rows.append({
+            "line_no": ln_i,
+            "dp_id": cells[dp_idx],
+            "key": key,
+            "kind": key[2],
+            "high_risk": key[2] in HIGH_RISK_KINDS,
+            "dimension": cell(0),
+            "code": cell(dp_idx + 1),
+            "invariant": cell(inv_i),
+            "pin": cell(pin_i),
+            "waiver": cell(wv_i),
+        })
+
+    if not args.apply:
+        pending = [r for r in rows
+                   if not (r["invariant"] or r["pin"] or r["waiver"])]
+        kinds = {k.strip() for k in (args.kinds or "").split(",") if k.strip()}
+        if kinds:
+            pending = [r for r in pending if r["kind"] in kinds]
+        pending.sort(key=lambda r: (0 if r["high_risk"] else 1,
+                                    r["key"][0], r["key"][1]))
+        total = len(pending)
+        if args.offset:
+            pending = pending[args.offset:]
+        if args.limit:
+            pending = pending[:args.limit]
+        cand = _assign_candidates(root, pending)
+        meta = {
+            "_invariants": [{"id": i, "desc": d}
+                            for i, d, _p in plan.invariants],
+            "_pending_total": total,
+            "_high_risk_kinds": sorted(HIGH_RISK_KINDS),
+            "_answer_format": {"dp_id": "原样抄回来",
+                               "invariant": "不变式清单里的编号",
+                               "pin": "测试文件::用例名",
+                               "waiver": "为什么这个判定点不用测"},
+        }
+        print(json.dumps(meta, ensure_ascii=False))
+        for r in pending:
+            print(json.dumps({
+                "dp_id": r["dp_id"],
+                "kind": r["kind"],
+                "high_risk": r["high_risk"],
+                "dimension": r["dimension"],
+                "file": r["key"][0],
+                "symbol": r["key"][1],
+                "code": r["code"],
+                "candidates": cand.get(r["dp_id"], []),
+            }, ensure_ascii=False))
+        return 0
+
+    # ---- 写回模式
+    inv_ids = {ident for ident, _d, _p in plan.invariants}
+    answers: list[tuple[dict, str, str, str]] = []
+    bad: list[tuple[int, str]] = []
+    ans_path = Path(args.apply)
+    if not ans_path.is_absolute() and not ans_path.exists():
+        alt = root / ans_path
+        if alt.exists():
+            ans_path = alt
+    if not ans_path.exists():
+        print(f"读不了答案文件: {ans_path}", file=sys.stderr)
+        return 1
+    by_key = {r["key"]: r for r in rows}
+    for n, line in enumerate(ans_path.read_text(encoding="utf-8").splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        try:
+            a = json.loads(line)
+        except json.JSONDecodeError as e:
+            bad.append((n, f"不是合法 JSON: {e}"))
+            continue
+        if not isinstance(a, dict):
+            bad.append((n, "每行得是一个 JSON 对象"))
+            continue
+        dp_id = str(a.get("dp_id", "")).strip()
+        key = dp_key(dp_id)
+        if key is None:
+            bad.append((n, f"DP ID 不合法: {dp_id!r}"))
+            continue
+        row = by_key.get(key)
+        if row is None:
+            bad.append((n, f"计划里没有这个判定点: {dp_id}"))
+            continue
+        inv = str(a.get("invariant", "")).strip()
+        pin = str(a.get("pin", "")).strip()
+        waiver = str(a.get("waiver", "")).strip()
+        errs: list[str] = []
+        if inv and inv not in inv_ids:
+            errs.append(f"归属的不变式 {inv!r} 不在不变式清单里")
+        if waiver and _vague_waiver(waiver):
+            errs.append(f"豁免理由太笼统: {waiver!r}")
+        if inv and not pin and not waiver:
+            errs.append("认领了不变式就得给落点（文件::用例名）")
+        if pin:
+            pins = parse_pins(pin)
+            if not pins:
+                errs.append(f"落点不是文件路径: {pin!r}")
+            for fpath, case in pins:
+                if not (root / fpath).exists():
+                    errs.append(f"落点文件不存在: {fpath}")
+                    break
+                if case is None:
+                    errs.append(f"落点只到文件、没有用例名: {fpath}")
+                    break
+                names = test_case_names(root, fpath)
+                if not names:
+                    errs.append(f"落点文件里没解析出用例: {fpath}")
+                    break
+                if not case_matches(case, names):
+                    errs.append(f"落点用例在 {fpath} 里不存在: {case!r}"
+                                f"（该文件的用例有：{'; '.join(names[:5])}）")
+                    break
+        if not errs and not inv and not waiver:
+            errs.append("既没给归属也没给豁免理由")
+        if errs:
+            bad.append((n, "；".join(errs)))
+            continue
+        answers.append((row, inv, pin, waiver))
+
+    # 写回：只改那三列，别的原样
+    by_line: dict[int, tuple[str, str, str]] = {}
+    for row, inv, pin, waiver in answers:
+        by_line[row["line_no"]] = (inv, pin, waiver)
+    for ln_i, (inv, pin, waiver) in by_line.items():
+        parts = lines[ln_i].split("|")
+        for idx, val in ((inv_i, inv), (pin_i, pin), (wv_i, waiver)):
+            if idx is None or idx + 1 >= len(parts) - 1:
+                continue
+            parts[idx + 1] = f" {val} " if val else "  "
+        lines[ln_i] = "|".join(parts)
+    plan_path.write_text(
+        "\n".join(lines) + ("\n" if trailing_nl else ""), encoding="utf-8")
+
+    # 写完重新算一遍还剩多少高危缺口
+    plan2 = parse_plan(plan_path)
+    left = 0
+    for r in parse_detail_rows(plan2):
+        if not r.dp_id.strip():
+            continue
+        k = dp_key(r.dp_id)
+        if k is None or k[2] not in HIGH_RISK_KINDS:
+            continue
+        if r.invariant.strip() or r.waiver.strip() or _waiver_for(plan2, r.dp_id):
+            continue
+        left += 1
+    print(f"写回 {len(by_line)} 条；拒绝 {len(bad)} 条；高危缺口还剩 {left} 条")
+    for n, msg in bad:
+        print(f"  ✗ 答案第 {n} 行：{msg}", file=sys.stderr)
+    return 1 if bad else 0
 
 
 def main(argv: list[str]) -> int:
@@ -3087,6 +3392,21 @@ def main(argv: list[str]) -> int:
     p_chk.add_argument("plan", help="计划文件")
     p_chk.add_argument("--repo", default=".", help="仓库根")
     p_chk.set_defaults(func=cmd_check)
+
+    p_asg = sub.add_parser(
+        "assign",
+        help="判定点归属：拉待填清单 / 校验并写回答案（v2 计划）")
+    p_asg.add_argument("plan", help="计划文件")
+    p_asg.add_argument("--repo", default=".", help="仓库根")
+    p_asg.add_argument("--apply", metavar="answers.jsonl",
+                       help="把填好的答案写回计划（校验不过的不写）")
+    p_asg.add_argument("--kinds", default="",
+                       help="只列这些类型的判定点（drop,error-path,resource,state,…）")
+    p_asg.add_argument("--offset", type=int, default=0,
+                       help="跳过前 N 条（分批填用）")
+    p_asg.add_argument("--limit", type=int, default=0,
+                       help="只列 N 条（分批填用）")
+    p_asg.set_defaults(func=cmd_assign)
 
     args = ap.parse_args(argv)
     return args.func(args)

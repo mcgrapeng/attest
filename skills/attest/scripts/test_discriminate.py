@@ -254,6 +254,39 @@ def test_verdict_pass_when_one_mutant_killed() -> None:
            "结论能对回它的那条不变式")
 
 
+#: 钉住的那条用例**不碰**任何有变异点的符号（同文件另一个函数才有）
+#: ⇒ 变异点杀不死这条钉是必然的 ⇒ 判「判不了」，不是「这条钉没区分力」
+OUT_OF_CASE_TS = """export function passthrough(n: number): number { return n; }
+
+export function classify(n: number): string {
+  if (n === 0) { return 'zero'; }
+  return 'other';
+}
+"""
+
+OUT_OF_CASE_TEST = """import { test } from 'node:test';
+import assert from 'node:assert';
+import { passthrough, classify } from './calc.ts';
+test('classifies zero', () => { assert.equal(passthrough(1), 1); });
+test('classifies', () => { assert.equal(classify(0), 'zero'); });
+"""
+
+
+def test_mutants_outside_the_pinned_case_are_untested() -> None:
+    """变异点全在钉住那条用例没提到的符号上 ⇒ 判不了，不是 fail。
+
+    否则「同文件里毫不相干的函数吃掉名额」会被说成「这条钉发现不了这类缺陷」
+    —— 那是假的：那些变异点本来就跟这条钉无关。
+    """
+    res = dpsp(node_repo({"src/calc.ts": OUT_OF_CASE_TS,
+                           "src/calc.test.ts": OUT_OF_CASE_TEST}),
+               OUT_OF_CASE_TS, OUT_OF_CASE_TEST, case="classifies zero")
+    expect(res["verdicts"][0]["status"] == "untested",
+           "变异点在用例范围外 ⇒ untested（不是 fail）")
+    expect(any("没提到任何可变异符号" in n for n in res["notes"]),
+           "notes 里说清「变异点只能取自别的符号」")
+
+
 def test_mutant_marker_makes_unloaded_code_not_applicable() -> None:
     """被测代码压根没被调用 ⇒ not-applicable，不是「存活」。"""
     res = dpsp(node_repo({"src/calc.ts": UNCALLED_TS,
@@ -380,6 +413,7 @@ def main() -> int:
     test_verdict_fail_when_all_mutants_survive()
     test_verdict_pass_when_one_mutant_killed()
     test_mutant_marker_makes_unloaded_code_not_applicable()
+    test_mutants_outside_the_pinned_case_are_untested()
     test_package_reachable_file_is_not_mutated()
     test_verdict_untested_when_pin_is_broken()
     test_monorepo_pin_resolves_against_repo_root()

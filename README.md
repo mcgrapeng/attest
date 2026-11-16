@@ -9,7 +9,7 @@
 <div align="center">
 
 [![CI](https://github.com/mcgrapeng/attest/actions/workflows/ci.yml/badge.svg)](https://github.com/mcgrapeng/attest/actions/workflows/ci.yml)
-[![skills.sh](https://skills.sh/b/mcgrapeng/attest)](https://skills.sh/mcgrapeng/attest)
+[![skills.sh](https://skills.sh/b/mcgrapeng/attest)](https://skills.sh/b/mcgrapeng/attest)
 [![Python](https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-0F766E?style=flat-square)](LICENSE)
 
@@ -21,6 +21,11 @@
 npx skills add mcgrapeng/attest
 ```
 
+<div align="center">
+  <img alt="attest's two lines: line A writes the requirement test plan (req_plan.py new → fill the invariants and the decision-point ownership → scaffold + check), line B verifies the delivery (readiness.py runs the target repository's own test lane, coverage gate and reconciliation script, then reports four kinds of evidence)"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-flow.svg"
+       width="820">
+</div>
 
 ## What it does
 
@@ -28,6 +33,12 @@ A coverage number tells you the code ran. It does not tell you that an
 assertion would fail, that the plan's pins point at files that exist, or that
 two stores have not drifted apart. `attest` answers the delivery question with
 **evidence**, sorted into four kinds:
+
+<div align="center">
+  <img alt="The four kinds of evidence attest reports: measured, static signal, not measured, not judged"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/evidence-kinds.svg"
+       width="794">
+</div>
 
 | Evidence kind | What it means |
 | --- | --- |
@@ -38,28 +49,59 @@ two stores have not drifted apart. `attest` answers the delivery question with
 
 The tool prints these four kinds in Chinese (已实测 / 静态信号 / 未实测 / 本工具不判定); the report sample below is its real output.
 
-**Supported today:** TypeScript / JavaScript and Python. Rust and Go are recognised
-by the plan generator, but the readiness checker exits with code 2 and says so
-rather than reporting on a module it cannot read.
-
 The measurement is real, not inferred. `attest` runs the target repo's **own**
 test command, its **own** coverage gate, its **own** reconciliation script, and
 queries the PostgreSQL catalog for the actual schema. Where it cannot measure
 something, it says so instead of passing it.
+
+**Supported today:** the **readiness checker** measures TypeScript / JavaScript and
+Python. (Python's real-backend itest lane can be found and run with
+`--include-itest`, but pytest's output is not a shape attest can parse, so that
+lane stays *not measured* instead of becoming a verdict.) The **plan generator**
+also reads Rust and Go in its reconnaissance and scaffolds for them (`.rs` → cargo
+test, `.go` → go test), but the readiness checker stops at the language boundary:
+on a Rust or Go module it exits with code 2 and says that only TS/JS/Python is
+implemented, rather than reporting on a module it cannot see.
 
 **What it is not.** It is not a "can we ship" referee, and it does not replace
 the tools you already have:
 
 | You already know | Where attest differs |
 | --- | --- |
-| A coverage badge (Codecov, SonarCloud) | attest **drives your repo's own coverage gate** and reads the number your CI already produces: it does not report coverage itself |
-| An AI-written test plan | attest pins every invariant to a test case **that really exists in your repo**, and refuses to generate a plan when it cannot recognise your conventions |
+| A coverage badge (Codecov, SonarCloud) | attest **drives your repo's own coverage gate** and reports the number your CI already produces; only when a repository has no gate of its own does attest measure coverage itself, as a fallback |
+| An AI-written test plan | attest pins every invariant to a test case **that really exists in your repo**, and when it cannot infer your test framework it refuses to scaffold and tells you (`--framework` is the way out) |
 | "I asked a chatbot whether this looks done" | attest **runs** the checks and prints the commands it ran: every verdict is re-runnable by you |
 | A checklist in a PR comment | attest's report is reproducible: one command, same input, same output |
 
 It reports evidence; the decision stays with whoever owns the delivery. The
 name avoids *verify*, *certify* and *sign-off* on purpose: those promise an
 approval this tool refuses to fake.
+
+## The two commands
+
+**Line A writes the plan** — `skills/attest/scripts/req_plan.py`:
+
+| Step | Command | What it does |
+| --- | --- | --- |
+| 1 | `new <feature> --repo . --module src/x` | Scans the module: the helpers it already has, the stores it touches, your test lanes, and the decision points in the code |
+| 2 | *fill the plan* | Write the invariants and the coverage matrix; pin each one to a real test case |
+| 3 | `upgrade <plan> --repo .` | Re-granularises the plan: one row per decision point, with three columns to fill — which invariant owns it, which case proves it, or why it needs no test |
+| 4 | `assign <plan> --repo . --limit 30` | Hands out the decision points still to be answered, as a JSONL worklist (that is what it does by default); `--apply answers.jsonl` checks the answers and writes them back |
+| 5 | `scaffold <plan> --repo .` | Writes the test files the plan asks for, in your conventions; the assertions are left as TODO for you to fill |
+| 6 | `check <plan> --repo .` | Verifies every pin: does the file exist, does the case exist, is the invariant covered |
+
+Step 4 is what makes the three columns fillable by an agent instead of by hand: in
+its default mode `assign` hands out each decision point's code excerpt, the
+candidate test files and the plan's own invariants; `--apply` takes the answers
+back and writes them in. Anything that does not check out — an invariant that is
+not in the list, a waiver that says nothing, a pin to a case that does not exist
+— is rejected and left for a human.
+
+**Line B verifies the delivery** — `skills/attest/scripts/readiness.py`:
+`readiness.py <module> --repo .` runs your repository's own test lane, coverage
+gate, reconciliation script and schema queries, then prints the four kinds of
+evidence and one exit code. `--plan <plan>` adds the decision-point criteria;
+without it those three are reported as *not measured*, not as passed.
 
 ## Install
 
@@ -71,7 +113,7 @@ Three ways in, pick the one that matches you:
 
 | You want to… | Do this |
 | --- | --- |
-| Use it inside your agent | `npx skills add mcgrapeng/attest`: the skills CLI copies the skill into `.agents/skills/attest/` and detects which agent you run (Claude Code, Codex, OpenCode, Cursor, Windsurf, Zed, Warp and 20 more). No clone, no Python |
+| Use it inside your agent | `npx skills add mcgrapeng/attest`: the skills CLI copies the skill into `.agents/skills/attest/` and detects which agent you run. No clone, no Python |
 | Keep the repository | `git clone … && python3 install.py`: symlinks the skill into `~/.agents/skills/attest` and the agent directories |
 | Just run it once | `python3 ~/.agents/skills/attest/scripts/readiness.py <module path> --repo <repo root>` |
 
@@ -89,8 +131,8 @@ python3 install.py
 
 The installer symlinks the skill directory (`skills/attest/`) to
 `~/.agents/skills/attest`, then symlinks that entry into `~/.claude/skills/`,
-`~/.codex/skills/` and `~/.config/opencode/skills/`. An existing symlink with
-the same name is replaced (the script says so); if the target path is a **real
+`~/.codex/skills/` and `~/.config/opencode/skills/`. An existing symlink with the
+same name is replaced (the script says so); if the target path is a **real
 directory** the script skips it and never deletes user data. Uninstall with
 `python3 install.py --uninstall`: symlinks only. On Windows `os.symlink` may
 need administrator rights or developer mode.
@@ -120,7 +162,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.7
+      - uses: mcgrapeng/attest@v0.1.12
         with:
           module: src/auth
 ```
@@ -144,12 +186,26 @@ the repository's own test command.
 
 ## Command-line flags
 
-`skills/attest/scripts/readiness.py` takes four switches for the decision-point
-engine. All of them degrade to "not measured" rather than to a false green.
+The switches you are most likely to need:
 
 | Flag | What it does |
 | --- | --- |
 | `--plan <file>` | The requirement test plan to compare against. **Without it the three decision-point criteria are skipped**, not passed |
+| `--database-url <url>` | The PostgreSQL to read the schema from, when it is not the default |
+| `--test-tenant <name>` | A tenant that is **not** production data. Repeat it for every test tenant, or the reconciliation counts them as drift |
+| `--include-itest` | Include the repository's real-backend itest lane in the measurement (it needs PostgreSQL and the vector store, and it is slow) |
+| `--json` | The same report, machine-readable: every check plus the verdict counters |
+| `--dry-run` | List the repository scripts that *would* run, and run nothing |
+| `--min-line-coverage`, `--min-branch-coverage` | Fallback coverage bars, used only when the repository has no coverage gate of its own |
+| `--mutation-check` | Break the source and check that the tests catch it (copies your code first, so your tree is untouched) |
+| `--self-check` | Reverse verification: inject a known defect into a copy and prove the criteria turn red (your repository is not touched) |
+
+Three more switches belong to the decision-point engine (the fourth, `--plan`, is
+above). None of them can turn a red into a green: a missing capability degrades
+to a warning or to *not measured*.
+
+| Flag | What it does |
+| --- | --- |
 | `--discriminating {auto,off,quick,full}` | Whether to break the source at each pin and check that the pinned test case catches it. `auto` runs it only for decision-point-grained plans, `off` skips it, `quick`/`full` widen the sample (expensive) |
 | `--analysis-backend {auto,b1,b2,l2}` | How the decision points are derived. `auto` uses the TypeScript AST when it is available; `l2` forces the lexical fallback, which **downgrades the three criteria to warnings** — a missing capability never reports green |
 | `--lenient` | Warn only: every red from the three decision-point criteria becomes a warning |
@@ -175,7 +231,7 @@ terminal:
 
 <div align="center">
   <img alt="The full report: four sections (measured, static signals, not measured, not judged) and a three-tier verdict: rendered from a real run of attest's own fixture"
-       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero.svg"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero-animated.svg"
        width="574">
 </div>
 
@@ -210,29 +266,40 @@ owns and no exemption explains**.
 
 ## What it measures
 
-The tool prints all 17 criteria in Chinese, so the names are listed here with
-an English gloss: 测试全绿 (tests green) · 核心逻辑测试到位 (core logic is covered) ·
-测试能发现缺陷 (the tests can find defects) · 表结构基本合规 (schema is basically
-compliant) · 数据流一致（跨存储对账）(data agrees across stores) ·
-数据准确（基线对拍）(data matches the baseline) · 钉有区分力 (the pin has
-discriminating power) · 需求覆盖到位 (requirement is covered) ·
-向量集合属性自洽 (vector collection attributes agree) ·
-测试卫生（不留残留、不靠 sleep）(test hygiene) · 导出的逻辑都有测试 (every export is
-referenced by a test) · 不过度抽象 (not over-abstracted) · 没有重复造轮子 (no reinvented
-wheels) · 使用主流开源库 (mainstream dependencies) · 断言的期望值独立 (assertion oracles
-independent) · 计划与机器推导对齐 (the plan matches the machine-derived decision points) ·
-应有判定点覆盖到位 (the decision points are covered).
+The tool prints all 17 criteria in Chinese, so the names are listed here with an
+English gloss. **Measured** means attest ran something; **static signal** means it
+read the source, and a static signal can never carry a pass on its own.
 
-How each one is measured, the four evidence kinds and the language matrix are in
+| Criterion | How attest measures it |
+| --- | --- |
+| 测试全绿 (tests green) | **Measured.** Runs the module's tests with the repo's own command; only assertion failures count — a setup error means the environment was not ready, not that the code is wrong |
+| 核心逻辑测试到位 (core logic is covered) | **Measured.** Drives the repo's own coverage gate; `--min-line-coverage` is only for repositories that have no gate |
+| 测试能发现缺陷 (the tests can find defects) | **Measured.** Breaks the source on purpose: red means the suite caught it, still green means this suite cannot find this class of defect (`--mutation-check`) |
+| 表结构基本合规 (schema is basically compliant) | **Measured.** Queries the PostgreSQL catalog: primary key, unique constraint, tenant column, RLS+FORCE, timestamps with a timezone. Single-tenant modules, global config tables and append-only tables are exempt from the tenant column and the unique constraint |
+| 数据流一致（跨存储对账）(data agrees across stores) | **Measured.** Runs the module's own reconciliation script and judges the drift per tenant kind; the field-level comparison is part of this one |
+| 数据准确（基线对拍）(data matches the baseline) | **Measured.** Runs the repo's own baseline script and parses the metric differences |
+| 钉有区分力 (the pin has discriminating power) | **Measured.** Breaks the source at the pinned point and runs the pinned case: red means the pin kills this class of defect, still green means it does not |
+| 需求覆盖到位 (requirement is covered) | **Static signal.** Reads the plan and the test files: every invariant's pin points at a case that really exists |
+| 向量集合属性自洽 (vector collection attributes agree) | **Static signal.** Whether one collection's dimension, metric and partition key agree across its call sites |
+| 测试卫生（不留残留、不靠 sleep）(test hygiene) | **Static signal.** Fixed waits (a source of flakiness) and database writes without cleanup (a source of leftovers). A test file that really does not write to a database declares it — `/* attest:no-db-writes reason="…" */` — and the reason shows up in the report |
+| 导出的逻辑都有测试 (every export is referenced by a test) | **Static signal.** Exported functions and classes with zero references in the tests are named |
+| 不过度抽象 (not over-abstracted) | **Static signal.** Exported symbols with almost no call sites anywhere in the repository |
+| 没有重复造轮子 (no reinvented wheels) | **Static signal.** Same-named implementations elsewhere in the repository |
+| 使用主流开源库 (uses mainstream open-source libraries) | **Static signal.** The module's real dependency list, with path aliases and the standard library excluded |
+| 断言的期望值独立 (assertion oracles are independent) | **Static signal.** Assertions whose expected value comes from the system under test |
+| 计划与机器推导对齐 (the plan matches the machine-derived decision points) | **Static signal.** The decision points are reverse-derived from the source and compared with the plan in both directions |
+| 应有判定点覆盖到位 (the decision points are covered) | **Static signal.** Every high-risk decision point has an owning invariant or a written exemption, and the pin really exists |
+
+How each one is measured in full, and the language matrix, are in
 **[docs/criteria.md](docs/criteria.md)**.
 
 ## Status
 
-**Actively developed. Released as `v0.1.7`.** The criteria and the skill
+**Actively developed. Released as `v0.1.12`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 
-Every number in this repository comes from a command you can re-run: **35 / 35** regression suites, **10 / 10** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
+Every number in this repository comes from a command you can re-run: **36 / 36** regression suites, **10 / 10** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
 
 Known gaps, in full: [CHANGELOG.md](CHANGELOG.md). The three that
 matter most:
@@ -264,17 +331,29 @@ the tests, it says so instead of guessing.
 **What does exit code 1 mean in my CI?**
 Either a measured criterion is below the bar, or a key criterion could not be
 measured at all. The GitHub Action does not fail the job on it by default
-(`strict: false`); with `strict: true` it does.
+(`strict: false`); with `strict: true` it does. In `--self-check` mode a third
+case exists: the reverse verification failing is about the tool, not your
+module, and attest says so in its own words.
 
 **Does attest write to my repository?**
-Only when you tell it to. It reads your repository and runs your scripts. One
-command writes files, and only under a directory you name: `req_plan.py scaffold`
-writes test files under `--out-dir`. `--self-check` and `--mutation-check` copy
-your code into a temporary directory first, so they leave your working tree alone.
+It reads your repository and runs your scripts. The plan commands write **the plan
+file** — `new` creates it, `upgrade` and `assign --apply` rewrite it — and
+`req_plan.py scaffold` writes test files under `--out-dir` (which defaults to the
+repository root). `--self-check` and `--mutation-check` copy your code into a
+temporary directory first, so they leave your working tree alone.
 
 **Does it replace my coverage dashboard?**
 No, it reads it. attest drives your repository's own coverage gate and reports
-the number your CI already produces.
+the number your CI already produces; with no gate of its own, it measures
+coverage itself as a fallback.
+
+**Can it fill the plan for me?**
+The three columns of a decision-point plan are a judgment call, and attest does
+not make it for you. But `req_plan.py assign` makes it fillable in batches: it
+hands out the open decision points as a JSONL worklist, and writes the answers
+back after checking each one — an invariant that is not in the plan, a waiver
+that says nothing, or a pin to a case that does not exist is rejected and left
+for a human.
 
 **Is this maintained?**
 It is released, versioned, and the changes to it are published:

@@ -733,6 +733,46 @@ def _parse_ts_json(out: str) -> tuple[dict | None, bool]:
     return None, truncated
 
 
+def ts_parses(backend: TsBackend, abs_path: Path, text: str,
+              cwd: Path) -> tuple[bool | None, str]:
+    """用 AST 后端真解析一遍 ⇒ (能不能解析, 说明)；None = 判不了。
+
+    B1 从内存里的文本解析（不落盘）；B2 只能从磁盘读 ⇒ 先把文本写进那个
+    路径，finally 里还原（内容没变就不动磁盘）。
+    """
+    payload: dict = {"kind": backend.kind, "abs": str(abs_path),
+                     "cwd": str(cwd)}
+    original: str | None = None
+    try:
+        if backend.kind == "B1":
+            payload["text"] = text
+        else:
+            try:
+                current = abs_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                current = None
+            if current != text:
+                original = current
+                abs_path.write_text(text, encoding="utf-8")
+        code, out, err = _run_ts_script(_TS_SCRIPT, "parse",
+                                        backend.package_dir, payload, cwd=cwd,
+                                        timeout=120)
+    finally:
+        if original is not None:
+            try:
+                abs_path.write_text(original, encoding="utf-8")
+            except OSError:
+                pass
+    if code != 0:
+        return None, (err.strip() or out.strip())[:200]
+    data, _truncated = _parse_ts_json(out)
+    if not data or not data.get("ok"):
+        return None, str((data or {}).get("error", ""))[:200]
+    if data.get("parses"):
+        return True, ""
+    return False, "; ".join(data.get("errors") or [])[:200]
+
+
 def ast_analyze(root: Path, files: list[str],
                 backend: TsBackend | None) -> DpAnalysis:
     """用 TS AST 后端推导 L3 判定点。
@@ -890,20 +930,34 @@ function missingKinds(syntaxKind) {
   return missing;
 }
 
+// 后缀 → ScriptKind（.tsx/.jsx 要分开，否则 JSX 语法解析不了）。
+function scriptKindOf(ts, f) {
+  if (f.endsWith(".tsx")) return ts.ScriptKind.TSX;
+  if (f.endsWith(".jsx")) return ts.ScriptKind.JSX;
+  if (/\.(js|mjs|cjs)$/.test(f)) return ts.ScriptKind.JS;
+  return ts.ScriptKind.TS;
+}
+
+// 诊断消息可能是链（DiagnosticMessageChain）⇒ 拍平成一行。
+function diagText(d) {
+  const m = d && d.messageText;
+  if (m == null) return String(d);
+  if (typeof m === "string") return m;
+  if (typeof m.messageText === "string") return m.messageText;
+  if (Array.isArray(m.next)) {
+    return m.next.map((x) => diagText({ messageText: x })).join(" ");
+  }
+  return String(m);
+}
+
 function openB1(files) {
   const ts = req(pkgDir);
   if (!ts || typeof ts.createSourceFile !== "function") {
     throw new Error("B1: 这份 typescript 没有经典 API（createSourceFile）");
   }
-  const scriptKind = (f) => {
-    if (f.endsWith(".tsx")) return ts.ScriptKind.TSX;
-    if (f.endsWith(".jsx")) return ts.ScriptKind.JSX;
-    if (/\.(js|mjs|cjs)$/.test(f)) return ts.ScriptKind.JS;
-    return ts.ScriptKind.TS;
-  };
   const sourceFiles = files.map((f) =>
     ts.createSourceFile(f.abs, fs.readFileSync(f.abs, "utf8"),
-                        ts.ScriptTarget.Latest, true, scriptKind(f.abs)));
+                        ts.ScriptTarget.Latest, true, scriptKindOf(ts, f.abs)));
   return {
     syntaxKind: ts.SyntaxKind,
     opMap: buildOpMap(ts.SyntaxKind),
@@ -1283,6 +1337,34 @@ if (mode === "probe") {
     const points = collectStructural(backend, payload.files);
     backend.close();
     emit({ ok: true, points: points }, 0);
+  } catch (e) {
+    emit({ ok: false, error: String((e && e.message) || e) }, 1);
+  }
+} else if (mode === "parse") {
+  // 变异体能不能解析：B1 从内存里的文本解析，B2 只能从磁盘读
+  // （Python 侧负责把文本写进去再还原）。
+  try {
+    const abs = payload.abs;
+    let diags = [];
+    if (payload.kind === "B1") {
+      const ts = req(pkgDir);
+      const sf = ts.createSourceFile(abs, payload.text, ts.ScriptTarget.Latest,
+                                     true, scriptKindOf(ts, abs));
+      diags = sf.parseDiagnostics || [];
+    } else {
+      const syncMod = req(req.resolve("typescript/unstable/sync"));
+      const api = new syncMod.API({ cwd: payload.cwd });
+      try {
+        const snap = api.updateSnapshot({ openFiles: [abs] });
+        const proj = snap.getDefaultProjectForFile(abs);
+        if (!proj) throw new Error("B2: " + abs + " 没有所属项目");
+        diags = proj.program.getSyntacticDiagnostics(abs) || [];
+      } finally {
+        try { api.close(); } catch (e) { /* 关不掉就算了 */ }
+      }
+    }
+    emit({ ok: true, parses: diags.length === 0,
+           errors: diags.slice(0, 3).map(diagText) }, 0);
   } catch (e) {
     emit({ ok: false, error: String((e && e.message) || e) }, 1);
   }

@@ -58,6 +58,21 @@ def criteria_rows(text: str) -> int:
     return n
 
 
+def para_with(text: str, marker: str) -> str:
+    """包含 marker 的那一段散文（空行分段）。"""
+    for p in re.split(r"\n\s*\n", text):
+        if marker in p:
+            return p
+    return ""
+
+
+def faq_answer(text: str, needle: str) -> str:
+    """FAQ 里那个 **…needle…** 问答的答案段。"""
+    m = re.search(r"\*\*[^*\n]*" + re.escape(needle) + r"[^*\n]*\*\*\n(.+?)(?=\n\n|\n# )",
+                  text, re.S)
+    return m.group(1).strip() if m else ""
+
+
 def main() -> int:
     en_path = ROOT / "README.md"
     zh_path = ROOT / "README.zh-CN.md"
@@ -76,6 +91,9 @@ def main() -> int:
            "章节层级与顺序一致")
 
     print("\n判据条数与代码一致")
+    # 写入行为那节要用：跑之前目标仓库长什么样
+    fixture_dir = ROOT / "fixtures" / "ts-colocated"
+    before_tree = {str(p) for p in fixture_dir.rglob("*")}
     # 代码里的 Check 数：跑一次 readiness --json 数
     out = subprocess.run(
         [sys.executable, str(HERE / "readiness.py"), "src",
@@ -87,6 +105,13 @@ def main() -> int:
     except Exception:
         pass
     expect(code_n == 17, f"代码里 17 条判据（实际 {code_n}）")
+    # README 自己写的判据数也要跟着变（FAQ 里的答案最容易在这上面说谎）
+    for label, text, pat in (("英文", en, r"(\d+)\s+criteria"),
+                             ("中文", zh, r"(\d+)\s*条判据")):
+        claimed = set(re.findall(pat, text))
+        expect(claimed == {str(code_n)},
+               f"{label} README 自称的判据数 == 代码 {code_n}"
+               f"（实际 {sorted(claimed) or '没写'}）")
     # 判据表搬到了 docs/criteria.md（README 只留一段话 + 链接）
     crit = (ROOT / "docs" / "criteria.md").read_text(encoding="utf-8")
     expect(criteria_rows(crit) == code_n,
@@ -132,6 +157,86 @@ def main() -> int:
     for label, text in (("英文", en), ("中文", zh)):
         expect("结论：0 项阻塞" in text,
                f"{label} README 引用了真实结论行")
+
+    print("\nREADME 说的退出码语义与代码一致")
+    # 代码侧的机器可读规则（JSON 里带的那条）
+    rule = json.loads(out.stdout)["conclusion"]["exit_rule"]
+    causes = [c for c in rule.split("，或") if c]
+    expect(len(causes) == 2,
+           f"代码的退出码规则还是两条成因（实际 {len(causes)}）")
+    # 实测：规则的两条成因各自都得为真，两条都不成立时才退 0
+    runs = [("ts-colocated", "两条都没有", False, False, out)]
+    for fx, why, wb, wk in (("english-reconciler", "有阻塞项", True, False),
+                            ("no-tests", "关键判据没测到", False, True)):
+        runs.append((fx, why, wb, wk, subprocess.run(
+            [sys.executable, str(HERE / "readiness.py"), "src",
+             "--repo", str(ROOT / "fixtures" / fx), "--json"],
+            capture_output=True, text=True, cwd=str(ROOT))))
+    for fx, why, wb, wk, r in runs:
+        d = json.loads(r.stdout)
+        blocking = d["conclusion"]["blocking"]
+        key_untested = [c for c in d["checks"] if c["key"] == "tests-green"
+                        and c["status"] in ("skipped", "untested")]
+        expect((blocking > 0) == wb and bool(key_untested) == wk,
+               f"{fx} 真的是「{why}」这一档")
+        expect(r.returncode == (1 if (blocking or key_untested) else 0),
+               f"{fx} 的退出码符合规则（实退 {r.returncode}）")
+    # README 的结论块逐字用上代码自己的措辞
+    core = rule.replace(" ⇒ 退出码 1", "").strip()
+    for label, text in (("英文", en), ("中文", zh)):
+        expect(core in text, f"{label} README 的退出码说明用了代码自己的措辞")
+    # README 讲的这次运行（ts-colocated）退出码 == 真跑的退出码
+    for label, text, marker, pat in (
+            ("英文", en, "Look at the last line", r"exit code `(\d)`"),
+            ("中文", zh, "看最后一行", r"退出码[^。]{0,12}`(\d)`")):
+        p = para_with(text, marker)
+        m = re.search(pat, p)
+        expect(m is not None, f"{label} README 写明了这次运行的退出码")
+        if m:
+            expect(int(m.group(1)) == out.returncode,
+                   f"{label} README 说的退出码 {m.group(1)} == 实跑 {out.returncode}")
+    # FAQ 那条回答也要说清两种成因（中英措辞不同，映射写死）
+    for label, text, needle, words in (
+            ("英文", en, "exit code 1", ("below the bar", "not be measured")),
+            ("中文", zh, "退出码 1", ("没达标", "没测到"))):
+        ans = " ".join(faq_answer(text, needle).split())
+        expect(bool(ans), f"{label} FAQ 回答了「退出码 1 是什么意思」")
+        for w in words:
+            expect(w in ans, f"{label} FAQ 提到了退出码的成因：{w}")
+    # Action 的 strict 默认值 = README 说的那个
+    act = (ROOT / "action.yml").read_text(encoding="utf-8")
+    block = re.search(r"^  strict:\n((?:[ \t]+.*\n)+)", act, re.M)
+    dflt = re.search(r"default:\s*\"?([\w-]+)\"?", block.group(1)) if block else None
+    expect(dflt is not None, "action.yml 的 strict 有默认值")
+    if dflt:
+        expect(dflt.group(1) == "false", f"strict 默认是 false（实际 {dflt.group(1)}）")
+        for label, text in (("英文", en), ("中文", zh)):
+            expect(f"`strict: {dflt.group(1)}`" in text,
+                   f"{label} README 写了 action 的 strict 默认值")
+            expect("`strict: true`" in text,
+                   f"{label} README 说了 strict: true 会拦 job")
+
+    print("\nREADME 说的写入行为与代码一致")
+    # 实测：跑完一遍，目标仓库里没多出文件 ⇒「attest 不往你的仓库写」是真的
+    after_tree = {str(p) for p in fixture_dir.rglob("*")}
+    expect(after_tree <= before_tree,
+           f"attest 不往目标仓库写文件（多出来的：{sorted(after_tree - before_tree)}）")
+    # 代码侧：带边界的写盘出口只有一个
+    writers = sorted(p.name for p in HERE.glob("*.py")
+                     if not p.name.startswith("test_")
+                     and "--out-dir" in p.read_text(encoding="utf-8"))
+    expect(writers == ["req_plan.py"],
+           f"只有 req_plan.py 提供 --out-dir 写盘出口（实际 {writers}）")
+    # FAQ 那条回答要说清：写盘出口在哪儿、另外两个开关在副本上跑
+    for label, text, needle, words in (
+            ("英文", en, "write to my repository",
+             ("scaffold", "--out-dir", "--self-check", "--mutation-check", "temporary")),
+            ("中文", zh, "往我的仓库里写",
+             ("scaffold", "--out-dir", "--self-check", "--mutation-check", "临时"))):
+        ans = " ".join(faq_answer(text, needle).split())
+        expect(bool(ans), f"{label} FAQ 回答了「会不会往我的仓库里写」")
+        for w in words:
+            expect(w in ans, f"{label} FAQ 写清了写入的边界：{w}")
 
     print("\nREADME 用到的资源文件都存在")
     for asset in ("skills/attest/assets/hero.png",
@@ -201,7 +306,6 @@ def main() -> int:
         pinned = set(re.findall(r"mcgrapeng/attest@v(\d+\.\d+\.\d+)", text))
         expect(pinned <= {latest},
                f"{label} README 的 Action pin 指向最新版本（实际 {sorted(pinned)}）")
-
 
     print("\nREADME 的环境白名单描述与代码一致")
     code = (HERE / "readiness.py").read_text(encoding="utf-8")

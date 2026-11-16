@@ -25,9 +25,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from decision_points import ts_parses  # noqa: E402
 from mutation_check import (  # noqa: E402
-    L2_OPERATORS, MUTANT_MARKER, OPERATORS, _strip_js_code,
-    match_case, run_mutation_check)
+    L2_OPERATORS, MUTANT_MARKER, OPERATORS, _backend_for, _project_root,
+    _strip_js_code, match_case, run_mutation_check)
 from req_plan import parse_pins  # noqa: E402
 
 __all__ = ["ImportRef", "Verdict", "file_exports", "parse_imports",
@@ -665,19 +666,47 @@ def _js_shape(text: str) -> tuple[int, int, int]:
             code.count("[") - code.count("]"))
 
 
+#: 这些后缀走 TS AST 后端真解析（其余按括号结构兜底）。
+_JS_TS_SUFFIXES = (".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts")
+
+
+def _js_parses(path: Path, text: str, original: str) -> bool:
+    """JS/TS 变异体能不能解析（真解析器，不是括号配平）。
+
+    括号配平看不见两类东西：语法坏了但括号照样配平的变异（`x === ;`）⇒
+    变异体被当成「杀死」，假的绿；正则字面量里的括号（`/)/`）⇒ 合法代码
+    被当成「解析不过」，假的 untested。
+
+    判据是「变异相对原文」：变异解析不过**而原文能解析** ⇒ 这次变异把语法
+    改坏了 ⇒ 判不了。原文本身也解析不过 ⇒ 账不在变异头上，放行。
+    """
+    root = _project_root(path)
+    backend = _backend_for(root) if root is not None else None
+    if backend is None:
+        return _js_shape(text) == _js_shape(original)
+    mut_ok, _why = ts_parses(backend, path, text, root)
+    if mut_ok is None:
+        return _js_shape(text) == _js_shape(original)
+    if mut_ok:
+        return True
+    orig_ok, _why = ts_parses(backend, path, original, root)
+    if orig_ok is None:
+        return True
+    return not orig_ok
+
+
 def _default_parse_check(path: Path, text: str) -> bool:
     """默认解析校验：**判变异，不判文件**。
 
     闸门要回答的是「这次变异有没有把代码改坏」，不是「这段代码本身干不干净」。
-    拿绝对标准（括号配平 / 能不能编译）去判，会把**原文就不标准**的真代码
-    （正则字面量里的括号、跑在旧 Python 上的新语法）判成「解析不过」⇒
-    能判的变异点全被推成「判不了」—— 假的 untested。
+    拿绝对标准去判，会把**原文就不标准**的真代码（正则字面量里的括号、跑在
+    旧 Python 上的新语法）判成「解析不过」⇒ 能判的变异点全被推成「判不了」
+    —— 假的 untested。
 
       - Python：变异后能编译就算过；编译不过时再看**原文能不能编译**——
         原文也编译不过 ⇒ 问题不在这次变异上。
-      - JS/TS：比对变异前后的括号结构。我们的算子都是**保结构**的替换
-        （`===`→`!==`、调用→`undefined`、catch 体→`{}`）⇒ 结构没变就是
-        没改坏；结构变了 ⇒ 这次变异坏了代码。
+      - JS/TS：用仓库那份 TypeScript 真解析一遍；没有可用后端 ⇒ 退回
+        比对变异前后的括号结构。
 
     原文从磁盘上读：调用方保证检查那一刻磁盘上还是原文（变异还没写下去）。
     """
@@ -687,6 +716,8 @@ def _default_parse_check(path: Path, text: str) -> bool:
         original = text
     if path.suffix == ".py":
         return _py_compiles(text) or not _py_compiles(original)
+    if path.suffix in _JS_TS_SUFFIXES:
+        return _js_parses(path, text, original)
     return _js_shape(text) == _js_shape(original)
 
 

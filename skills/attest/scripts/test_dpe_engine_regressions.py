@@ -119,6 +119,43 @@ def test_parse_check_judges_the_mutation_not_the_file():
            "结构被改坏的变异仍然判成「解析不过」")
 
 
+# ------------------------------------------------------- D 解析闸用真解析器
+
+
+def _ts_backend(root: Path):
+    """这台机器能不能拿到可用的 TS 后端（拿不到 ⇒ 相关断言跳过）。"""
+    sys.path.insert(0, str(HERE))
+    from decision_points import detect_backend  # noqa: E402
+    return detect_backend(root)
+
+
+def test_parse_gate_uses_a_real_parser_not_bracket_balance():
+    print("\ntest_parse_gate_uses_a_real_parser_not_bracket_balance")
+    sys.path.insert(0, str(HERE))
+    from discriminate import _default_parse_check  # noqa: E402
+    src = ("export function isOne(x) {\n"
+           "  return x === 1;\n"
+           "}\n")
+    root = node_repo({"src/a.ts": src})
+    path = root / "src" / "a.ts"
+    if _ts_backend(root) is None:
+        print("  skip 本机没有可用的 TypeScript 后端")
+        return
+    # 括号配平、语法坏了：老闸门（括号配平）看不见 ⇒ 变异体被当成「杀死」⇒ 假绿
+    broken = src.replace("x === 1", "x === ;")
+    expect(not _default_parse_check(path, broken),
+           "括号配平但语法坏了的变异判成「解析不过」")
+    # 正则字面量里的括号是合法的：老闸门把它当结构差异 ⇒ 合法变异被误杀
+    re_src = ("const re = /)/;\n"
+              "export function isOne(x) {\n"
+              "  return x === 1;\n"
+              "}\n")
+    re_path = write(root / "src" / "b.ts", re_src)
+    re_mut = re_src.replace("/)/;", "/(/;")
+    expect(_default_parse_check(re_path, re_mut),
+           "正则字面量里的括号变化不误判合法变异")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -127,6 +164,7 @@ def main() -> int:
     test_big_stdout_is_not_truncated()
     test_scope_relevant_mutation_is_selectable()
     test_parse_check_judges_the_mutation_not_the_file()
+    test_parse_gate_uses_a_real_parser_not_bracket_balance()
 
     print()
     for d in TMPDIRS:

@@ -18,6 +18,7 @@
 | 5 | 规格附录 B 的 5 条金标 DP 是修复前快照：当前树上 1 条已不存在、3 条缺序号后缀、1 条锚点不同 | §5.1 |
 | 6 | 20 条不变式的区分力自证：**pass 2 / fail 7 / not-applicable 11 / untested 0**。引擎如实报告「判不了」，不粉饰成「通过」 | §5.5 |
 | 7 | 阻塞项 1 个：`SKILL.md` 判据表同步（**集成者专属**，本车道按约定不碰该文件） | §8 |
+| 8 | 本车道另修两处并行车道未列的缺陷：**monorepo 里钉的路径基准错位**（修前 0/20 命中 ⇒ DPSP 恒判不了）与 **`not-applicable` 不报钉与测试文件**；两处都做过反向自证 | §10 |
 
 ---
 
@@ -317,3 +318,71 @@ python3 /tmp/dpe_verify/probe_dpsp20.py        # 20 条不变式全部进区分�
 
 探针都在 `/tmp/dpe_verify/`（不进仓库）。注意 `req_plan.py upgrade` 是就地写的，对着 lumen 仓库里的
 计划跑之前先 `cp` 到 `/tmp`。
+
+---
+
+## 10. 追加：本车道另修的两处缺陷（不在 §6 的四个 P0 里）
+
+§6 列的四个 P0 是并行车道写的。下面两处是**本车道**在 Task 10 复测时另外发现的：修法已进代码，
+也都做过反向自证，但**提交信息没有列出来**（见 10.3）⇒ 只按提交信息回溯会漏掉这两处。
+
+### 10.1 缺陷 E：monorepo 里钉的路径基准错位（DPSP 恒判不了）
+
+| 项 | 内容 |
+| --- | --- |
+| 机制 | 钉的路径基准是**仓库根**（规格 §3：判定点的 `file` 与钉同基准；`readiness.py` 自己也按 `m.root` 解析），而 `discriminate.run_dpsp` 用 `base = repo / ws_rel`（**工作区**）去解析钉。lumen 是 monorepo，模块 `service/src/agent-memory` 的工作区是 `<root>/service` ⇒ 仓库根相对的钉 `service/src/agent-memory/r5-contract.itest.ts` 被拼成 `<root>/service/service/src/agent-memory/r5-contract.itest.ts` ⇒ 不存在 |
+| 后果 | 每条钉都落进 `untested`（「钉的文件不存在」）⇒ `pin-discriminating` 判据在 monorepo 里**恒判不了**，区分力一条也测不出来。且报出来的是「判不了」，看报告的人会以为环境没就绪，不会想到是路径基准错了 |
+| 修法 | `discriminate._pin_to_ws_rel()`（`skills/attest/scripts/discriminate.py`，HEAD 行号 733）：两种基准各试一次 —— 先按工作区相对找；再把仓库根相对的前缀（`ws_rel + "/"`）去掉后按工作区相对找；都不在 ⇒ `None` ⇒ 判 `untested`（而不是错判 `fail`） |
+| 边界 | 同一个文件名在工作区与仓库根两个基准下都存在时，取工作区相对那个（变异检查的契约）。仓库根独有的文件不受影响 |
+| 实测 | 同一份 lumen 计划（20 条不变式）：修前 base=`<root>/service` **命中 0 / 20**；仓库根基准 **命中 20 / 20** |
+| 回归钉 | `test_discriminate.py::test_monorepo_pin_resolves_against_repo_root`（断言 `status == "pass"` 且 `test == "src/calc.test.ts"`）、`::test_pin_outside_workspace_is_untested`（工作区外的钉必须判 `untested`，不能判 `fail`） |
+
+反向自证（把修复退回 HEAD 的旧代码再跑回归）：
+
+```
+FAIL 仓库根相对的钉在 monorepo 里也能判出区分力（实际 untested：钉的文件不存在：service/src/calc.test.ts）
+FAIL 结论里记的是工作区相对路径
+退出码=1
+```
+
+**这条修复是 §5.5「untested = 0」的前置条件**：钉一条都定位不到时，20 条不变式会全部落进 `untested`
+（而不是 `not-applicable`）。§5.5 能判满 20 条、且 `untested` 归零，是在修复之后才跑得出来的。
+
+### 10.2 缺陷 F：`not-applicable` 的结论里不报钉与测试文件
+
+| 项 | 内容 |
+| --- | --- |
+| 机制 | `run_dpsp` 的两个 `not-applicable` 分支调 `_verdict(...)` 时没传 `pin` / `test` ⇒ 结论对象里没有钉与测试文件 |
+| 后果 | 报告里那条「不适用」是空的 ⇒ 看报告的人只知道判不了，**不知道是哪条钉判不了** ⇒ 分不清「钉指错了文件」与「这条钉本来就不在范围」；§5.5 的 not-applicable 分布因此无法回溯到具体钉 |
+| 修法 | 两个分支补 `pin=pin_cell, test=test_rel`（`discriminate.py` 的 `run_dpsp()`，HEAD 行号 824 / 831） |
+| 回归钉 | `test_discriminate.py::test_not_applicable_verdict_still_reports_its_pin`（断言 `v["pin"] == "src/calc.test.ts::classifies zero"` 且 `v["test"] == "src/calc.test.ts"`） |
+
+反向自证：
+
+```
+FAIL 不适用也报得出钉
+FAIL 不适用也报得出测试文件
+退出码=1
+```
+
+### 10.3 归属说明
+
+这两处修复与并行车道的 A/B/C/D 一起落在提交 `32ecbf2`（`fix(dpe): 判定点引擎的三个 P0 缺陷 +
+Python 侧的区分力自证`）。**该提交信息只列了三个 P0，没有列这两处** ⇒ 只按提交信息回溯会以为
+「monorepo 里钉的基准问题」还在。凡是出现「钉找不到 ⇒ 判不了」的现象，先查 10.1。
+
+复现：
+
+```bash
+# 路径基准对照（只查路径，不跑变异）
+python3 /tmp/dpe-roundtrip/probe_pinbase.py
+#   DPSP 当前基准 base=<root>/service：命中 0 / 20
+#   readiness 基准 base=<root>：命中 20 / 20
+
+# 两个反向自证（把修复退回 ⇒ 断言必须变红）
+python3 /tmp/dpe-roundtrip/selfprove_pinbase.py     # 期望退出码 1
+python3 /tmp/dpe-roundtrip/selfprove_report_pin.py  # 期望退出码 1
+```
+
+探针与自证脚本都在 scratchpad（`/tmp/dpe-roundtrip/`），不进仓库；自证脚本把
+`skills/attest/scripts/*.py` 复制到临时目录、回退指定代码块，再跑 `test_discriminate.py`。

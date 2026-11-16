@@ -3478,6 +3478,14 @@ def _dpe_alignment(dp, plan) -> dict:
     }
 
 
+# 没跑区分力自证时要说清是哪一种没跑：`auto` 只对判定点粒度（v2）的计划跑，
+# 旧格式（v1）的计划在 auto 下会被静默跳过 ⇒ 只说「off 或没有可跑的钉」会让人
+# 误以为是环境问题。
+_DPSP_NOT_RUN = ("没跑区分力自证：--discriminating off / "
+                 "auto 模式只对判定点粒度（v2）计划跑，本计划是旧格式 ⇒ "
+                 "显式用 --discriminating quick 或 full / 没有可跑的钉")
+
+
 def _dpe_discriminating(dpsp, plan) -> dict:
     """区分力自证的结果（规格 §7.4 的 discriminating 段）。"""
     if not dpsp:
@@ -3485,8 +3493,7 @@ def _dpe_discriminating(dpsp, plan) -> dict:
         return {"checked": 0, "total": total, "sample_rate": 0.0,
                 "killed": 0, "not_applicable": 0, "untested": 0,
                 "survivors": [],
-                "budget_note": "没跑区分力自证（--discriminating off，"
-                               "或没有可跑的钉）"}
+                "budget_note": _DPSP_NOT_RUN}
     checked = dpsp.get("checked", 0)
     total = dpsp.get("total", 0)
     survivors = []
@@ -3648,7 +3655,7 @@ def check_pin_discriminating(m: Module, plan_path: str | None, dpsp, *,
                      evidence_kind="untested")
     if not dpsp:
         chk = Check("pin-discriminating", "钉有区分力", "untested",
-                    "没跑区分力自证（--discriminating off，或没有可跑的钉）",
+                    _DPSP_NOT_RUN,
                     evidence_kind="untested")
         return _dpe_gate_apply(
             chk, *_dpe_gate(detect_plan_format(plan), "L3", lenient))

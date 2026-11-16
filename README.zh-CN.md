@@ -67,6 +67,10 @@ npx skills add mcgrapeng/attest
 | 把仓库留在本地 | `git clone … && python3 install.py` —— 软链到 `~/.agents/skills/attest` 与各 agent 目录 |
 | 只跑一次 | `python3 ~/.agents/skills/attest/scripts/readiness.py <模块路径> --repo <项目根>` |
 
+两条路装完的位置不一样：skills CLI 复制到**项目里**（`.agents/skills/attest/`），
+`install.py` 软链到**家目录**（`~/.agents/skills/attest/`）。上面那条命令走的是家目录
+那条路；用 skills CLI 装的话，路径换成 `.agents/skills/attest/scripts/readiness.py`。
+
 从 clone 装（本仓库是源头）：
 
 ```bash
@@ -114,12 +118,13 @@ jobs:
 | `module` | — | **必填。** 要检查的模块路径，相对仓库根（`src/auth`） |
 | `repo-path` | `.` | 仓库根（不在 workspace 根时用） |
 | `plan` | — | 要核对的需求测试计划 |
-| `strict` | `false` | attest 报出阻塞项时是否让 job 失败 |
+| `strict` | `false` | attest 退出码 1（阻塞项，或关键判据没测到）时是否让 job 失败 |
 | `comment` | `true` | 是否把报告发成 PR 评论 |
 
 它把证据清单写进 job summary 和 PR 评论，**默认不拦合并**（`strict: false`）——
 attest 给证据，仓库自己决定。attest 即使退出 1（有阻塞项，或关键判据没测到），
-job 仍然是绿的；改成 `strict: true` 才会让那次退出码把 job 判红。跑 action 之前先装好仓库自己的依赖：attest 跑的是
+job 仍然是绿的；改成 `strict: true` 才会让那次退出码把 job 判红。退出码 2 不一样 ——
+那是 attest 读不懂这个模块，action 无论 `strict` 是什么都会把 job 判红。跑 action 之前先装好仓库自己的依赖：attest 跑的是
 仓库自己的 test 命令。
 
 ## 命令行开关
@@ -158,8 +163,11 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
        width="574">
 </div>
 
-看最后一行：**10 项无信号**，不是「10 项通过」。没测到的判据报的是「未实测」，
-而退出码是 1 —— 因为有一项关键判据根本没测到。
+看最后一行：**10 项无信号**，不是「10 项通过」。没测到的判据报的是「未实测」。
+它下面那行是规则，不是这次运行的结论：**有阻塞项，或关键判据没测到 ⇒ 退出码 1**。
+这次两者都没有，所以退出码是 `0`。结论行里这几个数字是重叠的：待人工确认的那条同时
+也是静态信号之一，所以它们加起来不等于判据条数。去掉那处重叠，就是
+1 项实测通过 + 10 项无信号 + 6 条静态信号。
 
 `--json` 给同一份东西的机器可读版（checks + 结论计数）。`--dry-run` 只列出**将要**
 执行的仓库脚本，什么都不跑。
@@ -183,7 +191,7 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 
 17 条判据，名字列在这里：测试全绿 · 核心逻辑测试到位 · 测试能发现缺陷 · 表结构基本合规 ·
 数据流一致（跨存储对账）· 数据准确（基线对拍）· 钉有区分力 · 需求覆盖到位 ·
-向量集合属性自洽 · 测试卫生 · 导出的逻辑都有测试 · 不过度抽象 · 没有重复造轮子 ·
+向量集合属性自洽 · 测试卫生（不留残留、不靠 sleep）· 导出的逻辑都有测试 · 不过度抽象 · 没有重复造轮子 ·
 使用主流开源库 · 断言的期望值独立 · 计划与机器推导对齐 · 应有判定点覆盖到位。
 
 每一条怎么测、四档证据的说明和语言支持矩阵在
@@ -194,7 +202,7 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 **在维护中，已发 `v0.1.7`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
 不会悄悄变。MIT 许可。
 
-仓库里的每个数字都来自一条你能重跑的命令：**32 / 32** 回归套件、**10 / 10** 黄金 fixture、**6 / 6** 行为 eval、allowlist 之外 **0** 条安全发现。
+仓库里的每个数字都来自一条你能重跑的命令：**34 / 34** 回归套件、**10 / 10** 黄金 fixture、**6 / 6** 行为 eval、allowlist 之外 **0** 条安全发现。
 
 已知缺口全文见 [CHANGELOG.md](CHANGELOG.md)（已知遗留）。最要紧的三条：
 
@@ -222,9 +230,9 @@ Python 3.11+，别的都不要。attest **零第三方依赖**：它驱动的是
 让 job 变红（`strict: false`）；改成 `strict: true` 才会。
 
 **attest 会往我的仓库里写东西吗？**
-不会。它读你的仓库、跑你的脚本。有两个命令会写，都是你主动调用且有边界的：
-`req_plan.py scaffold` 在 `--out-dir` 里写测试文件；`--self-check` / `--mutation-check`
-在临时副本上工作。
+只有你叫它写的时候才写。它读你的仓库、跑你的脚本。写文件的只有一个命令，而且只写你
+指定的那个目录：`req_plan.py scaffold` 在 `--out-dir` 里写测试文件。`--self-check` /
+`--mutation-check` 会先把你的代码复制到临时目录，工作树不动。
 
 **它能替代我的覆盖率看板吗？**
 不能替代，它是用它。attest 驱动你仓库自己的覆盖率闸门，报的是你 CI 本来就产出的那个

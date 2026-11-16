@@ -75,6 +75,11 @@ Three ways in, pick the one that matches you:
 | Keep the repository | `git clone … && python3 install.py`: symlinks the skill into `~/.agents/skills/attest` and the agent directories |
 | Just run it once | `python3 ~/.agents/skills/attest/scripts/readiness.py <module path> --repo <repo root>` |
 
+Those two routes leave the skill in different places: the skills CLI copies it
+into the project (`.agents/skills/attest/`), `install.py` symlinks it into your
+home (`~/.agents/skills/attest/`). That command is the home path; from the skills
+CLI, use `.agents/skills/attest/scripts/readiness.py` instead.
+
 From a clone (this repository is the source of truth):
 
 ```bash
@@ -125,15 +130,17 @@ jobs:
 | `module` | — | **Required.** The module to check, relative to the repository root (`src/auth`) |
 | `repo-path` | `.` | The repository root, when it is not the workspace root |
 | `plan` | — | A requirement test plan to check the module against |
-| `strict` | `false` | Fail the job when attest reports blocking items |
+| `strict` | `false` | Fail the job when attest exits 1 (blocking items, or a key criterion it could not measure) |
 | `comment` | `true` | Post the report as a pull request comment |
 
 It publishes the evidence list to the job summary and the PR comment, and
 **does not block the merge by default** (`strict: false`): attest reports
 evidence, the repository decides. The job stays green even when attest exits 1
 (blocking items or an unmeasurable key criterion); with `strict: true` that
-exit code fails the job instead. Install the repository's own dependencies
-before the action runs: attest runs the repository's own test command.
+exit code fails the job instead. Exit code 2 is the exception: attest could not
+read the module, and the action fails the job whatever `strict` is set to.
+Install the repository's own dependencies before the action runs: attest runs
+the repository's own test command.
 
 ## Command-line flags
 
@@ -173,8 +180,13 @@ terminal:
 </div>
 
 Look at the last line: **10 items with no signal**, not "10 passed". A criterion
-that was not measured is reported as *not measured*, and the exit code is `1`
-because a key criterion could not be measured at all.
+that was not measured is reported as *not measured*. The line under it is the
+rule, not this run's verdict: **a blocking item, or a key criterion that could
+not be measured at all, is what makes attest exit `1`**. This run had neither,
+so it ended with exit code `0`. The counters in that line overlap: the item
+awaiting human review is also one of the static signals, so they do not add up
+to the number of criteria. Without that overlap it is 1 measured pass + 10 with
+no signal + 6 static signals.
 
 `--json` gives the same thing machine-readably (checks + verdict counters).
 `--dry-run` lists the repo scripts that *would* run, and executes nothing.
@@ -198,13 +210,18 @@ owns and no exemption explains**.
 
 ## What it measures
 
-The 17 criteria, by name: tests green · core logic is covered · the tests can
-find defects · schema is basically compliant · data agrees across stores · data
-matches the baseline · the pin has discriminating power · requirement covered ·
-vector collection attributes agree · test hygiene · every export referenced by a
-test · not over-abstracted · no reinvented wheels · mainstream dependencies ·
-assertion oracles independent · the plan matches the machine-derived decision
-points · the decision points are covered.
+The tool prints all 17 criteria in Chinese, so the names are listed here with
+an English gloss: 测试全绿 (tests green) · 核心逻辑测试到位 (core logic is covered) ·
+测试能发现缺陷 (the tests can find defects) · 表结构基本合规 (schema is basically
+compliant) · 数据流一致（跨存储对账）(data agrees across stores) ·
+数据准确（基线对拍）(data matches the baseline) · 钉有区分力 (the pin has
+discriminating power) · 需求覆盖到位 (requirement is covered) ·
+向量集合属性自洽 (vector collection attributes agree) ·
+测试卫生（不留残留、不靠 sleep）(test hygiene) · 导出的逻辑都有测试 (every export is
+referenced by a test) · 不过度抽象 (not over-abstracted) · 没有重复造轮子 (no reinvented
+wheels) · 使用主流开源库 (mainstream dependencies) · 断言的期望值独立 (assertion oracles
+independent) · 计划与机器推导对齐 (the plan matches the machine-derived decision points) ·
+应有判定点覆盖到位 (the decision points are covered).
 
 How each one is measured, the four evidence kinds and the language matrix are in
 **[docs/criteria.md](docs/criteria.md)**.
@@ -215,7 +232,7 @@ How each one is measured, the four evidence kinds and the language matrix are in
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 
-Every number in this repository comes from a command you can re-run: **32 / 32** regression suites, **10 / 10** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
+Every number in this repository comes from a command you can re-run: **34 / 34** regression suites, **10 / 10** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
 
 Known gaps, in full: [CHANGELOG.md](CHANGELOG.md). The three that
 matter most:
@@ -250,9 +267,10 @@ measured at all. The GitHub Action does not fail the job on it by default
 (`strict: false`); with `strict: true` it does.
 
 **Does attest write to my repository?**
-No. It reads your repository and runs your scripts. Two commands write, both
-opt-in and both bounded: `req_plan.py scaffold` writes test files under
-`--out-dir`, and `--self-check` / `--mutation-check` work on a temporary copy.
+Only when you tell it to. It reads your repository and runs your scripts. One
+command writes files, and only under a directory you name: `req_plan.py scaffold`
+writes test files under `--out-dir`. `--self-check` and `--mutation-check` copy
+your code into a temporary directory first, so they leave your working tree alone.
 
 **Does it replace my coverage dashboard?**
 No, it reads it. attest drives your repository's own coverage gate and reports

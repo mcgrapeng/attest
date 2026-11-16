@@ -20,8 +20,9 @@ inputs:
     required: false
   strict:
     description: >-
-      Fail the job when attest reports blocking items. Default false: attest
-      reports evidence, the repository decides what to do about it.
+      Fail the job when attest exits 1 (blocking items, or a key criterion it
+      could not measure). Off by default — attest reports evidence, the
+      repository decides what to do about it.
     required: false
     default: "false"
   comment:

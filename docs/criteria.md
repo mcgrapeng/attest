@@ -36,7 +36,7 @@ measured at all, `2` means the module could not be recognised.
 | 钉有区分力 (the pin has discriminating power) | `pin-discriminating` | Measured | **Breaks the source at the pinned point** and runs the pinned test case: red ⇒ the pin kills this class of defect; still green ⇒ **this pin cannot find it** (`--plan` + `--discriminating`; no plan ⇒ not measured) |
 | 需求覆盖到位 (requirement is covered) | `requirement` | Static signal | Reads the plan and the test files: every invariant's pin → a test case that really exists (`--plan`); an unreviewed plan downgrades this to advisory |
 | 向量集合属性自洽 (vector collection attributes agree) | `vector-schema` | Static signal | Whether one collection's dimension/metric/partition key agree across call sites; the partition key must not be a vector field |
-| 测试卫生（不留残留、不靠 sleep）(hygiene) | `hygiene` | Static signal | Fixed waits (a source of flakiness) and database writes without cleanup (a source of leftovers) |
+| 测试卫生（不留残留、不靠 sleep）(hygiene) | `hygiene` | Static signal | Fixed waits (a source of flakiness) and database writes without cleanup (a source of leftovers). A test file that really does not write to a database says so explicitly — `/* attest:no-db-writes reason="…" */` — the reason is required and shows up in the report |
 | 导出的逻辑都有测试 (every export is referenced by a test) | `uncovered-exports` | Static signal | Exported functions/classes with zero references in the tests are named |
 | 不过度抽象 (not over-abstracted) | `extensibility` | Static signal | Exported symbols with almost no call sites anywhere in the repo |
 | 没有重复造轮子 (no reinvented wheels) | `no-wheels` | Static signal | Same-named implementations across the repo |
@@ -53,7 +53,7 @@ marked *not measured* when there is no connection, never *measured*.
 | | Plan generation | Coverage measurement | Export-reference criterion | Cross-store reconciliation | Real-backend itest lane |
 | --- | --- | --- | --- | --- | --- |
 | TypeScript / JavaScript | ✅ | ✅ node / vitest / jest | ✅ | ✅ | ✅ |
-| Python | ✅ | ✅ pytest-cov | ✅ module-level `def`/`class` | ✅ | ✅ |
+| Python | ✅ | ✅ pytest-cov | ✅ module-level `def`/`class` | ✅ | runs, not judged — pytest's output is not a shape attest can parse, so the lane stays *not measured* |
 | Rust / Go | partial (reconnaissance is reused) | — module not recognised | — | — | — |
 
 The plan generator handles Rust and Go exports in its reconnaissance, and

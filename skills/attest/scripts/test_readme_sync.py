@@ -104,7 +104,7 @@ def main() -> int:
         code_n = len(json.loads(out.stdout)["checks"])
     except Exception:
         pass
-    expect(code_n == 17, f"代码里 17 条判据（实际 {code_n}）")
+    expect(code_n == 18, f"代码里 18 条判据（实际 {code_n}）")
     # README 自己写的判据数也要跟着变（FAQ 里的答案最容易在这上面说谎）
     for label, text, pat in (("英文", en, r"(\d+)\s+criteria"),
                              ("中文", zh, r"(\d+)\s*条判据")):

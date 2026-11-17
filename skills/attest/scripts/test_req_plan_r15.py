@@ -256,6 +256,32 @@ def main() -> int:
     expect("没人认领" in out_missing,
            "八项没人认领 ⇒ check 提醒（不报红）")
 
+    print("\ntest_reconcile_generates_script_from_the_plan")
+    rec_plan = write(mkdtemp() / "rec.md", """# 测试计划
+
+## 数据一致性
+
+| 数据 | 权威源 | 镜像/派生 | 一致性怎么验（钉） |
+| --- | --- | --- | --- |
+| 记忆事实 | PG `agent_memory`（`src/models.ts`） | Milvus 集合 `lumen_mem_<租户>` | src/x.itest.ts |
+| 记忆正文 | PG `agent_memory.text` | Milvus `text` 字段 | src/x.itest.ts |
+""")
+    out_ts = mkdtemp() / "scripts" / "reconcile-memory.ts"
+    r_rc = run("reconcile", str(rec_plan), "--repo", str(mkdtemp()),
+               "--out", str(out_ts))
+    expect(r_rc.returncode == 0, "reconcile 生成成功")
+    src = out_ts.read_text(encoding="utf-8") if out_ts.exists() else ""
+    expect("pgTable: 'agent_memory'" in src, "表名从计划里抽出来了")
+    expect("bodyColumn: 'text'" in src,
+           "计划里写了「表.列」⇒ 那一列直接填成要比对的正文列")
+    expect("collection: 'lumen_mem_<租户>'" in src, "集合名从计划里抽出来了")
+    expect("<待填" in src, "抽不出来的留成占位")
+    expect("拒绝运行" in src, "没填完时脚本拒绝运行（不静默绿）")
+    expect("计划原文" in src, "生成物里保留计划原文，agent 填的时候看得见")
+    r_rc2 = run("reconcile", str(rec_plan), "--repo", str(mkdtemp()),
+                "--out", str(out_ts))
+    expect(r_rc2.returncode == 1, "已存在的文件不覆盖（没有 --force）")
+
     print()
     for d in TMPDIRS:
         shutil.rmtree(d, ignore_errors=True)

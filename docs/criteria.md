@@ -1,6 +1,6 @@
 # The criteria — what attest measures, and what it refuses to measure
 
-`attest` runs 17 criteria against a module. Each one produces **evidence**, and
+`attest` runs 18 criteria against a module. Each one produces **evidence**, and
 the evidence is sorted into four kinds. The report never says "ready to ship" —
 that decision rests on things no tool can read off the code, and the report
 lists them under **本工具不判定**.
@@ -23,7 +23,7 @@ has to call it) and **无信号** (not measured). Exit code `0` means no blockin
 items, `1` means there are blocking items or a key criterion could not be
 measured at all, `2` means the module could not be recognised.
 
-## The 17 criteria
+## The 18 criteria
 
 | Criterion | key | Evidence kind | How it is measured |
 | --- | --- | --- | --- |
@@ -43,6 +43,7 @@ measured at all, `2` means the module could not be recognised.
 | 使用主流开源库 (uses mainstream open-source libraries) | `open-source` | Static signal | The module's real dependency list (path aliases and the standard library excluded) |
 | 断言的期望值独立 (assertion oracles are independent) | `oracle` | Static signal | Assertions whose expected value comes from the system under test ⇒ advisory |
 | 计划与机器推导对齐 (the plan matches the machine-derived decision points) | `plan-alignment` | Static signal | The decision points are **reverse-derived from the source** and compared with the plan's decision-point column in both directions: machine-only, plan-only, and pins that do not reference the module at all (`--plan`) |
+| 不变式有判定点 (every invariant reaches a decision point) | `invariant-coverage` | Static signal | The other direction of the decision-point reconciliation: every invariant in the plan has at least one decision point claiming it. An invariant with none is only pinned by a single test case, so the paths behind it are probably not covered |
 | 应有判定点覆盖到位 (the decision points are covered) | `decision-coverage` | Static signal | Every high-risk decision point in the plan has an owning invariant **or** a written exemption, and the landing point (file::case) really exists (`--plan`) |
 
 The evidence kind is assigned **per run**: a criterion that needs a database is

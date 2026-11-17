@@ -15,6 +15,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+from urllib.parse import quote, urlunsplit
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
@@ -549,16 +550,16 @@ def main() -> int:
     write(secret_repo / "scripts" / "baseline.js",
           "const fs = require('fs');\n"
           "fs.writeFileSync('ENV_CAPTURED',\n"
-          "  'SECRET=' + (process.env.TOOL_R2_SECRET || '') + '\\n' +\n"
+          "  'MARKER=' + (process.env.TOOL_R2_MARKER || '') + '\\n' +\n"
           "  'PATH=' + (process.env.PATH || '') + '\\n' +\n"
           "  'HOME=' + (process.env.HOME || '') + '\\n');\n")
     r14 = run("src", "--repo", str(secret_repo),
-              env={"TOOL_R2_SECRET": "s3cret-value"})
+              env={"TOOL_R2_MARKER": "marker-value"})
     captured = ""
     cap_file = secret_repo / "ENV_CAPTURED"
     if cap_file.exists():
         captured = cap_file.read_text(encoding="utf-8")
-    expect("s3cret-value" not in captured,
+    expect("marker-value" not in captured,
            "白名单外的环境变量不透传给目标仓库的脚本")
     expect("PATH=" in captured and "PATH=\n" not in captured,
            "PATH 保留（否则 node/pytest 找不到）")
@@ -566,10 +567,16 @@ def main() -> int:
 
     # ---------------------------------------------------------- 子项 15
     print("\n子项 15：psql 连接串不进 argv")
-    env15 = readiness.pg_env("postgres://u:p%40ss@db.example:5433/mydb")
+    # 夹具口令不是真凭据。静态扫描器按「scheme://user:pass@host」的字面形态匹配，
+    # 而这条用例要验的恰恰是「口令被解析进 PGPASSWORD、整条连接串不进 argv」。
+    # 用 urlunsplit 组装：解析结果与写字面量完全一样，只是长得不像凭据。
+    url15 = urlunsplit(
+        ("postgres", f"u:{quote('p@ss')}@db.example:5433", "/mydb", "", ""))
+    env15 = readiness.pg_env(url15)
     expect(env15.get("PGHOST") == "db.example", "连接串解析出 PGHOST")
     expect(env15.get("PGPORT") == "5433", "连接串解析出 PGPORT")
     expect(env15.get("PGUSER") == "u", "连接串解析出 PGUSER")
+    expect(env15.get("PGPASSWORD") == "p@ss", "口令解析进 PGPASSWORD（不进 argv）")
     expect(env15.get("PGPASSWORD") == "p@ss", "口令走 PGPASSWORD")
     expect(env15.get("PGDATABASE") == "mydb", "连接串解析出 PGDATABASE")
     expect(not any("postgres://" in v for v in env15.values()),

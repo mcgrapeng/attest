@@ -164,7 +164,7 @@ node 的 `--experimental-test-coverage` 在**用了 `mock.module()` 的项目**�
 实测（一个向量记忆模块）：生产租户 ✅ 一致；两个测试租户分别有 50 行和 4 行
 没有向量 —— 前者是测试用例**直接 DB insert** 的配额占位，后者是**注入镜像失败**
 造出来的 —— 两个都不是缺陷。按租户口径判之后，这条判据才准。
-完整案例见 [examples/cross-store-reconciliation.md](../examples/cross-store-reconciliation.md)。
+完整案例见同包的 examples/cross-store-reconciliation.md。
 
 ## 「跑不起来」和「不达标」必须分开
 

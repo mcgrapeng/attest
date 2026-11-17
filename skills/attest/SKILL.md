@@ -1,16 +1,28 @@
 ---
 name: attest
-description: Plan and verify a requirement's test suite. Use when writing or reviewing a feature's test plan, when a teammate says a feature is tested but the pinned case is not there, when data drifts between two stores and you must know which tenant drifted, when asked whether a module can ship, or when choosing which test dimensions to cover. Triggers: 写测试计划、覆盖哪些测试维度、哪些 helper 能复用、核一遍测试覆盖、这个模块能不能交付、能不能上线、交付就绪度、测试就绪度、跨存储数据有没有漂、两边对不上、生成测试骨架。
+description: "Plan and verify a requirement's test suite. Use when writing or reviewing a feature's test plan, when data drifts between two stores and you need to know which tenant drifted, when asked whether a module can ship, or when choosing which test dimensions to cover. Not for reviewing ordinary application code, and not for performance, security or ops review. Triggers: 写测试计划、覆盖哪些测试维度、这个模块能不能交付、交付就绪度、跨存储数据有没有漂、生成测试骨架。"
 license: MIT
+version: "1.0.0"
 metadata:
-  author: mcgrapeng
-  version: "1.0"
+  author: mcgrapeng <mcgrapengzhang@gmail.com>
+  version: "1.0.0"
+  tags: [testing, test-plan, delivery, coverage, cross-store]
 ---
 
 # 需求级测试计划
 
-接到一个需求时，产出一份**可核对的**测试工具集：每条行为契约有钉、每个关键流程
-有测试落点、每份产出数据有一致性核对方式、已有能力先复用。
+## Purpose
+
+把一条需求变成一份**可核对的**测试工具集：每条行为契约有钉、每个关键流程有测试落点、
+每份产出数据有一致性核对方式、已有能力先复用；然后用一条命令把这个模块的交付前提
+逐条测出来，测不出来的说清缺什么，而不是报个通过。
+
+## Prerequisites
+
+- **Python 3.11+，无第三方依赖。** 脚本只跑目标仓库自己的工具链（node、pytest…）。
+- **目标仓库的依赖要装好**：attest 跑的是那个仓库的 test 命令，依赖没装 ⇒ 报「未实测」。
+- **跨存储的模块**：要能连上 PG 与派生存储（向量库/对象存储），否则对账判「未实测」。
+- 装了 skill 之后脚本在 `$SKILL_DIR/scripts/`（`~/.agents/skills/attest/scripts/`）。
 
 ## 一条命令：交付就绪度判定
 
@@ -123,7 +135,20 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> \
 
 每一步写成什么样、哪些写法会被判红：[references/workflow.md](references/workflow.md)。
 
-## 常用命令
+## Usage（常用命令）
+
+脚本都直接用 `python3` 跑（没有 `run_script` 包装层）—— 命令如下：
+
+| Script | 用途 | 什么时候跑 |
+| --- | --- | --- |
+| `scripts/req_plan.py new` | 生成计划骨架（扫存储、helper、测试车道、判定点） | 拿到需求第一步 |
+| `scripts/req_plan.py upgrade` | 把模块级维度表换成判定点粒度 | 计划写完不变式与矩阵之后 |
+| `scripts/req_plan.py assign` | 拉待填判定点清单 / 把答案校验后写回 | 计划是 v2（判定点粒度）时 |
+| `scripts/req_plan.py scaffold` | 生成测试文件骨架（断言留 TODO） | 计划写完之后 |
+| `scripts/req_plan.py check` | 核对每一个钉（文件、用例名、维度、豁免） | 交给别人看之前 |
+| `scripts/req_plan.py reconcile` | 按计划的数据一致性节生成对账脚本骨架 | 跨存储的模块 |
+| `scripts/readiness.py` | 交付就绪度判定（跑仓库自己的车道与闸） | 验收时 |
+| `scripts/selfcheck.py` | 工具自检：往副本注入已知缺陷，验证判据会翻红 | 改了判据逻辑之后 |
 
 ```bash
 # 1. 生成计划骨架 / 2. 生成测试骨架 / 3. 核对计划 / 4. 交付就绪度判定
@@ -137,6 +162,33 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> [--plan <�
 [references/commands.md](references/commands.md)。
 
 常见错法（会判红或产生假绿的写法）：[references/pitfalls.md](references/pitfalls.md)。
+
+## Examples（案例）
+
+- **跨存储模块的完整做法**（真实案例：权威源、镜像、对账脚本、判据怎么钉）：
+  [examples/cross-store-reconciliation.md](examples/cross-store-reconciliation.md)
+
+## 出错了怎么办
+
+| 现象 | 多半是 | 怎么办 |
+| --- | --- | --- |
+| 退出码 1 | 有阻塞项，或关键判据没测到 | 报告里列了是哪些：红的先清，绿的别动 |
+| 退出码 2 | 读不懂这个模块（路径错/语言不支持） | 报错里说了「按什么扩展名识别」，换路径或换工具 |
+| 判据是「未实测」 | 缺前置条件（库连不上、依赖没装、没给 `--plan`） | 报告里点名缺哪个：补上再跑 |
+| 脚本报「没有认出的测试车道」 | 仓库的 test 脚本没被认出来 | 车道在计划里手填，见 references/workflow.md |
+| 报红但看不出该改哪 | 钉指错了地方（文件/用例名/归属） | `check` 的每条红都写了「怎么改」 |
+
+**红的别改钉来骗过检查** —— 钉该指哪就指哪。改钉 = 把没测到的东西说成测到了。
+
+## Limitations
+
+- **它不是「能不能交付给客户」的裁决**：需求是否被正确理解、产品行为、性能、安全、
+  可用性、运维就绪、并发正确性、容量与规模行为 —— 这八项按设计不判，报告里固定列出。
+- **只读 TS/JS 与 Python**：就绪度检查器只认这两族（Rust/Go 只到计划生成器）。
+- **不替代覆盖率看板**：它驱动仓库自己的闸门，读那个数字；仓库没有闸门时它自己测作为兜底。
+- **静态信号永远不能单独支撑「通过」**：需要一条实测判据通过。
+- **它不写断言**：`scaffold` 只生成结构与用例名，断言留给读过需求的 agent 或人。
+- **它不改你的仓库**（除 `scaffold`/`new`/`reconcile` 按你指定的位置写文件）。
 
 ## references
 

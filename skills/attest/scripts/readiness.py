@@ -23,6 +23,7 @@ from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from req_plan import (  # noqa: E402
+    NOT_JUDGED_ITEMS,
     _vague_waiver,
     _waiver_for,
     case_matches,
@@ -132,18 +133,7 @@ class Check:
 # 为什么要有：工具只判机械判据（测试绿、覆盖率、跨存储对账、表结构…）。
 # 需求本身对不对、产品行为、性能、安全、可用性、运维就绪都不在射程里。
 # 列出来是让读报告的人知道边界在哪，而不是以为"全绿了就能交付"。
-NOT_JUDGED = (
-    "需求是否被正确理解",
-    "产品行为是否正确",
-    "性能",
-    "安全",
-    "可用性",
-    "运维就绪",
-    # 判定点引擎判的是「有没有判定点、判点有没有被钉住」，
-    # 不是「并发下对不对」「扛不扛得住量」—— 后两样本工具没有条件判。
-    "并发正确性",
-    "容量与规模行为",
-)
+NOT_JUDGED = NOT_JUDGED_ITEMS
 
 
 @dataclass
@@ -4143,6 +4133,39 @@ def run_readiness(args) -> int:
     print("── 本工具不判定 " + "─" * 32)
     print("  " + " · ".join(NOT_JUDGED))
     print("  上面只是测试就绪度的实测结果；「能不能交付」仍要人判断。")
+    print()
+
+    # ── 交付前置条件 ──────────────────────────────────────────────────
+    # 三条：证据齐（没阻塞、关键判据测到了）、计划已确认（人或 agent 都行）、
+    # 本工具不判定的八项各有归属。**这不是新的一条判据** —— 判据条数不变，
+    # 它只是把「证据 → 能不能进交付流程」这段缺口显式化。
+    print("── 交付前置条件 " + "─" * 30)
+    pre_ok = True
+    if not fails and not key_untested:
+        print("  ✓ 证据没有阻塞项，关键判据也测到了")
+    else:
+        pre_ok = False
+        extra = f"、{len(key_untested)} 条关键判据没测到" if key_untested else ""
+        print(f"  ✗ 证据还差：{len(fails)} 项阻塞{extra}")
+    if dpe_plan is None:
+        pre_ok = False
+        print("  ✗ 没给计划文件 ⇒ 需求覆盖与确认无从谈起（--plan）")
+    else:
+        if dpe_plan.reviewed:
+            who = getattr(dpe_plan, "review_by", "") or ""
+            print("  ✓ 计划已确认" + (f"（确认者：{who}）" if who else ""))
+        else:
+            pre_ok = False
+            print(f"  ✗ 计划未经确认：{dpe_plan.review_note}")
+        missing = list(getattr(dpe_plan, "not_judged_missing", []) or [])
+        if not missing:
+            print(f"  ✓ 本工具不判定的 {len(NOT_JUDGED)} 项都有人认领并给了依据")
+        else:
+            pre_ok = False
+            print(f"  ✗ 本工具不判定的 {len(missing)} 项没人认领："
+                  + "、".join(missing))
+    print("  ⇒ " + ("前置条件齐了，可以进交付流程（最后的决定仍然是人的）"
+                     if pre_ok else "前置条件不齐，还不能进交付流程"))
     print()
 
     print(f"结论：{len(fails)} 项阻塞 · {len(warns)} 项待人工确认 · "

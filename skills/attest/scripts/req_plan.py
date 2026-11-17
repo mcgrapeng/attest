@@ -533,6 +533,33 @@ class Plan:
     # 但"没人签过字"是一条必须出现在报告里的事实。
     reviewed: bool = False
     review_note: str = ""
+    # 「确认」节里的表格行（审什么 | 谁 | 什么时候 | 结论）—— 谁确认的要能进报告
+    review_rows: list[list[str]] = field(default_factory=list)
+    # 谁确认了（报告里要写出来：人还是哪个 agent）
+    review_by: str = ""
+    # 「本工具不判定项的归属」节：{项 | 由谁判 | 依据}
+    # 这八项本工具判不了，但**必须有人（或某个工具）认领并给出依据** ——
+    # 否则"通过"只是"没人反对"，不是"有人签过字"。这是交付前置条件之一。
+    not_judged_owners: list[list[str]] = field(default_factory=list)
+    # 八项里还没人认领的
+    not_judged_missing: list[str] = field(default_factory=list)
+
+
+# 本工具**不判定**的事 —— 固定清单，每份报告都列。
+# 计划里的「本工具不判定项的归属」节要逐项写明「由谁判、依据是什么」，
+# 否则交付前置条件不齐（readiness 会在报告里说清缺哪几项）。
+NOT_JUDGED_ITEMS = (
+    "需求是否被正确理解",
+    "产品行为是否正确",
+    "性能",
+    "安全",
+    "可用性",
+    "运维就绪",
+    # 判定点引擎判的是「有没有判定点、判点有没有被钉住」，
+    # 不是「并发下对不对」「扛不扛得住量」—— 后两样本工具没有条件判。
+    "并发正确性",
+    "容量与规模行为",
+)
 
 
 # ---------------------------------------------------------------- 计划格式
@@ -638,18 +665,24 @@ def _vague_waiver(reason: str) -> bool:
 
 
 def _parse_review_section(plan: Plan) -> None:
-    """读「人工确认」节：填了（谁 + 什么时候）才算有人读过。"""
+    """读「确认」节：填了（谁 + 什么时候 + 结论）才算有人读过。
+
+    确认者**可以是人，也可以是 agent** —— 零人工流程里由 agent 确认。
+    但确认者必须写清「谁」与「结论」：模型的确认也是一条可追溯的记录，
+    而不是"没人反对"。
+    """
     lines = plan.text.splitlines()
     start = None
     for i, ln in enumerate(lines):
         if ln.strip().startswith("## ") and ("人工确认" in ln
                                             or "人工复核" in ln
-                                            or "人工审" in ln):
+                                            or "人工审" in ln
+                                            or ("确认" in ln and "不判定" not in ln)):
             start = i
             break
     if start is None:
         plan.reviewed = False
-        plan.review_note = "计划里没有「人工确认」节 ⇒ 没人对需求理解签过字"
+        plan.review_note = "计划里没有「确认」节 ⇒ 没人（或 agent）对需求理解签过字"
         return
     body = []
     for ln in lines[start + 1:]:
@@ -659,14 +692,29 @@ def _parse_review_section(plan: Plan) -> None:
     text = "\n".join(body)
     if not text.strip():
         plan.reviewed = False
-        plan.review_note = "「人工确认」节是空的 ⇒ 没人对需求理解签过字"
+        plan.review_note = "「确认」节是空的 ⇒ 没人（或 agent）对需求理解签过字"
         return
+    # 表格形式：审什么 | 谁 | 什么时候 | 结论 —— 把「谁」记下来进报告
+    rows = []
+    for ln in body:
+        if not ln.strip().startswith("|"):
+            continue
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        if len(cells) < 2 or set("".join(cells)) <= set("- :"):
+            continue
+        if cells[0] in ("审什么", "项"):
+            continue
+        rows.append(cells)
+    plan.review_rows = rows
+    if rows:
+        who = rows[0][1] if len(rows[0]) > 1 else ""
+        plan.review_by = "" if "<待填" in who else who
     if "<待填" in text or "待填" in text:
         plan.reviewed = False
-        plan.review_note = "「人工确认」节还是模板占位 ⇒ 没人对需求理解签过字"
+        plan.review_note = "「确认」节还是模板占位 ⇒ 没人（或 agent）对需求理解签过字"
         return
     plan.reviewed = True
-    plan.review_note = "计划已有人工确认（需求理解由人负责，不是本工具判的）"
+    plan.review_note = "计划已有人（或 agent）确认（需求理解不由本工具判）"
 
 
 def parse_plan(path: Path) -> Plan:
@@ -730,6 +778,8 @@ def parse_plan(path: Path) -> Plan:
                 kinds.append("newcap")
             if any(k in low for k in ("车道", "lane")):
                 kinds.append("lane")
+            if "不判定" in low:
+                kinds.append("notjudged")
             # 「## 新建能力（先论证不能复用）」这类标题里天然带"复用"，
             # 不算混节 —— 把 reuse 从 newcap 标题里摘掉。
             if "newcap" in kinds and "reuse" in kinds:
@@ -859,7 +909,51 @@ def parse_plan(path: Path) -> Plan:
         if "constraint" in row_kinds:
             plan.constraint_text += " ".join(cells) + "\n"
     _parse_review_section(plan)
+    _parse_not_judged_section(plan)
     return plan
+
+
+def _parse_not_judged_section(plan: Plan) -> None:
+    """读「本工具不判定项的归属」节：{项 | 由谁判 | 依据}。
+
+    独立解析，不走通用表格机制 —— 这张表的表头（「由谁判」「依据」）不在
+    表头词表里，走通用机制会把表头当成数据行。
+
+    结果两个字段：
+      owners   —— 计划里写了的行
+      missing  —— NOT_JUDGED_ITEMS 里**没人认领**的那些
+    """
+    lines = plan.text.splitlines()
+    start = None
+    for i, ln in enumerate(lines):
+        if ln.strip().startswith("## ") and "不判定" in ln:
+            start = i
+            break
+    if start is None:
+        plan.not_judged_missing = list(NOT_JUDGED_ITEMS)
+        return
+    rows = []
+    for ln in lines[start + 1:]:
+        if ln.strip().startswith("## "):
+            break
+        if not ln.strip().startswith("|"):
+            continue
+        cells = [c.strip() for c in ln.strip().strip("|").split("|")]
+        if len(cells) < 2 or set("".join(cells)) <= set("- :"):
+            continue
+        if cells[0] in ("项", "项目", "不判定项", "不判定的事项"):
+            continue                       # 表头
+        rows.append(cells)
+    plan.not_judged_owners = rows
+    owned = set()
+    for cells in rows:
+        item = cells[0]
+        who = cells[1] if len(cells) > 1 else ""
+        basis = cells[2] if len(cells) > 2 else ""
+        if "<待填" in who or "<待填" in basis or not who.strip():
+            continue
+        owned.add(item)
+    plan.not_judged_missing = [i for i in NOT_JUDGED_ITEMS if i not in owned]
 
 
 # ---------------------------------------------------------------- 校验
@@ -2048,14 +2142,24 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
                     "别引用不存在的东西",
                 ))
 
-    # 「人工确认」没填 ⇒ 提醒（不报红）：需求理解对不对本工具判不了，
+    # 「确认」没填 ⇒ 提醒（不报红）：需求理解对不对本工具判不了，
     # 但"没人读过这份计划"是必须让人知道的事。
     if not plan.reviewed:
         fs.append(Finding(
-            "warn", "人工确认",
-            plan.review_note or "计划未经人工确认",
-            "让读需求的人确认一遍不变式清单与覆盖矩阵，并填上「人工确认」节 —— "
-            "钉得实不代表理解得对，那一环只能由人签",
+            "warn", "确认",
+            plan.review_note or "计划未经确认",
+            "确认一遍不变式清单与覆盖矩阵，并填上「确认」节 —— 人或 agent 都行，"
+            "但要写清谁确认、依据是什么；钉得实不代表理解得对",
+        ))
+    # 「本工具不判定项的归属」没填齐 ⇒ 提醒（不报红）：这八项本工具判不了，
+    # 但"没人认领"与"有人认领并给了依据"是两件事 —— 交付前置条件靠它区分。
+    if plan.not_judged_missing:
+        fs.append(Finding(
+            "warn", "本工具不判定项的归属",
+            f"{len(plan.not_judged_missing)} 项没人认领："
+            + "、".join(plan.not_judged_missing),
+            "这八项本工具判不了，但必须有人（或某个工具）认领并写明依据 —— "
+            "填进计划的「本工具不判定项的归属」节；没人认领的「通过」只是没人反对",
         ))
     return fs
 
@@ -2134,18 +2238,35 @@ Python 仓读 Makefile 目标与 tox.ini 环境；别自己编）：
 
 <待填：这个需求明确不做的事>
 
-## 人工确认
+## 确认（人 或 agent 都可以）
 
-**这一节是给人用的。** 需求理解对不对，本工具判不了（那是人的判断）；
-但"这份计划有没有被人读过并确认过"必须留下痕迹 —— 否则报告里的"需求覆盖到位 ✓"
-只说明不变式都钉上了，不说明不变式是对的。
+**确认者可以是人，也可以是 agent** —— 全自动流程里由 agent 确认。但确认者必须写清
+「谁」与「结论」：模型的确认是一条**可追溯的记录**，不是"没人反对"。
 
-| 审什么 | 谁 | 什么时候 | 结论 |
+| 审什么 | 谁确认 | 什么时候 | 结论 |
 | --- | --- | --- | --- |
-| 不变式清单与需求一致 | <待填：谁读的> | <待填：日期> | <待填：一致 / 有出入（改哪条）> |
-| 覆盖矩阵覆盖了全部关键流程 | <待填：谁读的> | <待填：日期> | <待填：覆盖到 / 缺哪条> |
+| 不变式清单与需求一致 | <待填：人或 agent 的名字> | <待填：日期> | <待填：一致 / 有出入（改哪条）> |
+| 覆盖矩阵覆盖了全部关键流程 | <待填：人或 agent 的名字> | <待填：日期> | <待填：覆盖到 / 缺哪条> |
+| 判定点的归属与豁免理由站得住 | <待填：人或 agent 的名字> | <待填：日期> | <待填：站得住 / 要改> |
 
-没填这一节 ⇒ `check` 会提醒，`readiness` 的报告会明说"计划未经人工确认"。
+没填这一节 ⇒ `check` 会提醒，`readiness` 的报告会明说「计划未经确认」。
+
+## 本工具不判定项的归属
+
+这八项本工具判不了，但**必须有人（或某个工具）认领并给出依据** —— 否则"通过"只是
+"没人反对"，不是"有人签过字"。这一节填齐，交付前置条件才齐（readiness 会在报告里
+逐项说清缺哪几项）。
+
+| 项 | 由谁判 | 依据 |
+| --- | --- | --- |
+| 需求是否被正确理解 | <待填：人或 agent> | <待填：怎么判的> |
+| 产品行为是否正确 | <待填：人或 agent> | <待填：怎么判的> |
+| 性能 | <待填：人或 agent> | <待填：怎么判的> |
+| 安全 | <待填：人或 agent> | <待填：怎么判的> |
+| 可用性 | <待填：人或 agent> | <待填：怎么判的> |
+| 运维就绪 | <待填：人或 agent> | <待填：怎么判的> |
+| 并发正确性 | <待填：人或 agent> | <待填：怎么判的> |
+| 容量与规模行为 | <待填：人或 agent> | <待填：怎么判的> |
 """
 
 

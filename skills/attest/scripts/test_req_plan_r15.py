@@ -219,6 +219,43 @@ def main() -> int:
     text3 = plan3.read_text(encoding="utf-8") if plan3.exists() else ""
     expect("leak" not in text3, "仓库外的模块不被读进计划")
 
+    print("\ntest_delivery_precondition_sections")
+    # 「确认」节：确认者可以是人，也可以是 agent —— 记下是谁
+    ok_sec = """
+## 确认（人 或 agent 都可以）
+
+| 审什么 | 谁确认 | 什么时候 | 结论 |
+| --- | --- | --- | --- |
+| 不变式清单与需求一致 | claude-opus-5 | 2026-11-17 | 一致 |
+"""
+    p_ok = parse_plan(write(mkdtemp() / "p.md", plan_text("", ok_sec)))
+    expect(p_ok.reviewed, "「确认」节填了 ⇒ 算确认过")
+    expect(p_ok.review_by == "claude-opus-5", "确认者被记下来（人 or agent）")
+    p_ph = parse_plan(write(mkdtemp() / "p.md", plan_text(
+        "", "\n## 确认（人 或 agent 都可以）\n\n| 审什么 | 谁确认 | 什么时候 | 结论 |\n"
+           "| --- | --- | --- | --- |\n| 不变式清单 | <待填> | <待填> | <待填> |\n")))
+    expect(not p_ph.reviewed, "「确认」节还是占位 ⇒ 不算确认过")
+
+    # 「本工具不判定项的归属」节：八项各由谁判、依据是什么
+    from req_plan import NOT_JUDGED_ITEMS  # noqa: E402
+    rows = "\n".join(f"| {i} | 人 | 评审记录 |" for i in NOT_JUDGED_ITEMS)
+    nj = f"\n## 本工具不判定项的归属\n\n| 项 | 由谁判 | 依据 |\n| --- | --- | --- |\n{rows}\n"
+    p_nj = parse_plan(write(mkdtemp() / "p.md", plan_text("", nj)))
+    expect(len(p_nj.not_judged_owners) == len(NOT_JUDGED_ITEMS),
+           "归属表的行被解析到")
+    expect(not p_nj.not_judged_missing, "八项都有人认领 ⇒ 没有缺口")
+    half = "\n".join(f"| {i} | 人 | 评审记录 |" for i in NOT_JUDGED_ITEMS[:4])
+    p_half = parse_plan(write(mkdtemp() / "p.md", plan_text(
+        "", "\n## 本工具不判定项的归属\n\n| 项 | 由谁判 | 依据 |\n| --- | --- | --- |\n"
+           f"{half}\n| <待填> | <待填> | <待填> |\n")))
+    expect(len(p_half.not_judged_missing) == len(NOT_JUDGED_ITEMS) - 4,
+           "没认领的项被数出来")
+    out_nj = check(mk_repo(), plan_text("", nj))
+    expect("没人认领" not in out_nj, "八项都认领了 ⇒ check 不提醒")
+    out_missing = check(mk_repo(), plan_text("", ""))
+    expect("没人认领" in out_missing,
+           "八项没人认领 ⇒ check 提醒（不报红）")
+
     print()
     for d in TMPDIRS:
         shutil.rmtree(d, ignore_errors=True)

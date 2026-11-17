@@ -48,6 +48,23 @@ measured at all, `2` means the module could not be recognised.
 The evidence kind is assigned **per run**: a criterion that needs a database is
 marked *not measured* when there is no connection, never *measured*.
 
+## The delivery preconditions — a summary, not another criterion
+
+The report ends with a **交付前置条件** section. It is **not** an eighteenth
+criterion: the criterion count stays the same and the exit code does not change.
+It makes explicit the gap between "the evidence is green" and "this may go into
+the delivery pipeline":
+
+| Precondition | Where it comes from |
+| --- | --- |
+| The evidence has no blocking items and the key criteria were measured | this run |
+| The plan is confirmed — by a person **or by an agent**, recorded with who and on what basis | the plan's 确认 section |
+| Every item this tool does not judge has an owner and a basis | the plan's 本工具不判定项的归属 section |
+
+The last one exists because the eight items above are out of scope **by design**.
+That is not the same as nobody being responsible for them: a plan that leaves
+them unclaimed reports "nobody has claimed these", and the report says so.
+
 ## Language support
 
 | | Plan generation | Coverage measurement | Export-reference criterion | Cross-store reconciliation | Real-backend itest lane |

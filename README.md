@@ -103,6 +103,16 @@ gate, reconciliation script and schema queries, then prints the four kinds of
 evidence and one exit code. `--plan <plan>` adds the decision-point criteria;
 without it those three are reported as *not measured*, not as passed.
 
+**Nobody has to be in the loop.** An agent that reads the requirement can drive
+both lines end to end: derive the invariants from the requirement, fill the plan
+in batches with `assign`, write the assertions that `scaffold` leaves as TODO,
+confirm the plan (the 确认 section accepts an agent, and the report says who
+confirmed it), claim the eight items this tool does not judge, and run the
+readiness check. The report ends with a **delivery precondition** summary — the
+evidence is green, the plan is confirmed, and nothing is unclaimed — which is
+what "may go into the delivery pipeline" means. It is a summary, not another
+criterion: the criteria count and the exit code do not change.
+
 ## Install
 
 ```bash
@@ -162,7 +172,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.12
+      - uses: mcgrapeng/attest@v0.1.13
         with:
           module: src/auth
 ```
@@ -295,7 +305,7 @@ How each one is measured in full, and the language matrix, are in
 
 ## Status
 
-**Actively developed. Released as `v0.1.12`.** The criteria and the skill
+**Actively developed. Released as `v0.1.13`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 

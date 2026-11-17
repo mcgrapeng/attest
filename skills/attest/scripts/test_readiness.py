@@ -335,6 +335,66 @@ def main() -> int:
           "});\n")
     r18 = run("src", "--repo", str(hyg3))
     expect("没给理由" in r18.stdout, "豁免缺理由被报出来")
+
+    print("\n交付前置条件：证据齐 + 计划已确认 + 八项有归属 ⇒ 可以进交付流程")
+    pre = mkdtemp()
+    write(pre / "package.json", json.dumps({
+        "scripts": {"test": "node --test 'src/**/*.test.ts'"}}))
+    write(pre / "src" / "a.ts",
+          "export function add(a: number): number { return a + 1; }\n")
+    write(pre / "src" / "a.test.ts",
+          "import { test } from 'node:test';\n"
+          "import assert from 'node:assert/strict';\n"
+          "import { add } from './a.ts';\n"
+          "test('adds', () => { assert.equal(add(1), 2); });\n")
+    items = "\n".join(f"| {i} | 人 | 评审记录 |" for i in (
+        "需求是否被正确理解", "产品行为是否正确", "性能", "安全",
+        "可用性", "运维就绪", "并发正确性", "容量与规模行为"))
+    plan_ok = write(pre / "docs" / "p.md", f"""# 测试计划
+
+目标模块：`src`
+
+## 不变式清单
+
+| # | 不变式 | 钉在哪 |
+| --- | --- | --- |
+| I1 | 加一 | src/a.test.ts::adds |
+
+## 覆盖矩阵
+
+| 流程 | 落点 | 车道 |
+| --- | --- | --- |
+| 写入 | src/a.test.ts::adds | unit |
+
+## 核心逻辑细节
+
+| 维度 | 细节 | 落点 |
+| --- | --- | --- |
+| 边界 | 加一 | src/a.test.ts::adds |
+
+## 确认（人 或 agent 都可以）
+
+| 审什么 | 谁确认 | 什么时候 | 结论 |
+| --- | --- | --- | --- |
+| 不变式清单与需求一致 | claude-opus-5 | 2026-11-17 | 一致 |
+
+## 本工具不判定项的归属
+
+| 项 | 由谁判 | 依据 |
+| --- | --- | --- |
+{items}
+""")
+    r19 = run("src", "--repo", str(pre), "--plan", str(plan_ok))
+    expect("交付前置条件" in r19.stdout, "报告里有交付前置条件这一节")
+    expect("前置条件齐了" in r19.stdout,
+           "证据齐 + 计划已确认 + 八项有归属 ⇒ 前置条件齐了")
+    expect("确认者：claude-opus-5" in r19.stdout,
+           "确认者（人或 agent）写进报告")
+    plan_bad = write(pre / "docs" / "p2.md", plan_ok.read_text(encoding="utf-8")
+                     .replace("| 性能 | 人 | 评审记录 |", "| 性能 | <待填> | <待填> |"))
+    r20 = run("src", "--repo", str(pre), "--plan", str(plan_bad))
+    expect("没人认领" in r20.stdout, "八项缺一项 ⇒ 说清缺哪一项")
+    expect("前置条件不齐" in r20.stdout, "缺一项 ⇒ 前置条件不齐")
     expect("dirty.test.ts" in r16.stdout, "点名了哪个文件")
 
     print("\n真后端车道：环境没就绪 ≠ 用例失败")

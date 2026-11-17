@@ -2684,6 +2684,165 @@ def check_test_toolkit(plan: Plan, repo: Repo) -> list[Finding]:
     return fs
 
 
+def _reconcile_rows(plan: Plan) -> list[dict]:
+    """从「数据一致性」节抽出每一行的口径：数据 / 权威源 / 镜像 / 落点。
+
+    权威源与镜像列里常见写法：PG `agent_memory`（`path/to/models.ts`）、
+    Milvus 集合 `lumen_mem_<租户>`。这里只把**反引号里的标识符**抽出来 ——
+    抽不出来的留给 `<待填>`，不猜。
+    """
+    out = []
+    for row in plan.consistency_rows:
+        if len(row) < 3:
+            continue
+        data, auth, mirror = row[0], row[1], row[2]
+        pin = row[3] if len(row) > 3 else ""
+        def ids(cell: str) -> list[str]:
+            return re.findall(r"`([^`]+)`", cell)
+        auth_ids = ids(auth)
+        mirror_ids = ids(mirror)
+        first_auth = auth_ids[0] if auth_ids else ""
+        out.append({
+            "data": data,
+            "auth": auth,
+            "mirror": mirror,
+            "pin": pin,
+            "pg_table": (first_auth.split(".")[0] if first_auth else ""),
+            "pg_column": (first_auth.split(".", 1)[1] if "." in first_auth else ""),
+            "collection": next((i for i in mirror_ids if "<" in i or "_" in i or i.islower()), ""),
+        })
+    return out
+
+
+RECONCILE_HEADER = """/**
+ * 跨存储对账脚本 —— 由 attest 的 `req_plan.py reconcile` 生成。
+ *
+ * 生成的依据是计划里的「数据一致性」节：每一行 = 一份数据、它的权威源、
+ * 它的镜像、以及一致性怎么验。**这份脚本只做比对，不修数据** ——
+ * 修复是另一个动作（repair），必须人工确认后再跑。
+ *
+ * ⚠️ 填完之前它**拒绝运行**：脚本启动时先扫自己有没有 `<待填` ⇒ 有就打印
+ * 缺哪几项并退出非零。宁可红，不可静默绿（attest 的一贯口径）。
+ *
+ * 填完之后：把脚本名里的 reconcile 保持住，attest 的 readiness 会自动
+ * 认出它（脚本名含 reconcile + 正文提到本模块的表）⇒ 下一轮验收会真跑它。
+ */
+import { createHash } from 'node:crypto';
+
+const TODO_RE = () => /<待填[^>]*>/;
+
+/** 本模块要对账的数据（来自计划的「数据一致性」节）。 */
+type ReconcileItem = {
+  /** 这份数据是什么 */
+  data: string;
+  /** 权威源：PG 表 */
+  pgTable: string;
+  /** 权威源里的主键列 */
+  pkColumn: string;
+  /** 要比对的正文列（空 = 只比存在性） */
+  bodyColumn: string;
+  /** 镜像：Milvus 集合 */
+  collection: string;
+  /** 镜像里的主键字段 */
+  mirrorPkField: string;
+  /** 镜像里的正文字段 */
+  mirrorBodyField: string;
+  /** 租户列（PG 与向量库两边都有） */
+  tenantColumn: string;
+};
+
+const ITEMS: ReconcileItem[] = [
+/*ITEMS*/
+];
+
+/** 扫描自己有没有没填的占位 —— 有就别跑。 */
+function unfilled(): string[] {
+  const out: string[] = [];
+  for (const [i, it] of ITEMS.entries()) {
+    for (const [k, v] of Object.entries(it)) {
+      if (typeof v === 'string' && TODO_RE().test(v)) {
+        out.push(`第 ${i + 1} 行（${it.data}）的 ${k}`);
+      }
+    }
+  }
+  return out;
+}
+
+function sha256(s: string): string {
+  return createHash('sha256').update(s).digest('hex');
+}
+
+async function main(): Promise<void> {
+  const missing = unfilled();
+  if (missing.length > 0) {
+    console.error('这份对账脚本还没填完，拒绝运行（避免静默当成「没有漂移」）：');
+    for (const m of missing) console.error(`  · ${m}`);
+    process.exit(1);
+  }
+  // TODO: 接上仓库自己的 PG 客户端与 Milvus 客户端，按租户枚举后逐项比对：
+  //   1. id 集合：PG 有而向量没有 = 丢数据；向量有而 PG 没有 = 多出数据
+  //   2. 正文：两边同一 id 的正文哈希不同 = 对不上（索引的是旧正文）
+  //   3. 状态：PG 非 active 的行在向量里存在 = 失效向量占位
+  // 每项都要按租户分开报 —— 判交付只看生产租户，测试租户是信息不是阻塞。
+  console.error('还没接上比对逻辑：把上面的 TODO 换成仓库自己的 PG / Milvus 客户端。');
+  process.exit(1);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});
+"""
+
+
+def cmd_reconcile(args: argparse.Namespace) -> int:
+    """按计划的「数据一致性」节生成对账脚本（代建侧）。"""
+    root = Path(args.repo).resolve()
+    plan_path = Path(args.plan)
+    if not plan_path.is_absolute() and not plan_path.exists():
+        alt = root / plan_path
+        if alt.exists():
+            plan_path = alt
+    if not plan_path.exists():
+        print(f"计划文件不存在: {plan_path}", file=sys.stderr)
+        return 1
+    plan = parse_plan(plan_path.resolve())
+    rows = _reconcile_rows(plan)
+    if not rows:
+        print("计划里没有「数据一致性」节的数据行 ⇒ 没有可生成的对账口径\n"
+              "（只有一种存储的模块不需要对账）", file=sys.stderr)
+        return 1
+    items = []
+    for r in rows:
+        pg_table = r["pg_table"] or "<待填：PG 表名>"
+        collection = r["collection"] or "<待填：Milvus 集合名>"
+        items.append(
+            f"  // 计划原文：权威源 {r['auth']} ｜ 镜像 {r['mirror']}\n"
+            "  {\n"
+            f"    data: '{_js_str(r['data'] or '<待填：这份数据是什么>')}',\n"
+            f"    pgTable: '{_js_str(pg_table)}',\n"
+            "    pkColumn: '<待填：主键列>',\n"
+            f"    bodyColumn: '{_js_str(r['pg_column'] or '<待填：要比对的正文列（空=只比存在性）>')}',\n"
+            f"    collection: '{_js_str(collection)}',\n"
+            "    mirrorPkField: '<待填：镜像里的主键字段>',\n"
+            "    mirrorBodyField: '<待填：镜像里的正文字段>',\n"
+            "    tenantColumn: '<待填：租户列>',\n"
+            "  },"
+        )
+    out = Path(args.out) if args.out else root / "scripts" / "reconcile-memory.ts"
+    if out.exists() and not args.force:
+        print(f"文件已存在，不覆盖: {out}\n"
+              "（要覆盖加 --force；想保留就换 --out 路径）", file=sys.stderr)
+        return 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(RECONCILE_HEADER.replace("/*ITEMS*/", "\n".join(items)),
+                   encoding="utf-8")
+    print(f"已生成 {out}（{len(rows)} 条对账口径）")
+    print("填完 `<待填>` 之前它拒绝运行（退出码 1）—— 宁可红，不可静默绿。")
+    print("填完之后：把脚本名保持含 'reconcile'，readiness 会自动认出它并真跑。")
+    return 0
+
+
 def cmd_scaffold(args: argparse.Namespace) -> int:
     """从计划生成测试工具包骨架。"""
     root = Path(args.repo).resolve()
@@ -3508,6 +3667,15 @@ def main(argv: list[str]) -> int:
     p_up.add_argument("--module", action="append", default=[],
                       help="目标模块（相对仓库根），可重复；默认取计划里写的")
     p_up.set_defaults(func=cmd_upgrade)
+
+    p_rc = sub.add_parser(
+        "reconcile", help="按计划的「数据一致性」节生成跨存储对账脚本")
+    p_rc.add_argument("plan", help="计划文件")
+    p_rc.add_argument("--repo", default=".", help="仓库根")
+    p_rc.add_argument("--out", default=None,
+                      help="生成路径（默认 <仓库根>/scripts/reconcile-memory.ts）")
+    p_rc.add_argument("--force", action="store_true", help="覆盖已存在的文件")
+    p_rc.set_defaults(func=cmd_reconcile)
 
     p_chk = sub.add_parser("check", help="校验计划 vs 代码实况")
     p_chk.add_argument("plan", help="计划文件")

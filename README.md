@@ -89,6 +89,7 @@ approval this tool refuses to fake.
 | 4 | `assign <plan> --repo . --limit 30` | Hands out the decision points still to be answered, as a JSONL worklist (that is what it does by default); `--apply answers.jsonl` checks the answers and writes them back |
 | 5 | `scaffold <plan> --repo .` | Writes the test files the plan asks for, in your conventions; the assertions are left as TODO for you to fill |
 | 6 | `check <plan> --repo .` | Verifies every pin: does the file exist, does the case exist, is the invariant covered |
+| 7 | `reconcile <plan> --repo .` | Generates the cross-store reconciliation script from the plan's data-consistency section — the table and collection names come from the plan, and the slots that are still empty make the script refuse to run, so it cannot silently pass |
 
 Step 4 is what makes the three columns fillable by an agent instead of by hand: in
 its default mode `assign` hands out each decision point's code excerpt, the
@@ -172,7 +173,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.13
+      - uses: mcgrapeng/attest@v0.1.14
         with:
           module: src/auth
 ```
@@ -235,7 +236,7 @@ terminal:
 ```
 
 ```
-结论：0 项阻塞 · 1 项待人工确认 · 10 项无信号 · 1 项实测通过（另有 6 条静态信号）
+结论：0 项阻塞 · 1 项待人工确认 · 11 项无信号 · 1 项实测通过（另有 6 条静态信号）
 退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到
 ```
 
@@ -251,7 +252,7 @@ rule, not this run's verdict: **a blocking item, or a key criterion that could
 not be measured at all, is what makes attest exit `1`**. This run had neither,
 so it ended with exit code `0`. The counters in that line overlap: the item
 awaiting human review is also one of the static signals, so they do not add up
-to the number of criteria. Without that overlap it is 1 measured pass + 10 with
+to the number of criteria. Without that overlap it is 1 measured pass + 11 with
 no signal + 6 static signals.
 
 `--json` gives the same thing machine-readably (checks + verdict counters).
@@ -276,7 +277,7 @@ owns and no exemption explains**.
 
 ## What it measures
 
-The tool prints all 17 criteria in Chinese, so the names are listed here with an
+The tool prints all 18 criteria in Chinese, so the names are listed here with an
 English gloss. **Measured** means attest ran something; **static signal** means it
 read the source, and a static signal can never carry a pass on its own.
 
@@ -299,13 +300,14 @@ read the source, and a static signal can never carry a pass on its own.
 | 断言的期望值独立 (assertion oracles are independent) | **Static signal.** Assertions whose expected value comes from the system under test |
 | 计划与机器推导对齐 (the plan matches the machine-derived decision points) | **Static signal.** The decision points are reverse-derived from the source and compared with the plan in both directions |
 | 应有判定点覆盖到位 (the decision points are covered) | **Static signal.** Every high-risk decision point has an owning invariant or a written exemption, and the pin really exists |
+| 不变式有判定点 (every invariant reaches a decision point) | **Static signal.** The other direction of the same reconciliation: every invariant has at least one decision point claiming it — one with none is only pinned by a single test case |
 
 How each one is measured in full, and the language matrix, are in
 **[docs/criteria.md](docs/criteria.md)**.
 
 ## Status
 
-**Actively developed. Released as `v0.1.13`.** The criteria and the skill
+**Actively developed. Released as `v0.1.14`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 

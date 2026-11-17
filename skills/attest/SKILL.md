@@ -49,6 +49,7 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> \
 | 断言的期望值独立 | 静态 | 期望值取自被测对象自身的断言（恒真的同义反复单独点出）⇒ 提醒 |
 | 计划与机器推导对齐 | 静态 | 从源码反推判定点，与计划里的判定点列**双向**对账：机器有计划没有、计划有机器没有、钉的路径根本不在这个模块里（`--plan`） |
 | 应有判定点覆盖到位 | 静态 | 计划里每个高危判定点都有不变式认领**或**写明豁免理由，且落点（file::case）真实存在（`--plan`） |
+| 不变式有判定点 | 静态 | 同一套对账的另一头：计划里每条不变式至少有一个判定点认领它 —— 一个都没有的，只靠一条用例钉着，路径多半没测全（`--plan`） |
 
 **证据类别说的是"这条判据靠什么得出"**（跑出来的 vs 读源码读出来的）。
 它同时决定了报告里它落在哪一节：**静态信号永远不能单独支撑「通过」**。
@@ -383,6 +384,7 @@ python3 "$SKILL_DIR/scripts/req_plan.py assign <计划文件> --repo <项目根>
 | 3 | agent | 把不变式与覆盖矩阵填进计划；再用 `upgrade` 把维度表换成判定点粒度 |
 | 4 | agent | 用 `assign` 批量认领判定点：拉清单 → 逐条判归属或写豁免理由 → `--apply` 写回 |
 | 5 | agent | `scaffold` 生成测试骨架，**并把断言填掉**（工具不知道期望值，读过需求的 agent 知道） |
+| 5' | agent | 跨存储的模块：跑 `req_plan.py reconcile` 生成对账脚本骨架，填完 `<待填>` ⇒ 下一轮 readiness 会自动认出它并真跑 |
 | 6 | agent | 跑 `check`，把红清掉（红的都是真的：钉错了、落点不存在、维度没答） |
 | 7 | agent | 填「确认」节（记自己是谁、依据是什么）与「本工具不判定项的归属」八行 |
 | 8 | agent | 跑 `readiness.py`，读交付前置条件：三条齐 ⇒ 可以进交付流程 |
@@ -580,6 +582,21 @@ python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <项目根>
 跨租户的不误删。项目里已有对账机制就复用它，别另写一套
 （一个真实案例见 [examples/cross-store-reconciliation.md](examples/cross-store-reconciliation.md)）。
 
+**仓库里没有对账机制？让工具生成骨架：**
+
+```bash
+python3 "$SKILL_DIR/scripts/req_plan.py reconcile <计划文件> --repo <根> \
+  [--out scripts/reconcile-<模块>.ts]
+```
+
+它按这一节的每一行生成一份对账脚本：表名与集合名从计划里抽好，计划写明
+「表.列」的那一列直接填成要比对的正文列，其余（主键列、镜像字段名、租户列）
+留成 `<待填>`。**填完之前脚本拒绝运行**（启动时扫自己有没有 `<待填`，有就打印
+缺哪几项并退出非零）—— 宁可红，不可静默当成「没有漂移」。
+
+生成物的名字里保持有 `reconcile`，`readiness` 就会自动认出它（脚本名含
+reconcile + 正文提到本模块的表）⇒ 下一轮验收会**真跑**它，漂移随即进报告。
+
 ### 7. 约束：不引入中间件
 
 跨存储一致性的解法在本项目里长什么样（**不引入额外的协调组件**）。
@@ -760,6 +777,10 @@ python3 "$SKILL_DIR/scripts/req_plan.py scaffold \
 
 # 3. 核对计划 vs 代码实况
 python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <根>
+
+# 3'. 按计划的数据一致性节生成对账脚本骨架（跨存储才有意义）
+python3 "$SKILL_DIR/scripts/req_plan.py reconcile <计划文件> --repo <根> \
+  [--out scripts/reconcile-<模块>.ts]
 
 # 4. 模块交付就绪度判定（一条命令，实测）
 python3 "$SKILL_DIR/scripts/readiness.py <模块路径> --repo <根> \

@@ -585,7 +585,7 @@ def main() -> int:
     r16 = run("src", "--repo", str(layout), "--json")
     data16 = json.loads(r16.stdout)
     keys16 = [c["key"] for c in data16["checks"]]
-    expect(len(keys16) == 17, f"报告里有 17 条判据（实际 {len(keys16)}）")
+    expect(len(keys16) == 18, f"报告里有 18 条判据（实际 {len(keys16)}）")
     expect("field-compare" not in keys16,
            "字段级比对不是独立判据（并入数据流一致）")
     expect("data-flow" in keys16, "数据流一致这条在")

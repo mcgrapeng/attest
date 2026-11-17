@@ -24,6 +24,7 @@ from pathlib import Path, PurePosixPath
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from req_plan import (  # noqa: E402
     NOT_JUDGED_ITEMS,
+    PLAN_FORMAT_V2,
     _vague_waiver,
     _waiver_for,
     case_matches,
@@ -3600,6 +3601,43 @@ def check_plan_alignment(m: Module, plan_path: str | None, dp, *,
     return _dpe_gate_apply(chk, *_dpe_gate(fmt, dp.level, lenient))
 
 
+def check_invariant_coverage(m: Module, plan_path: str | None) -> Check:
+    """不变式有判定点（静态；**不产生 pass**）。
+
+    反向对账：`应有判定点覆盖到位` 查的是「每个判定点有没有不变式认领」，
+    这一条查的是另一头 —— 「每条不变式有没有判定点认领它」。一条不变式
+    如果一个判定点都没认领，说明它的代码路径没有被判定点粒度覆盖：
+    它只靠一条用例钉着，路径里的分支/错误路径很可能没被测到。
+    """
+    plan, err = _dpe_plan(m, plan_path)
+    if plan is None:
+        return Check("invariant-coverage", "不变式有判定点", "skipped", err,
+                     evidence_kind="untested")
+    if detect_plan_format(plan) != PLAN_FORMAT_V2:
+        return Check("invariant-coverage", "不变式有判定点", "skipped",
+                     "旧的模块级维度表没有判定点列 ⇒ 这条判据判不了"
+                     "（先跑 req_plan.py upgrade）",
+                     evidence_kind="untested")
+    counts: dict[str, int] = {}
+    for row in parse_detail_rows(plan):
+        inv = (row.invariant or "").strip()
+        if inv:
+            counts[inv] = counts.get(inv, 0) + 1
+    orphan = []
+    for ident, desc, _pin in plan.invariants:
+        if counts.get(ident, 0) == 0:
+            orphan.append(f"{ident}（{(desc or '')[:40]}）—— 没有判定点认领它")
+    if orphan:
+        return Check("invariant-coverage", "不变式有判定点", "warn",
+                    f"{len(orphan)}/{len(plan.invariants)} 条不变式"
+                    "在代码里没有对应判定点",
+                    orphan[:8],
+                    "要么给这些不变式认领判定点，要么写明为什么它不需要 —— "
+                    "一个判定点都没有，通常意味着它只靠一条用例钉着，路径没被测全")
+    return Check("invariant-coverage", "不变式有判定点", "pass",
+                 f"{len(plan.invariants)} 条不变式都有判定点认领")
+
+
 def check_decision_coverage(m: Module, plan_path: str | None, dp, *,
                             lenient: bool = False) -> Check:
     """应有判定点覆盖到位（规格 §7.1，静态；**不产生 pass**）。
@@ -4053,6 +4091,7 @@ def run_readiness(args) -> int:
         check_plan_alignment(m, args.plan, dpe_analysis, lenient=dpe_lenient),
         check_decision_coverage(m, args.plan, dpe_analysis, lenient=dpe_lenient),
         check_pin_discriminating(m, args.plan, dpsp, lenient=dpe_lenient),
+        check_invariant_coverage(m, args.plan),
     ])
     dpe_acc = _dpe_accounting(dpe_analysis, dpe_plan)
     dpe_align = _dpe_alignment(dpe_analysis, dpe_plan)

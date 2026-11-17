@@ -9,6 +9,7 @@ install.py 是**跨平台**的安装实现（install.sh 只是它的一层薄壳
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -109,6 +110,42 @@ def test_shell_wrapper_is_thin() -> None:
            "薄壳装出了软链")
 
 
+def test_skill_md_links_resolve_inside_the_package() -> None:
+    """skill 里的相对链接必须在**打出的包里**能解析。
+
+    SKILL.md 引用 examples/cross-store-reconciliation.md，而那个文件原先在仓库
+    根、不进包 ⇒ 装成独立 skill 的用户点那个链接是断的。打包时只带
+    skills/attest/** ⇒ 包内的相对链接必须自洽。
+    """
+    print("\nskill 包内的相对链接都能解析")
+    import zipfile
+    out = mkdtemp()
+    proc = subprocess.run([sys.executable, str(ROOT / "package.py"),
+                           "--out", str(out)],
+                          capture_output=True, text=True, cwd=str(ROOT))
+    expect(proc.returncode == 0, "package.py 能打出包")
+    zips = list(out.glob("*.skill"))
+    expect(bool(zips), "打出了 .skill")
+    if not zips:
+        return
+    names = set(zipfile.ZipFile(zips[0]).namelist())
+    broken = []
+    for md in sorted(SKILL_DIR.rglob("*.md")):
+        text = md.read_text(encoding="utf-8")
+        for link in sorted(set(re.findall(r"\]\(([^)#h][^)]*)\)", text))):
+            if link.startswith(("http", "#")):
+                continue
+            target = (md.parent / link).resolve()
+            try:
+                rel = str(target.relative_to(SKILL_DIR))
+            except ValueError:
+                broken.append(f"{md.name} → {link}（指向 skill 包外）")
+                continue
+            if "attest/" + rel not in names:
+                broken.append(f"{md.name} → {link}（包内没有）")
+    expect(not broken, f"包内没有断链（断的：{broken[:5]}）")
+
+
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -116,6 +153,7 @@ def main() -> int:
         pass
     test_install_and_uninstall()
     test_shell_wrapper_is_thin()
+    test_skill_md_links_resolve_inside_the_package()
     print()
     for d in TMPDIRS:
         shutil.rmtree(d, ignore_errors=True)

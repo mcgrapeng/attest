@@ -7,6 +7,29 @@
 
 （暂无）
 
+## [0.1.15] - 2026-11-17
+
+**skill 工程面对齐生态基线：入口变薄、描述变短、包内不再断链。**
+
+拿注册表里安装量最高的一批 skill 当基线（`mattpocock/skills@code-review` 900K 安装、
+`anthropics/skills@webapp-testing` 207K、`anthropics/knowledge-work-plugins@testing-strategy`），
+它们的 SKILL.md 只有 33–95 行 —— 细节靠渐进披露，入口只留流程与判据。attest 之前是 817 行。
+
+- **渐进披露**：`SKILL.md` 817 → **149 行**，只留定位、一条命令、18 条判据表、核心原则、
+  工作流（第 0 步零人工 + 1–9 步动作表）、常用命令、references 索引。口径与纪律搬进
+  `skills/attest/references/`：`criteria.md`（各判据怎么测、怎么分层、存储类模块怎么审）、
+  `workflow.md`（线A 每一步写成什么样）、`commands.md`（命令、开关、安全须知、反向验证）、
+  `pitfalls.md`（常见错法、什么时候用）。内容逐字搬运，没删。
+- **description 897 → 433 字符**：改成「动词开头 + 具体触发语」（基线的写法：
+  `Design test strategies and test plans. Trigger with "how should we test"…`）。
+  之前那句把「必须/不得/应该」全塞进描述，触发面被稀释 —— 这与已知��召回 0.5 同根。
+- **修包内断链**：`SKILL.md` 引用 `examples/cross-store-reconciliation.md`，而那个文件在
+  **仓库根、不进包** ⇒ 装成独立 skill 的用户点那个链接是断的。现在它搬进
+  `skills/attest/examples/`（随包发布），引用改成包内可解析的相对路径。
+- **加了回归**：新测试校验打出的 `.skill` 包里**所有相对链接都能解析**（断链不许再犯）。
+
+守卫、36 个回归套件、打包自检、10 个 fixture、6 个 eval 全过。
+
 ## [0.1.14] - 2026-11-17
 
 **两件补齐：不变式的反向对账 + 对账脚本的代建。**

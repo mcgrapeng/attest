@@ -7,6 +7,22 @@
 
 （暂无）
 
+## [0.1.18] - 2026-11-18
+
+**SkillEvaluator Tier 2/3 评估带回来的两处真修：workflow.md 与 SKILL.md 的逐字重复、以及 AE1 的成因澄清。**
+
+- **`references/workflow.md` §0 与 `SKILL.md` §0 逐字重复（29 行）**：v0.1.15 把细节搬进
+  references 时，两份都留了同一段「零人工链条」表。Tier 2 去重扫描（NVIDIA SkillEvaluator 1.0.1，
+  本地 embedding）把它判成 HIGH 重复簇。现在保留入口那份（agent 先读 SKILL.md），
+  workflow.md 改成指针 + 只补入口没展开的一句（「人不需要参与，但痕迹要留下」）。
+- **AE1 的成因澄清**：allowlist 里 AE1 的理由写的是「文档引用脚本只引片段」，这是当初的猜测。
+  2026-11-18 带 key 复跑验证：AE1 **只在 skillspector 无 key、批量语义分析失败（llm_batch_failed）
+  时出现**，给了 key 之后自动消失 ⇒ 它是 keyless 跑的固有噪声，不是 skill 的引用结构问题。
+  allowlist 条目保留（CI 是 keyless 跑），理由改成实测结论，别让后人照着旧理由去改引用结构。
+
+其余评估结论（Tier 1 93.5/A、Tier 2 跨 skill 零重叠、Tier 3 量到 goal_accuracy 1.00 vs 0.00）
+在评估报告里，不在 changelog 里逐条抄。
+
 ## [0.1.17] - 2026-11-18
 
 **两条静态遗留的收口：references 恢复直链（取舍记清楚），LP3 按扫描器自己的建议入 allowlist。**

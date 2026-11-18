@@ -7,6 +7,21 @@
 
 （暂无）
 
+## [0.1.19] - 2026-11-18
+
+**更正 v0.1.18 里关于 AE1 的说法：那轮「带 key 后 AE1 消失」是假信号。**
+
+自审时复核了那次带 key 复跑的原始输出，发现 **skillspector 自己崩了**
+（`did not return valid JSON (exit code 1)`）⇒ security 扫描整体 incomplete，
+AE1「消失」只是扫描器崩掉的副作用，不能当成「分析成功所以自动消失」。
+
+补做了两次实测，AE1 的真实成因是**扫描器侧的 LLM 批次没跑完**：
+- 无 key：`reason code = llm_batch_failed`；
+- 有 key 但端点慢：`LLM batch failed ... (OpenAITimeoutError)`，每个失败批次产生一条 AE1。
+
+⇒ 结论修正为：**AE1 是 skillspector 的 LLM 批次失败的伴随现象**（既不是 skill 缺产物，
+也不是引用结构有问题 —— 后者由 reason code 直接证实）。allowlist 条目的理由按实测结论重写。
+
 ## [0.1.18] - 2026-11-18
 
 **SkillEvaluator Tier 2/3 评估带回来的两处真修：workflow.md 与 SKILL.md 的逐字重复、以及 AE1 的成因澄清。**
@@ -19,6 +34,7 @@
   2026-11-18 带 key 复跑验证：AE1 **只在 skillspector 无 key、批量语义分析失败（llm_batch_failed）
   时出现**，给了 key 之后自动消失 ⇒ 它是 keyless 跑的固有噪声，不是 skill 的引用结构问题。
   allowlist 条目保留（CI 是 keyless 跑），理由改成实测结论，别让后人照着旧理由去改引用结构。
+  （**本段的 AE1 结论已在 v0.1.19 更正**：那轮「自动消失」是 skillspector 自身崩溃造成的假信号。）
 
 其余评估结论（Tier 1 93.5/A、Tier 2 跨 skill 零重叠、Tier 3 量到 goal_accuracy 1.00 vs 0.00）
 在评估报告里，不在 changelog 里逐条抄。

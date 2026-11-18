@@ -173,7 +173,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.18
+      - uses: mcgrapeng/attest@v0.1.19
         with:
           module: src/auth
 ```
@@ -307,7 +307,7 @@ How each one is measured in full, and the language matrix, are in
 
 ## Status
 
-**Actively developed. Released as `v0.1.18`.** The criteria and the skill
+**Actively developed. Released as `v0.1.19`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 

@@ -35,10 +35,14 @@ rules:
 
   # AE1「Artifact Evidence」：文档（SKILL.md / README）引用 scripts/*.py 时
   # 只引了片段 —— 那是文档里的引用，不是缺失的产物。
+  # 2026-11-18 带 key 复跑验证：AE1 只有在 skillspector 无 key、批量语义分析
+  # 失败（llm_batch_failed）时才出现；给了 key 之后这两条自动消失 ⇒ 本条是
+  # keyless 跑的固有噪声，CI（keyless）需要它，但别当成 skill 的引用结构问题。
   - id: AE1
     reason: >-
       文档引用仓库内的脚本时只引片段（"见 scripts/readiness.py"），
-      不是缺失的产物。误报。
+      不是缺失的产物。误报。（带 key 复跑验证：AE1 仅在 skillspector
+      无 key、批量语义分析失败时出现；带 key 自动消失。）
 
   # PE3「Credential Access」：源码里**点名** .npmrc（说明不复制它），
   # 扫描器按"出现了凭据文件路径"判。凭据本身没有读、没有复制。

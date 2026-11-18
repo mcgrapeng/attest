@@ -61,3 +61,20 @@ rules:
     reason: >-
       反射调用误报（读 argparse 属性不是执行 sink）。已改写为直接属性访问，
       规则本身仍可能命中别的写法。
+
+  # LP3「Missing Permission Declaration」：skill 没声明 permissions/allowed-tools
+  # 但代码有能力检测（env, file_read, file_write, network, shell）。
+  # 不声明是**刻意**决定，不是遗漏：
+  #   1. allowed-tools 是预授权（Claude Code 里免确认放行），不是权限上限；
+  #      skillspector 自己的 remediation 原文就写着 "add a tool only when it is
+  #      independently approved as necessary, not to silence this finding"。
+  #   2. attest 要跑目标仓库自己的任意测试命令（subprocess → shell/env/network），
+  #      工具范围就是宿主 agent 本身的范围，预先放权与最小权限相反。
+  #   3. 声明还会触发能力覆盖核查：subprocess 的 shell/env/network 盖不住
+  #      （除非预授权整个 Bash），只会换来更多 finding。
+  - id: LP3
+    reason: >-
+      attest 需要执行目标仓库自己的测试命令（subprocess → shell/env/network），
+      预授权这些工具与最小权限相反；按扫描器自己的建议，不为消此条而声明
+      allowed-tools。
+

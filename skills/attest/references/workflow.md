@@ -260,7 +260,7 @@ python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <项目根>
 
 校对要覆盖三件事（对账/修复路径必须被测到）：掉的数据能补、重复的不产生、
 跨租户的不误删。项目里已有对账机制就复用它，别另写一套
-（一个真实案例见同包的 examples/cross-store-reconciliation.md）。
+（一个真实案例见 [examples/cross-store-reconciliation.md](../examples/cross-store-reconciliation.md)）。
 
 **仓库里没有对账机制？让工具生成骨架：**
 

@@ -7,6 +7,24 @@
 
 （暂无）
 
+## [0.1.17] - 2026-11-18
+
+**两条静态遗留的收口：references 恢复直链（取舍记清楚），LP3 按扫描器自己的建议入 allowlist。**
+
+- **references 恢复直链**：v0.1.16 为满足「引用离 SKILL.md 一层深」把 `criteria.md` /
+  `workflow.md` 里指向案例文件的链接改成了纯文本。读者少一层可点击路径，代价大于一条
+  启发式告警：现在恢复直链（`examples/cross-store-reconciliation.md`）。代价透明记录：
+  Tier 1 质量分 95.0 → **93.5**（「嵌套引用」告警扣 Efficiency 10 分，权重 15%），
+  仍是 **A 档**（门槛 90）。可读性优先于分数。
+- **LP3 入 allowlist（不声明 allowed-tools）**：skillspector 建议声明工具范围，但它自己的
+  remediation 原文写着「add a tool only when it is independently approved as necessary,
+  **not to silence this finding**」。attest 要执行目标仓库自己的任意测试命令
+  （subprocess → shell/env/network），`allowed-tools` 是预授权不是权限上限，预授权整个
+  Bash 与最小权限相反；不预授权则能力覆盖核查永远盖不住 subprocess。取舍：不声明，
+  LP3 以规则级条目入 `.github/skillspector-allowlist.yaml`，理由写进条目注释。
+- **验证**：SkillEvaluator 升到 1.0.1（tier2/tier3 extras 齐了，doctor 全过），Tier 1
+  无 key 基线 95.0/A 且 **0 项 failed**（0.9.0 时 security 项 keyless 判 failed）。
+
 ## [0.1.16] - 2026-11-17
 
 **用 NVIDIA SkillEvaluator 静态评估 attest，把真问题修掉、把契约缺口补齐。**

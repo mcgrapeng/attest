@@ -24,3 +24,14 @@ dist/
 
 # superpowers 执行态（机器本地：账本与任务简报）
 .superpowers/
+
+# agent 工具的机器本地状态（impeccable / archify / serena）
+.impeccable/
+.archify/
+.serena/
+
+# attest 自测生成的测试计划（docs 公开文档仍入库）
+docs/*-test-plan.md
+
+# 本机浏览器 MCP 产物
+.playwright-mcp/

@@ -1,12 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="574" height="1016" viewBox="0 0 574 1016" role="img" aria-label="attest report">
-<rect width="574" height="1016" rx="10" fill="#0d1117"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="574" height="1156" viewBox="0 0 574 1156" role="img" aria-label="attest report">
+<rect width="574" height="1156" rx="10" fill="#0d1117"/>
 <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" fill="#c9d1d9">
 <text x="18" y="34"><tspan fill="#39c5cf">将执行的仓库脚本：测试车道（逐个测试文件跑 $ node --test &lt;测试文</tspan></text>
 <text x="18" y="54">件&gt;）</text>
 <text x="18" y="74"></text>
 <text x="18" y="94">交付就绪度分析 — src</text>
-<text x="18" y="114">仓库：/Users/zhangpeng/workspace/liaohe/attest/fixtures/ts-coloc</text>
-<text x="18" y="134">ated</text>
+<text x="18" y="114">仓库：/Users/zhangpeng/workspace/orca/attest/ai-assign/fixtures/</text>
+<text x="18" y="134">ts-colocated</text>
 <text x="18" y="154">源码 1 文件（+0 个测试支撑） / 单测 1 个 / itest 0 个</text>
 <text x="18" y="174"></text>
 <text x="18" y="194"><tspan fill="#39c5cf">── 已实测 ───────────────────────────────────────────</tspan></text>
@@ -36,19 +36,26 @@
 <text x="18" y="674"><tspan fill="#d29922">  — 向量集合属性自洽 — 这个模块没有向量集合调用点（判不了）</tspan></text>
 <text x="18" y="694"><tspan fill="#d29922">  — 数据流一致（跨存储对账） — 模块只碰了 PG 一个存储 —— 没有派</tspan></text>
 <text x="18" y="714">生层要跨存储校对</text>
-<text x="18" y="734"><tspan fill="#d29922">  — 数据准确（基线对拍） — 项目里没有基线对拍脚本</tspan></text>
-<text x="18" y="754"><tspan fill="#d29922">  — 需求覆盖到位 — 没给计划文件（--plan）</tspan></text>
-<text x="18" y="774"><tspan fill="#d29922">  — 计划与机器推导对齐 — 没给计划文件（--plan）</tspan></text>
-<text x="18" y="794"><tspan fill="#d29922">  — 应有判定点覆盖到位 — 没给计划文件（--plan）</tspan></text>
-<text x="18" y="814"><tspan fill="#d29922">  — 钉有区分力 — 没给计划文件（--plan）</tspan></text>
-<text x="18" y="834"></text>
-<text x="18" y="854"><tspan fill="#39c5cf">── 本工具不判定 ────────────────────────────────</tspan></text>
-<text x="18" y="874"><tspan fill="#8b949e">  需求是否被正确理解 · 产品行为是否正确 · 性能 · 安全 · 可用性 ·</tspan></text>
-<text x="18" y="894"> 运维就绪 · 并发正确性 · 容量与规模行为</text>
-<text x="18" y="914"><tspan fill="#8b949e">  上面只是测试就绪度的实测结果；「能不能交付」仍要人判断。</tspan></text>
-<text x="18" y="934"></text>
-<text x="18" y="954"><tspan fill="#c9d1d9"><tspan font-weight="700">结论：0 项阻塞 · 1 项待人工确认 · 10 项无信号 · 1 项实测通过（另</tspan></tspan></text>
-<text x="18" y="974">有 6 条静态信号）</text>
-<text x="18" y="994"><tspan fill="#c9d1d9"><tspan font-weight="700">退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到</tspan></tspan></text>
+<text x="18" y="734"><tspan fill="#d29922">  — 数据准确（基线对拍） — 本模块没有基线对拍脚本（仓库里别的包</tspan></text>
+<text x="18" y="754">的基线脚本不算数）</text>
+<text x="18" y="774"><tspan fill="#d29922">  — 需求覆盖到位 — 没给计划文件（--plan）</tspan></text>
+<text x="18" y="794"><tspan fill="#d29922">  — 计划与机器推导对齐 — 没给计划文件（--plan）</tspan></text>
+<text x="18" y="814"><tspan fill="#d29922">  — 应有判定点覆盖到位 — 没给计划文件（--plan）</tspan></text>
+<text x="18" y="834"><tspan fill="#d29922">  — 钉有区分力 — 没给计划文件（--plan）</tspan></text>
+<text x="18" y="854"><tspan fill="#d29922">  — 不变式有判定点 — 没给计划文件（--plan）</tspan></text>
+<text x="18" y="874"></text>
+<text x="18" y="894"><tspan fill="#39c5cf">── 本工具不判定 ────────────────────────────────</tspan></text>
+<text x="18" y="914"><tspan fill="#8b949e">  需求是否被正确理解 · 产品行为是否正确 · 性能 · 安全 · 可用性 ·</tspan></text>
+<text x="18" y="934"> 运维就绪 · 并发正确性 · 容量与规模行为</text>
+<text x="18" y="954"><tspan fill="#8b949e">  上面只是测试就绪度的实测结果；「能不能交付」仍要人判断。</tspan></text>
+<text x="18" y="974"></text>
+<text x="18" y="994"><tspan fill="#39c5cf">── 交付前置条件 ──────────────────────────────</tspan></text>
+<text x="18" y="1014"><tspan fill="#3fb950">  ✓ 证据没有阻塞项，关键判据也测到了</tspan></text>
+<text x="18" y="1034"><tspan fill="#f85149">  ✗ 没给计划文件 ⇒ 需求覆盖与确认无从谈起（--plan）</tspan></text>
+<text x="18" y="1054"><tspan fill="#8b949e">  ⇒ 前置条件不齐，还不能进交付流程</tspan></text>
+<text x="18" y="1074"></text>
+<text x="18" y="1094"><tspan fill="#c9d1d9"><tspan font-weight="700">结论：0 项阻塞 · 1 项待人工确认 · 11 项无信号 · 1 项实测通过（另</tspan></tspan></text>
+<text x="18" y="1114">有 6 条静态信号）</text>
+<text x="18" y="1134"><tspan fill="#c9d1d9"><tspan font-weight="700">退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到</tspan></tspan></text>
 </g>
 </svg>

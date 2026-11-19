@@ -4136,6 +4136,9 @@ def run_readiness(args) -> int:
                 "static_signals": len(static_signals),
                 "not_judged": list(NOT_JUDGED),
                 "exit_rule": "有阻塞项，或关键判据（测试是否绿）没测到 ⇒ 退出码 1",
+                # 英文孪生：英文 README 要能**逐字**引用这条规则（人写的中文改写会漂）。
+                "exit_rule_en": ("A blocking item, or a key criterion that could not be "
+                                 "measured at all ⇒ exit code 1"),
             },
         }, ensure_ascii=False, indent=2))
         return 1 if (fails or key_untested) else 0

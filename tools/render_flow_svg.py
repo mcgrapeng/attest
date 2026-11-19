@@ -3,10 +3,13 @@
 
     # 1. 先用 Archify skill 从 candidate.json 渲染出 HTML（它的 finalize 会跑完
     #    validate / deliver / check / browser-check 四道闸）
-    #    候选文件在 .archify/workflow-attest-flow-20261116-231500/candidate.json
+    #    candidate 在仓库外（不入库）：~/workspace/orca/attest/attest-diagrams/
+    #    下的 archify-flow-en/ 里是英文那份，zh 的那份在 git 历史里
+    #    （cec8b21:.archify/workflow-attest-flow-20261116-231500/candidate.json）
     # 2. 再跑这个脚本：
     python3 tools/render_flow_svg.py <archify.html> \
       --out skills/attest/assets/attest-flow.svg
+    #    英文版（meta.locale: en）出 attest-flow.en.svg
 
 **为什么不能直接嵌 HTML**：GitHub 的 README 不跑 HTML 里的 JS，而 Archify 的
 「trace 动画」是 viewer 在运行时驱动的 ⇒ 抽出来的静态 SVG 不会动。所以这里

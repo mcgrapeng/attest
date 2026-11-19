@@ -24,7 +24,7 @@ npx skills add mcgrapeng/attest
 
 <div align="center">
   <img alt="attest's two lines: line A writes the requirement test plan (req_plan.py new → fill the invariants and the decision-point ownership → scaffold + check), line B verifies the delivery (readiness.py runs the target repository's own test lane, coverage gate and reconciliation script, then reports four kinds of evidence)"
-       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-flow.svg"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-flow.en.svg"
        width="820">
 </div>
 
@@ -37,7 +37,7 @@ two stores have not drifted apart. `attest` answers the delivery question with
 
 <div align="center">
   <img alt="The four kinds of evidence attest reports: measured, static signal, not measured, not judged"
-       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/evidence-kinds.svg"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/evidence-kinds.en.svg"
        width="794">
 </div>
 
@@ -48,7 +48,9 @@ two stores have not drifted apart. `attest` answers the delivery question with
 | **Not measured** | Could not be measured, and the report names the precondition that was missing |
 | **Not judged** | Out of scope by design: requirement understanding, product behaviour, performance, security, availability, operational readiness |
 
-The tool prints these four kinds in Chinese (已实测 / 静态信号 / 未实测 / 本工具不判定); the report sample below is its real output.
+attest prints these four kinds in Chinese. The English↔Chinese name mapping is in
+[references/criteria.md](skills/attest/references/criteria.md); this page uses
+the English names throughout.
 
 The measurement is real, not inferred. `attest` runs the target repo's **own**
 test command, its **own** coverage gate, its **own** reconciliation script, and
@@ -109,7 +111,7 @@ without it those three are reported as *not measured*, not as passed.
 **Nobody has to be in the loop.** An agent that reads the requirement can drive
 both lines end to end: derive the invariants from the requirement, fill the plan
 in batches with `assign`, write the assertions that `scaffold` leaves as TODO,
-confirm the plan (the 确认 section accepts an agent, and the report says who
+confirm the plan (its confirmation section accepts an agent, and the report says who
 confirmed it), claim the eight items this tool does not judge, and run the
 readiness check. The report ends with a **delivery precondition** summary — the
 evidence is green, the plan is confirmed, and nothing is unclaimed — which is
@@ -175,7 +177,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.26
+      - uses: mcgrapeng/attest@v0.1.27
         with:
           module: src/auth
 ```
@@ -225,63 +227,50 @@ to a warning or to *not measured*.
 
 ## The report
 
-Real output from attest's own fixture (`fixtures/ts-colocated`). The tool prints
-in Chinese: the criterion names and the verdict are what you read in your
-terminal:
+A real run against attest's own fixture (`fixtures/ts-colocated`). attest prints
+in Chinese: the criterion names, the four evidence sections and the verdict line
+are what you read in your terminal. The English↔Chinese name mapping is in
+[references/criteria.md](skills/attest/references/criteria.md). This page states
+the same run in English:
 
-```
-将执行的仓库脚本：测试车道（逐个测试文件跑 $ node --test <测试文件>）
+| Part of the report | What it says |
+| --- | --- |
+| Repo header | Which repository, which module, how many source files and test files it found |
+| **Measured** | Criteria attest actually ran: the command, its exit code and its output are in the report |
+| **Static signal** | Criteria read out of the source; they can never carry a pass on their own |
+| **Not measured** | Criteria it could not measure, each with the missing precondition named |
+| **Not judged** | The eight things this tool refuses to judge, by design |
+| Verdict | `0 blocking · 1 awaiting human review · 11 with no signal · 1 measured pass (plus 6 static signals)` |
 
-交付就绪度分析 — src
-仓库：<repo root>
-源码 1 文件（+0 个测试支撑） / 单测 1 个 / itest 0 个
-```
-
-```
-结论：0 项阻塞 · 1 项待人工确认 · 11 项无信号 · 1 项实测通过（另有 6 条静态信号）
-退出码 1 = 有阻塞项，或关键判据（测试是否绿）没测到
-```
-
-<div align="center">
-  <img alt="The full report: four sections (measured, static signals, not measured, not judged) and a three-tier verdict: rendered from a real run of attest's own fixture"
-       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/hero-animated.svg"
-       width="574">
-</div>
-
-Look at the last line: **10 items with no signal**, not "10 passed". A criterion
-that was not measured is reported as *not measured*. The line under it is the
-rule, not this run's verdict: **a blocking item, or a key criterion that could
-not be measured at all, is what makes attest exit `1`**. This run had neither,
-so it ended with exit code `0`. The counters in that line overlap: the item
-awaiting human review is also one of the static signals, so they do not add up
-to the number of criteria. Without that overlap it is 1 measured pass + 11 with
-no signal + 6 static signals.
+Look at the verdict line: **11 items with no signal**, not "11 passed". A criterion
+that was not measured is reported as *not measured*. The rule behind that line is
+not this run's verdict: **A blocking item, or a key criterion that could not
+be measured at all** is what makes attest exit `1`. This run had neither, so it
+ended with exit code `0`. The counters in that line overlap: the item awaiting
+human review is also one of the static signals, so they do not add up to the
+number of criteria. Without that overlap it is 1 measured pass + 11 with no
+signal + 6 static signals.
 
 `--json` gives the same thing machine-readably (checks + verdict counters).
 `--dry-run` lists the repo scripts that *would* run, and executes nothing.
 
-With `--plan`, the report grows a **判定点覆盖** (decision-point coverage)
-section — the decision points reverse-derived from the source, counted
-against the plan's own list:
-
-```
-── 判定点覆盖 ────────────────────────────────
-  判定点总数 2 ｜ 已归属 1 ｜ 豁免 0 ｜ 缺口 1
-  高危四类缺口：drop 0 ｜ error-path 0 ｜ resource 1 ｜ state 0
-  缺口清单（只列高危档）：
-    src/a.ts#closeClient#resource  既没有归属不变式，也没有豁免理由
-  推导等级 L3（后端 B2，来源 global-npm）
-  区分力自证：1/1 条（100%），杀得死 1 条
-```
+With `--plan`, the report grows a **decision-point coverage** section — the
+decision points reverse-derived from the source, counted against the plan's own
+list. From the same run: 2 decision points, 1 claimed, 0 waived, 1 gap; the
+high-risk gaps are drop 0, error-path 0, resource 1, state 0; the derivation
+level is L3 (backend B2, from global-npm); the discrimination self-check is
+1/1 (100%), with 1 killed.
 
 That gap line is the point: a high-risk decision point that **no invariant
 owns and no exemption explains**.
 
 ## What it measures
 
-The tool prints all 18 criteria in Chinese, so the names are listed here with an
-English gloss. **Measured** means attest ran something; **static signal** means it
-read the source, and a static signal can never carry a pass on its own.
+The tool prints all 18 criteria in Chinese; the names below are the English
+names for the same 18, one-to-one (the mapping is in
+[references/criteria.md](skills/attest/references/criteria.md)). **Measured**
+means attest ran something; **static signal** means it read the source, and a
+static signal can never carry a pass on its own.
 
 The last three criteria are one mechanism seen from three sides: **reconciliation
 in both directions**, between the plan and the code, and between the decision
@@ -290,34 +279,34 @@ party and derived by the other, so a gap on either side is named in the report.
 
 <div align="center">
   <img alt="attest's two-way reconciliation: the plan's decision-point list against the decision points derived from the code, high-risk decision points against the invariants that claim them, and invariants against the decision points that claim them — each side marked human-written or machine-derived"
-       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/reconcile-2way.svg"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/reconcile-2way.en.svg"
        width="880">
 </div>
 
 | Criterion | How attest measures it |
 | --- | --- |
-| 测试全绿 (tests green) | **Measured.** Runs the module's tests with the repo's own command; only assertion failures count — a setup error means the environment was not ready, not that the code is wrong |
-| 核心逻辑测试到位 (core logic is covered) | **Measured.** Drives the repo's own coverage gate; `--min-line-coverage` is only for repositories that have no gate |
-| 测试能发现缺陷 (the tests can find defects) | **Measured.** Breaks the source on purpose: red means the suite caught it, still green means this suite cannot find this class of defect (`--mutation-check`) |
-| 表结构基本合规 (schema is basically compliant) | **Measured.** Queries the PostgreSQL catalog: primary key, unique constraint, tenant column, RLS+FORCE, timestamps with a timezone. Single-tenant modules, global config tables and append-only tables are exempt from the tenant column and the unique constraint |
-| 数据流一致（跨存储对账）(data agrees across stores) | **Measured.** Runs the module's own reconciliation script and judges the drift per tenant kind; the field-level comparison is part of this one |
-| 数据准确（基线对拍）(data matches the baseline) | **Measured.** Runs the repo's own baseline script and parses the metric differences |
-| 钉有区分力 (the pin has discriminating power) | **Measured.** Breaks the source at the pinned point and runs the pinned case: red means the pin kills this class of defect, still green means it does not |
-| 需求覆盖到位 (requirement is covered) | **Static signal.** Reads the plan and the test files: every invariant's pin points at a case that really exists |
-| 向量集合属性自洽 (vector collection attributes agree) | **Static signal.** Whether one collection's dimension, metric and partition key agree across its call sites |
-| 测试卫生（不留残留、不靠 sleep）(test hygiene) | **Static signal.** Fixed waits (a source of flakiness) and database writes without cleanup (a source of leftovers). A test file that really does not write to a database declares it — `/* attest:no-db-writes reason="…" */` — and the reason shows up in the report |
-| 导出的逻辑都有测试 (every export is referenced by a test) | **Static signal.** Exported functions and classes with zero references in the tests are named |
-| 不过度抽象 (not over-abstracted) | **Static signal.** Exported symbols with almost no call sites anywhere in the repository |
-| 没有重复造轮子 (no reinvented wheels) | **Static signal.** Same-named implementations elsewhere in the repository |
-| 使用主流开源库 (uses mainstream open-source libraries) | **Static signal.** The module's real dependency list, with path aliases and the standard library excluded |
-| 断言的期望值独立 (assertion oracles are independent) | **Static signal.** Assertions whose expected value comes from the system under test |
-| 计划与机器推导对齐 (the plan matches the machine-derived decision points) | **Static signal.** The decision points are reverse-derived from the source and compared with the plan in both directions |
-| 应有判定点覆盖到位 (the decision points are covered) | **Static signal.** Every high-risk decision point has an owning invariant or a written exemption, and the pin really exists |
-| 不变式有判定点 (every invariant reaches a decision point) | **Static signal.** The other direction of the same reconciliation: every invariant has at least one decision point claiming it — one with none is only pinned by a single test case. A composite invariant that has no claiming decision point by nature can be exempted in the plan with `<!-- attest:invariant-exempt I3 reason="…" -->`; the exemption needs a real reason and is reported, never silent |
+| tests green | **Measured.** Runs the module's tests with the repo's own command; only assertion failures count — a setup error means the environment was not ready, not that the code is wrong |
+| core logic is covered | **Measured.** Drives the repo's own coverage gate; `--min-line-coverage` is only for repositories that have no gate |
+| the tests can find defects | **Measured.** Breaks the source on purpose: red means the suite caught it, still green means this suite cannot find this class of defect (`--mutation-check`) |
+| schema is basically compliant | **Measured.** Queries the PostgreSQL catalog: primary key, unique constraint, tenant column, RLS+FORCE, timestamps with a timezone. Single-tenant modules, global config tables and append-only tables are exempt from the tenant column and the unique constraint |
+| data agrees across stores | **Measured.** Runs the module's own reconciliation script and judges the drift per tenant kind; the field-level comparison is part of this one |
+| data matches the baseline | **Measured.** Runs the repo's own baseline script and parses the metric differences |
+| the pin has discriminating power | **Measured.** Breaks the source at the pinned point and runs the pinned case: red means the pin kills this class of defect, still green means it does not |
+| requirement is covered | **Static signal.** Reads the plan and the test files: every invariant's pin points at a case that really exists |
+| vector collection attributes agree | **Static signal.** Whether one collection's dimension, metric and partition key agree across its call sites |
+| test hygiene | **Static signal.** Fixed waits (a source of flakiness) and database writes without cleanup (a source of leftovers). A test file that really does not write to a database declares it — `/* attest:no-db-writes reason="…" */` — and the reason shows up in the report |
+| every export is referenced by a test | **Static signal.** Exported functions and classes with zero references in the tests are named |
+| not over-abstracted | **Static signal.** Exported symbols with almost no call sites anywhere in the repository |
+| no reinvented wheels | **Static signal.** Same-named implementations elsewhere in the repository |
+| uses mainstream open-source libraries | **Static signal.** The module's real dependency list, with path aliases and the standard library excluded |
+| assertion oracles are independent | **Static signal.** Assertions whose expected value comes from the system under test |
+| the plan matches the machine-derived decision points | **Static signal.** The decision points are reverse-derived from the source and compared with the plan in both directions |
+| the decision points are covered | **Static signal.** Every high-risk decision point has an owning invariant or a written exemption, and the pin really exists |
+| every invariant reaches a decision point | **Static signal.** The other direction of the same reconciliation: every invariant has at least one decision point claiming it — one with none is only pinned by a single test case. A composite invariant that has no claiming decision point by nature can be exempted in the plan with `<!-- attest:invariant-exempt I3 reason="…" -->`; the exemption needs a real reason and is reported, never silent |
 
 ## Status
 
-**Actively developed. Released as `v0.1.26`.** The criteria and the skill
+**Actively developed. Released as `v0.1.27`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 

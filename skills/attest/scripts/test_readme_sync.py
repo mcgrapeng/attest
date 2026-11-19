@@ -99,13 +99,47 @@ def main() -> int:
         expect(claimed == {str(code_n)},
                f"{label} README 自称的判据数 == 代码 {code_n}"
                f"（实际 {sorted(claimed) or '没写'}）")
-    # 判据表原在 docs/criteria.md；docs/ 已不入库，无可对账的公开文档
-    # 判据名：README 上写的名字要跟终端里打印的**逐字一致**，
-    # 否则读者对着自己的运行结果对不上号（冷读提过的那个失分点）。
+    # 判据名对照表在 skills/attest/references/criteria.md（docs/ 已不入库）：
+    # 工具打印中文名，两份 README 各自只写自己那一种语言，对照表是唯一的桥。
+    # 中文名必须逐字等于工具打印的名字，否则读者对着自己的运行结果对不上号
+    # （冷读提过的那个失分点）；英文名必须等于英文 README 表里那一列。
     titles = [c["title"] for c in json.loads(out.stdout)["checks"]]
-    for label, text in (("英文", en), ("中文", zh)):
-        miss = [t for t in titles if t not in text]
-        expect(not miss, f"{label} README 里的判据名 == 工具打印的名字（缺：{miss}）")
+    mapping = (SKILL_DIR / "references" / "criteria.md").read_text(encoding="utf-8")
+    pairs = re.findall(r"^\| ([^|]+?) \| ([^|]+?) \|$", mapping, re.M)
+    # 对照表里有两张表：四档证据（4 行）与 18 条判据。判据那张的左边是中文名。
+    doc_zh = [zh.strip() for zh, en in pairs if zh.strip() in titles]
+    doc_en = {zh.strip(): en.strip() for zh, en in pairs}
+    expect(sorted(doc_zh) == sorted(titles),
+           f"对照表里的中文判据名 == 工具打印的名字（缺："
+           f"{sorted(set(titles) - set(doc_zh))}）")
+
+    def table_col(text: str, header: str) -> list[str]:
+        """某张表的第一列（表头行之后、直到空行）。"""
+        rows = []
+        started = False
+        for ln in text.splitlines():
+            if ln.startswith(header):
+                started = True
+                continue
+            if started:
+                if not ln.startswith("|"):
+                    break
+                if set(ln) <= set("| -:"):
+                    continue
+                rows.append(ln.split("|")[1].strip())
+        return rows
+
+    en_col = table_col(en, "| Criterion |")
+    zh_col = table_col(zh, "| 判据 |")
+    expect(sorted(en_col) == sorted(doc_en[t] for t in titles),
+           "英文 README 的判据表 == 对照表的英文列")
+    expect(sorted(zh_col) == sorted(titles),
+           "中文 README 的判据表 == 工具打印的判据名")
+    # 纯语言：英文页不得出现中文判据名，中文页的判据列不得带英文注释
+    expect(not [t for t in titles if t in en],
+           "英文 README 里没有中文判据名")
+    expect(not [c for c in zh_col if "(" in c],
+           f"中文 README 的判据列没有英文注释（实际：{[c for c in zh_col if '(' in c]}）")
 
     print("\nREADME 里的数字与仓库实况一致")
     tests = sorted(p.name for p in SKILL_DIR.joinpath("scripts").glob("test_*.py"))
@@ -124,15 +158,16 @@ def main() -> int:
     expect(all(("6 / 6" in t or "6/6" in t) for t in (en, zh)),
            f"README 写 6 / 6 eval（实际 {n_evals}）")
 
-    print("\n输出样例是逐字真实输出")
+    print("\n输出样例是逐字真实输出（中文页）")
     run_out = subprocess.run(
         [sys.executable, str(HERE / "readiness.py"), "src",
          "--repo", str(ROOT / "fixtures" / "ts-colocated")],
         capture_output=True, text=True, cwd=str(ROOT)).stdout
     run_out = re.sub(r"/\S*/fixtures/ts-colocated", "<repo root>", run_out).rstrip("\n")
-    # README 里放的是**摘录**（首段 + 结论段），每一段都必须是真实输出的连续子串
-    blocks = re.findall(r"```\n([^`]+?)```", en, re.S)
-    expect(len(blocks) >= 2, f"英文 README 有输出摘录（实际 {len(blocks)} 段）")
+    # 中文 README 里放的是**摘录**（首段 + 结论段），每一段都必须是真实输出的原样行。
+    # 英文 README 不贴中文输出：它写英文，数字的一致性在下面单独查。
+    blocks = re.findall(r"```\n([^`]+?)```", zh, re.S)
+    expect(len(blocks) >= 2, f"中文 README 有输出摘录（实际 {len(blocks)} 段）")
     real_lines = [l.rstrip() for l in run_out.splitlines()]
     for b in blocks:
         if not b.startswith("将执行的仓库脚本") and not b.startswith("结论："):
@@ -140,10 +175,14 @@ def main() -> int:
         # 逐行比对（摘录的两段在真实输出里并不相邻 ⇒ 连续子串不成立）
         for l in b.strip().splitlines():
             expect(l in real_lines,
-                   f"英文 README 的输出摘录与真实运行逐字一致：{l[:28]!r}")
-    for label, text in (("英文", en), ("中文", zh)):
-        expect("结论：0 项阻塞" in text,
-               f"{label} README 引用了真实结论行")
+                   f"中文 README 的输出摘录与真实运行逐字一致：{l[:28]!r}")
+    expect("结论：0 项阻塞" in zh, "中文 README 引用了真实结论行")
+    expect("结论：" not in en, "英文 README 不贴中文结论行")
+
+    print("\n英文 README 是纯英文（语言切换那一处除外）")
+    cjk = set(re.findall(r"[一-鿿]+", en))
+    expect(cjk <= {"中文"},
+           f"英文 README 里只有语言切换那处中文（实际还有：{sorted(cjk - {'中文'})}）")
 
     # 结论行里那几个数字是重叠的（待人工确认的那条也在静态信号里）⇒ 加起来会大于
     # 判据条数。README 得说清真正的拆分，且那三个数 == 实跑。
@@ -188,13 +227,19 @@ def main() -> int:
                f"{fx} 真的是「{why}」这一档")
         expect(r.returncode == (1 if (blocking or key_untested) else 0),
                f"{fx} 的退出码符合规则（实退 {r.returncode}）")
-    # README 的结论块逐字用上代码自己的措辞
-    core = rule.replace(" ⇒ 退出码 1", "").strip()
-    for label, text in (("英文", en), ("中文", zh)):
-        expect(core in text, f"{label} README 的退出码说明用了代码自己的措辞")
+    # README 的结论块逐字用上代码自己的措辞：中文页引中文那句，
+    # 英文页引代码里成对的英文那句（exit_rule_en）—— 人写的中文改写会漂。
+    # 比较时忽略换行：README 会折行，句子本身不能被折断。
+    core = " ".join(rule.replace(" ⇒ 退出码 1", "").split())
+    rule_en = json.loads(out.stdout)["conclusion"]["exit_rule_en"]
+    core_en = " ".join(rule_en.replace(" ⇒ exit code 1", "").split())
+    expect(core in " ".join(zh.split()),
+           "中文 README 的退出码说明用了代码自己的措辞")
+    expect(core_en in " ".join(en.split()),
+           "英文 README 的退出码说明用了代码自己的英文措辞")
     # README 讲的这次运行（ts-colocated）退出码 == 真跑的退出码
     for label, text, marker, pat in (
-            ("英文", en, "Look at the last line", r"exit code `(\d)`"),
+            ("英文", en, "Look at the verdict line", r"exit code `(\d)`"),
             ("中文", zh, "看最后一行", r"退出码[^。]{0,12}`(\d)`")):
         p = para_with(text, marker)
         m = re.search(pat, p)
@@ -273,6 +318,11 @@ def main() -> int:
                 if (ROOT / p).exists():
                     continue
                 p = f"skills/attest/scripts/{p}"
+            if not (ROOT / p).exists():
+                # skill 自己的文档目录也可能是引用目标（references/…）
+                alt = f"skills/attest/{p}"
+                if (ROOT / alt).exists():
+                    p = alt
             if not (ROOT / p).exists():
                 missing.append(tok)
         expect(not missing, f"{label} README 引用的仓库内文件都存在（缺：{missing}）")

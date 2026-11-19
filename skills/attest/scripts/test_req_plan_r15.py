@@ -11,6 +11,9 @@ import tempfile
 from pathlib import Path
 
 HERE = Path(__file__).parent
+sys.path.insert(0, str(HERE))
+
+import req_plan  # noqa: E402
 SCRIPT = HERE / "req_plan.py"
 FAILURES: list[str] = []
 TMPDIRS: list[Path] = []
@@ -281,6 +284,19 @@ def main() -> int:
     r_rc2 = run("reconcile", str(rec_plan), "--repo", str(mkdtemp()),
                 "--out", str(out_ts))
     expect(r_rc2.returncode == 1, "已存在的文件不覆盖（没有 --force）")
+
+    print("\ntest_case_names_see_template_literal_cases")
+    # 用例名写成模板字符串（`it(\`...\${x}...\`)`）在 TS 里很常见（把
+    # method/url 插进用例名）⇒ 用例名解析器不认它 ⇒ 这类用例没法被计划钉住
+    # （落点写不出「文件::用例名」⇒ 计划只能整条豁免）。
+    tpl_repo = mkdtemp()
+    write(tpl_repo / "src" / "a.test.ts",
+          "it(`rejects ${request.method} ${request.url} without credentials (401)`, () => {});\n"
+          "it('plain case', () => {});\n")
+    names = req_plan.test_case_names(tpl_repo, "src/a.test.ts")
+    expect(any("rejects" in n and "without credentials" in n for n in names),
+           "模板字符串写的用例名也能被解析出来")
+    expect("plain case" in names, "普通引号用例名照旧解析得到")
 
     print("\ntest_baseline_generates_script_from_the_plan")
     base_plan = write(mkdtemp() / "base.md", """# 测试计划

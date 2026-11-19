@@ -974,6 +974,9 @@ def _parse_not_judged_section(plan: Plan) -> None:
 # 可能有单引号：it("doesn't fail", …)）。
 _CASE_PATTERNS = (
     re.compile(r"\b(?:it|test)(?:\.\w+)*\s*\(\s*(['\"])(.*?)\1"),
+    # 模板字符串写的用例名（`it(\`rejects ${request.method} …\`)`）—— TS 里常见
+    # （把 method/url 插进用例名）⇒ 保留 `${…}` 原文，计划里按同样文本就能钉住。
+    re.compile(r"\b(?:it|test)(?:\.\w+)*\s*\(\s*(`)(.*?)\1"),
     # it.each([…])('name') —— 参数在括号里，名字在后面
     re.compile(r"\b(?:it|test)\.\w+\s*\([^)]*\)\s*\(\s*(['\"])(.*?)\1"),
     re.compile(r"^\s*(?:async\s+)?def\s+(test_\w+)", re.M),

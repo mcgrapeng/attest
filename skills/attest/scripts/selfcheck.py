@@ -34,6 +34,10 @@ import sys
 import tempfile
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import module_names  # noqa: E402
+from module_names import module_tokens  # noqa: E402
+
 # ---------------------------------------------------------------- 常量
 
 #: 判据 id —— readiness.py --json 的 checks[].key（也兼容未来的 checks[].id）
@@ -257,27 +261,8 @@ def _reference_files(copy_root: Path, module_rel: str) -> list[Path]:
 
 
 def _module_tokens(copy_root: Path, module_rel: str) -> list[str]:
-    """模块在测试文件里可能出现的名字（与 readiness 的 _module_tokens 对齐）。"""
-    toks: list[str] = []
-    if module_rel and module_rel != ".":
-        toks.append(module_rel)
-        toks.append(Path(module_rel).name)
-    mod_dir = copy_root / module_rel
-    pkg: Path | None = None
-    if mod_dir.name in ("src", "lib"):
-        for child in sorted(mod_dir.iterdir()) if mod_dir.is_dir() else []:
-            if child.is_dir() and (child / "__init__.py").exists():
-                pkg = child
-                break
-    elif (mod_dir / "__init__.py").exists():
-        pkg = mod_dir
-    if pkg:
-        toks.append(pkg.name)
-    out: list[str] = []
-    for t in toks:
-        if t and t not in out:
-            out.append(t)
-    return out
+    """模块在测试文件里可能出现的名字 —— 实现与 readiness 共用（module_names）。"""
+    return module_tokens(module_rel, module_names.python_package_dir(copy_root / module_rel))
 
 
 def _mentions_module(p: Path, tokens: list[str]) -> bool:

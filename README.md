@@ -173,7 +173,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.19
+      - uses: mcgrapeng/attest@v0.1.20
         with:
           module: src/auth
 ```
@@ -307,11 +307,11 @@ How each one is measured in full, and the language matrix, are in
 
 ## Status
 
-**Actively developed. Released as `v0.1.19`.** The criteria and the skill
+**Actively developed. Released as `v0.1.20`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 
-Every number in this repository comes from a command you can re-run: **36 / 36** regression suites, **10 / 10** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
+Every number in this repository comes from a command you can re-run: **37 / 37** regression suites, **10 / 10** golden fixtures, **6 / 6** behaviour evals, **0** security findings outside a rule-level allowlist.
 
 Known gaps, in full: [CHANGELOG.md](CHANGELOG.md). The three that
 matter most:

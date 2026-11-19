@@ -21,9 +21,12 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 DP_KINDS: tuple[str, ...] = (
     "branch", "boundary", "error-path", "resource", "state", "drop",
@@ -157,30 +160,9 @@ def dp_key(raw: str) -> tuple[str, str, str, int] | None:
 
 # ------------------------------------------------------------------ L2 词法
 
-_STRIP_RE = re.compile(
-    r"'(?:\\.|[^'\\\n])*'"
-    r'|"(?:\\.|[^"\\\n])*"'
-    r"|`(?:\\.|[^`\\])*`"
-    r"|//[^\n]*"
-    r"|/\*.*?\*/",
-    re.S,
-)
-
-
-def _blank(m: re.Match[str]) -> str:
-    """把匹配段换成空格，但**保留换行** —— 行号是 DP 的报告字段，塌了就错。"""
-    return re.sub(r"[^\n]", " ", m.group(0))
-
-
-def _strip_js_code(src: str) -> str:
-    """把 JS/TS 的字符串与注释换成空格（**保持偏移量与行号不变**）。
-
-    与 `mutation_check._strip_js_code` 同口径（字符串在前 ⇒ 字符串里的 `//`
-    不会被当注释），改一处要改两处。本模块不 import mutation_check ——
-    免得形成循环依赖；两份都要保换行（mutation_check 那份原本会把多行字符串
-    压成一行，`find_mutations` 的行号因此会算错）。
-    """
-    return _STRIP_RE.sub(_blank, src)
+# 字符串与注释清空走共享实现（code_strip）：以前这里与 mutation_check 各有一份
+# 逐字相同的 JS stripper，docstring 里自己写着「改一处要改两处」。
+from code_strip import strip_js_code  # noqa: E402
 
 
 # 判定特征的正则。整词匹配靠 `_norm` + 词表，不靠正则魔法（附录 A 口径 1）。
@@ -498,7 +480,7 @@ def lexical_analyze(file: str, source: str) -> list[DecisionPoint]:
 
     有误报漏报（启发式），报告里必须标明「词法推导，可能有误报」。
     """
-    code = _strip_js_code(source)
+    code = strip_js_code(source)
     lines = code.split("\n")
     _, hits = _scan_lines(lines)
     return [DecisionPoint(file=file, anchor=anchor, kind=kind, line=lineno,

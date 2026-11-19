@@ -25,10 +25,11 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path, PurePosixPath
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from code_strip import strip_js_code  # noqa: E402
 from decision_points import ts_parses  # noqa: E402
 from mutation_check import (  # noqa: E402
     L2_OPERATORS, MUTANT_MARKER, OPERATORS, _backend_for, _project_root,
-    _strip_js_code, match_case, run_mutation_check)
+    match_case, run_mutation_check)
 from req_plan import parse_pins  # noqa: E402
 
 __all__ = ["ImportRef", "Verdict", "file_exports", "parse_imports",
@@ -196,7 +197,7 @@ def parse_imports(source: str, file: str, root: Path) -> list[ImportRef]:
     `file` 是**工作区相对**的路径（相对 specifier 按它所在目录解析）；
     `root` 是工作区根（别名解析与读目标模块的导出用）。
     """
-    code = _strip_js_code(source)      # 字符串与注释清空（偏移不变）
+    code = strip_js_code(source)      # 字符串与注释清空（偏移不变）
     refs: list[ImportRef] = []
     seen: set[tuple] = set()
 
@@ -482,7 +483,7 @@ def file_exports(path: Path) -> set[str]:
         out = {m.group(1) for m in _PY_DEF_RE.finditer(text)}
         out |= {m.group(1) for m in _PY_CLASS_RE.finditer(text)}
         return out
-    code = _strip_js_code(text)
+    code = strip_js_code(text)
     out = {m.group(1) for m in _JS_EXPORT_DECL_RE.finditer(code)}
     for m in _JS_EXPORT_LIST_RE.finditer(code):
         for item in m.group(1).split(","):
@@ -589,7 +590,7 @@ def _inject_marker(rel: str, text: str, mut) -> str:
     token = f"{MUTANT_MARKER}:{rel}"
     if mut.path.suffix == ".py":
         return _inject_marker_py(text, mut, token)
-    code = _strip_js_code(text)
+    code = strip_js_code(text)
     open_idx = _enclosing_function_body(code, mut.offset)
     if open_idx is None:
         # 顶层变异 ⇒ 模块被加载就会打
@@ -663,7 +664,7 @@ def _py_compiles(text: str) -> bool:
 
 def _js_shape(text: str) -> tuple[int, int, int]:
     """JS/TS 的括号结构（开-闭之差）；字符串与注释不算。"""
-    code = _strip_js_code(text)
+    code = strip_js_code(text)
     return (code.count("{") - code.count("}"),
             code.count("(") - code.count(")"),
             code.count("[") - code.count("]"))

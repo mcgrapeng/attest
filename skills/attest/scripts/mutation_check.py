@@ -52,6 +52,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from code_strip import strip_js_code, strip_py_code  # noqa: E402
 from decision_points import (  # noqa: E402
     _anchor_at, detect_backend, scope_stacks, structural_points)
 
@@ -184,57 +185,6 @@ def _py_scope_at(scopes: list[tuple[str, int, int]],
     return best
 
 
-def _strip_py_code(src: str) -> str:
-    """把 Python 的字符串与注释换成空格（**保持偏移量不变**）。
-
-    tokenize 给的是 (行, 列)，不是绝对偏移 ⇒ 得自己换算，
-    否则第 2 行往后的字符串会盖错位置（第一版就踩了这个）。
-    """
-    import io
-    import tokenize
-    try:
-        toks = list(tokenize.generate_tokens(io.StringIO(src).readline))
-    except (tokenize.TokenError, IndentationError, ValueError):
-        return src
-    starts = [0]
-    for ln in src.splitlines(keepends=True):
-        starts.append(starts[-1] + len(ln))
-    out = list(src)
-    for tok in toks:
-        if tok.type not in (tokenize.STRING, tokenize.COMMENT):
-            continue
-        s = starts[tok.start[0] - 1] + tok.start[1]
-        e = starts[tok.end[0] - 1] + tok.end[1]
-        for i in range(max(0, s), min(e, len(out))):
-            if out[i] != "\n":
-                out[i] = " "
-    return "".join(out)
-
-
-_JS_STRIP_RE = re.compile(
-    r"'(?:\\.|[^'\\\n])*'"
-    r'|"(?:\\.|[^"\\\n])*"'
-    r"|`(?:\\.|[^`\\])*`"
-    r"|//[^\n]*"
-    r"|/\*.*?\*/",
-    re.S,
-)
-
-
-def _blank(m: re.Match[str]) -> str:
-    """把匹配段换成空格，但**保留换行** —— 行号是变异点的报告字段，塌了就错。"""
-    return re.sub(r"[^\n]", " ", m.group(0))
-
-
-def _strip_js_code(src: str) -> str:
-    """把 JS/TS 的字符串与注释换成空格（**保持偏移量与行号不变**）。
-
-    顺序要紧：字符串在前 ⇒ 字符串里的 ``//`` 不会被当成注释。
-    与 `decision_points._strip_js_code` 同口径，改一处要改两处。
-    """
-    return _JS_STRIP_RE.sub(_blank, src)
-
-
 def _for_in_positions(code: str) -> set[int]:
     """`for (x in y)` 头里那个 `in` 的位置（它不是运算符，别去改它）。"""
     out: set[int] = set()
@@ -317,9 +267,9 @@ def find_mutations(path: Path,
     except OSError:
         return []
     if path.suffix == ".py":
-        code = _strip_py_code(src)
+        code = strip_py_code(src)
     else:
-        code = _strip_js_code(src)
+        code = strip_js_code(src)
     lines = code.split("\n")
     py_scopes = _py_scopes(src) if path.suffix == ".py" else None
     js_stacks = None if py_scopes is not None else scope_stacks(lines)
@@ -443,7 +393,7 @@ def find_structural_mutations(path: Path,
     except (OSError, ValueError):
         return []
     starts = _astral_u16_starts(src)
-    js_stacks = scope_stacks(_strip_js_code(src).split("\n"))
+    js_stacks = scope_stacks(strip_js_code(src).split("\n"))
     out: list[Mutation] = []
     for fact in structural_points(root, [rel], backend):
         op = str(fact.get("op") or "")

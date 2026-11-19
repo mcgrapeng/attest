@@ -4,6 +4,7 @@
     <img alt="attest" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-wordmark.png" height="44">
   </picture>
   <p><strong>把「这个模块能不能交付？」从一个覆盖率百分比，变成一份可机读、可核对、可审计的证据清单。</strong></p>
+  <p><sub>18 条判据 · 四档证据 · 一条命令</sub></p>
 </div>
 
 <div align="center">
@@ -13,7 +14,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-0F766E?style=flat-square)](LICENSE)
 
-[English](README.md) · [中文](README.zh-CN.md)
+<sub><a href="README.md">English</a> · <b>中文</b> —— 两种语言是同一页：章节、顺序、数字完全一致。</sub>
 
 </div>
 
@@ -157,7 +158,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.25
+      - uses: mcgrapeng/attest@v0.1.26
         with:
           module: src/auth
 ```
@@ -254,6 +255,15 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 工具打印 18 条判据的中文名，这里给上英文说法。**实测**＝attest 真的跑了什么；**静态信号**＝
 从源码读出来的，而静态信号永远不能单独撑起一个「通过」。
 
+最后三条判据是同一个机制的三个侧面：**双向对账** —— 计划与代码互相对，判定点与不变式互相对
+认领。每次对账的两头，一头是人写的、一头是机器推的 ⇒ 哪一头漏了，报告会指名道姓地报出来。
+
+<div align="center">
+  <img alt="attest 的双向对账：计划里的判定点列 ⇄ 代码里推导出的判定点，高危判定点 ⇄ 认领它的不变式，不变式 ⇄ 认领它的判定点 —— 每一头都标着是人写还是机器推"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/reconcile-2way.svg"
+       width="880">
+</div>
+
 | 判据 | 怎么测 |
 | --- | --- |
 | 测试全绿 (tests green) | **实测。** 用仓库自己的命令跑模块的测试；只认断言失败 —— 搭环境失败说明的是环境没就绪，不是代码有问题 |
@@ -277,7 +287,7 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 
 ## 状态
 
-**在维护中，已发 `v0.1.25`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
+**在维护中，已发 `v0.1.26`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
 不会悄悄变。MIT 许可。
 
 仓库里的每个数字都来自一条你能重跑的命令：**38 / 38** 回归套件、**10 / 10** 黄金 fixture、
@@ -335,3 +345,10 @@ job 失败（`strict: false`）；`strict: true` 才会。`--self-check` 模式�
 ## License
 
 MIT.
+
+---
+
+<div align="center">
+<sub>换一种语言读这一页：<a href="README.md">English</a> ·
+两页是同一页：章节、顺序、数字完全一致。</sub>
+</div>

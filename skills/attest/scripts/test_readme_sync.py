@@ -45,19 +45,6 @@ def sections(text: str) -> list[str]:
     return out
 
 
-def criteria_rows(text: str) -> int:
-    """判据表里的数据行数（表格首行是表头、第二行是分隔行）。"""
-    n = 0
-    for block in re.findall(r"(?:^\|.*\|\s*$\n)+", text, re.M):
-        rows = [r for r in block.strip().splitlines() if r.strip()]
-        if len(rows) < 3:
-            continue
-        first = rows[0].strip().strip("|").split("|")[0].strip()
-        if first in ("判据", "Criterion"):
-            n += len(rows) - 2
-    return n
-
-
 def para_with(text: str, marker: str) -> str:
     """包含 marker 的那一段散文（空行分段）。"""
     for p in re.split(r"\n\s*\n", text):
@@ -112,13 +99,7 @@ def main() -> int:
         expect(claimed == {str(code_n)},
                f"{label} README 自称的判据数 == 代码 {code_n}"
                f"（实际 {sorted(claimed) or '没写'}）")
-    # 判据表搬到了 docs/criteria.md（README 只留一段话 + 链接）
-    crit = (ROOT / "docs" / "criteria.md").read_text(encoding="utf-8")
-    expect(criteria_rows(crit) == code_n,
-           f"docs/criteria.md 判据表 {code_n} 行（实际 {criteria_rows(crit)}）")
-    for label, text in (("英文", en), ("中文", zh)):
-        expect("docs/criteria.md" in text,
-               f"{label} README 链到了判据表所在文档")
+    # 判据表原在 docs/criteria.md；docs/ 已不入库，无可对账的公开文档
     # 判据名：README 上写的名字要跟终端里打印的**逐字一致**，
     # 否则读者对着自己的运行结果对不上号（冷读提过的那个失分点）。
     titles = [c["title"] for c in json.loads(out.stdout)["checks"]]

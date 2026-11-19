@@ -24,3 +24,15 @@ dist/
 
 # superpowers 执行态（机器本地：账本与任务简报）
 .superpowers/
+
+# agent 工具的机器本地状态（impeccable / archify / serena）
+.impeccable/
+.archify/
+.serena/
+
+# 插件市场清单与 docs 工作文档不入库（本机保留）
+.claude-plugin/
+docs/
+
+# 本机浏览器 MCP 产物
+.playwright-mcp/

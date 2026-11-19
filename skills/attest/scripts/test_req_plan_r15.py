@@ -282,6 +282,35 @@ def main() -> int:
                 "--out", str(out_ts))
     expect(r_rc2.returncode == 1, "已存在的文件不覆盖（没有 --force）")
 
+    print("\ntest_baseline_generates_script_from_the_plan")
+    base_plan = write(mkdtemp() / "base.md", """# 测试计划
+
+## 数据一致性
+
+| 数据 | 权威源 | 镜像/派生 | 一致性怎么验（钉） |
+| --- | --- | --- | --- |
+| 记忆事实 | PG `agent_memory`（`src/models.ts`） | Milvus 集合 `lumen_mem_<租户>` | `scripts/memory-baseline-check.ts` 基线快照 `fixtures/baseline.json` |
+""")
+    out_base = mkdtemp() / "scripts" / "baseline-memory.ts"
+    r_bl = run("baseline", str(base_plan), "--repo", str(mkdtemp()),
+               "--out", str(out_base))
+    expect(r_bl.returncode == 0, "baseline 生成成功")
+    bsrc = out_base.read_text(encoding="utf-8") if out_base.exists() else ""
+    expect("pgTable: 'agent_memory'" in bsrc, "表名从计划里抽出来了")
+    expect("baselinePath: 'fixtures/baseline.json'" in bsrc,
+           "基线快照路径从「一致性怎么验」列里抽出来了")
+    expect("<待填" in bsrc, "抽不出来的留成占位")
+    expect("拒绝运行" in bsrc, "没填完时脚本拒绝运行（不静默绿）")
+    expect("计划原文" in bsrc, "生成物里保留计划原文，agent 填的时候看得见")
+    expect("baseline:check" in bsrc,
+           "生成物里给出 package.json 的脚本名（readiness 靠它认出这条车道）")
+    r_bl2 = run("baseline", str(base_plan), "--repo", str(mkdtemp()),
+                "--out", str(out_base))
+    expect(r_bl2.returncode == 1, "已存在的文件不覆盖（没有 --force）")
+    r_bl3 = run("baseline", str(base_plan), "--repo", str(mkdtemp()),
+                "--out", str(out_base), "--force")
+    expect(r_bl3.returncode == 0, "--force 可以覆盖")
+
     print()
     for d in TMPDIRS:
         shutil.rmtree(d, ignore_errors=True)

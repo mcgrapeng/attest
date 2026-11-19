@@ -4,6 +4,7 @@
     <img alt="attest" src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/attest-wordmark.png" height="44">
   </picture>
   <p><strong>Turns "is this module ready to ship?" from a coverage percentage into an auditable evidence list.</strong></p>
+  <p><sub>18 criteria · four kinds of evidence · one command</sub></p>
 </div>
 
 <div align="center">
@@ -13,7 +14,7 @@
 [![Python](https://img.shields.io/badge/python-3.11%2B-0F766E?style=flat-square)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-0F766E?style=flat-square)](LICENSE)
 
-[中文版](README.zh-CN.md) · [English](README.md)
+<sub><b>English</b> · <a href="README.zh-CN.md">中文</a> — two languages, one page: same sections, same order, same numbers.</sub>
 
 </div>
 
@@ -174,7 +175,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.25
+      - uses: mcgrapeng/attest@v0.1.26
         with:
           module: src/auth
 ```
@@ -282,6 +283,17 @@ The tool prints all 18 criteria in Chinese, so the names are listed here with an
 English gloss. **Measured** means attest ran something; **static signal** means it
 read the source, and a static signal can never carry a pass on its own.
 
+The last three criteria are one mechanism seen from three sides: **reconciliation
+in both directions**, between the plan and the code, and between the decision
+points and the invariants. Each side of each reconciliation is written by one
+party and derived by the other, so a gap on either side is named in the report.
+
+<div align="center">
+  <img alt="attest's two-way reconciliation: the plan's decision-point list against the decision points derived from the code, high-risk decision points against the invariants that claim them, and invariants against the decision points that claim them — each side marked human-written or machine-derived"
+       src="https://raw.githubusercontent.com/mcgrapeng/attest/main/skills/attest/assets/reconcile-2way.svg"
+       width="880">
+</div>
+
 | Criterion | How attest measures it |
 | --- | --- |
 | 测试全绿 (tests green) | **Measured.** Runs the module's tests with the repo's own command; only assertion failures count — a setup error means the environment was not ready, not that the code is wrong |
@@ -305,7 +317,7 @@ read the source, and a static signal can never carry a pass on its own.
 
 ## Status
 
-**Actively developed. Released as `v0.1.25`.** The criteria and the skill
+**Actively developed. Released as `v0.1.26`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 
@@ -378,3 +390,10 @@ follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 ## License
 
 MIT.
+
+---
+
+<div align="center">
+<sub>Read this page in another language: <a href="README.zh-CN.md">中文</a> ·
+The two pages are one page: same sections, same order, same numbers.</sub>
+</div>

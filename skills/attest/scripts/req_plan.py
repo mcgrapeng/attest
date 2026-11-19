@@ -880,9 +880,14 @@ def parse_plan(path: Path) -> Plan:
         # 这张表归哪一节：表头定的优先；没有表头（手写漏了表头）时用标题兜底；
         # 标题也没认出来时按行形状猜（一致性表：多列且含权威源/镜像/派生）。
         kind = table_kind or (sections[0] if sections else None)
-        if kind is None and len(cells) >= 3 and any(
-                any(h in c for h in _CONSISTENCY_HINT) for c in cells):
-            kind = "consistency"
+        if kind is None and len(cells) >= 3:
+            # 认不出表头时的兜底：**≥2 个特征词**才认（与 _kind_from_header 同纪律）。
+            # 只命中一个词就认 ⇒ 判定点表里一句「镜像失败」就能把整行塞进一致性节
+            # ⇒ 报一堆假红，还可能让 check 崩。
+            hits = sum(1 for c in cells
+                       if any(h in c for h in _CONSISTENCY_HINT))
+            if hits >= 2:
+                kind = "consistency"
         if kind:
             plan.sections.add(kind)
         row_kinds = [kind] if kind else []
@@ -2104,7 +2109,7 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
         if seen_data[data_key] > 1:
             fs.append(Finding(
                 "error", "数据一致性",
-                f"{data_name!r} 出现了 {seen_data[data_name]} 行",
+                f"{data_name!r} 出现了 {seen_data[data_key]} 行",
                 "同一份数据列两行 = 两个权威源；合并成一行",
             ))
 

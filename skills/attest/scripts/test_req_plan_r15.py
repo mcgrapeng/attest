@@ -298,6 +298,41 @@ def main() -> int:
            "模板字符串写的用例名也能被解析出来")
     expect("plain case" in names, "普通引号用例名照旧解析得到")
 
+    print("\ntest_row_with_one_consistency_word_is_not_a_consistency_row")
+    # 表头认不出来的表 + 行里只有一个「镜像」字样 ⇒ **不能**被当成数据一致性行
+    # （那会把几千条判定点塞进一致性节 ⇒ 报一堆假红，还可能把 check 弄崩）。
+    stray = write(mkdtemp() / "stray.md", """# 测试计划
+
+## 附记
+
+| 甲 | 乙 | 丙 | 丁 | 镜像这件事 | 己 |
+| --- | --- | --- | --- | --- | --- |
+| 1 | 2 | 3 | 4 | 5 | 6 |
+""")
+    stray_plan = req_plan.parse_plan(stray)
+    expect(not stray_plan.consistency_rows,
+           "只命中一个特征词的行不被当成数据一致性行")
+
+    print("\ntest_check_does_not_crash_on_duplicate_data_names")
+    # 同一份数据写成两行（只有空格/大小写不同）⇒ 规范化后是同一个 key ⇒ 要报红，
+    # 不能在拼报错信息时用原始名字查字典而崩掉。
+    dup = write(mkdtemp() / "dup.md", """# 测试计划
+
+## 数据一致性
+
+| 数据 | 权威源 | 镜像/派生 | 一致性怎么验（钉） |
+| --- | --- | --- | --- |
+| 记忆事实 | PG `agent_memory` | Milvus `x` | src/a.test.ts |
+| 记忆 事实 | PG `agent_memory` | Milvus `x` | src/a.test.ts |
+""")
+    dup_repo = mkdtemp()
+    write(dup_repo / "src" / "a.test.ts", "test('x', () => {});\n")
+    r_dup = run("check", str(dup), "--repo", str(dup_repo))
+    expect("Traceback" not in r_dup.stderr,
+           "重复数据名不会让 check 崩掉")
+    expect(r_dup.returncode == 1 and "出现了 2 行" in r_dup.stdout,
+           "重复数据名照旧报红（同一份数据两行 = 两个权威源）")
+
     print("\ntest_baseline_generates_script_from_the_plan")
     base_plan = write(mkdtemp() / "base.md", """# 测试计划
 

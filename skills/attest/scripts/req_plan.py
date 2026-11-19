@@ -757,7 +757,13 @@ def parse_plan(path: Path) -> Plan:
         if in_fence:
             continue
         if "目标模块" in line and not line.startswith("#"):
-            plan.modules = re.findall(r"`([^`]+)`", line)
+            # 只有**真的带路径**的那行才算目标模块声明（`- 目标模块：`src``）。
+            # 正文里提到「目标模块」的一句话不该把已声明的模块清空 ——
+            # new 生成的模板里就有一句「按目标模块的代码特征推导出来的」，
+            # 它会让 upgrade 找不到模块、判定点推成 0 个。
+            for m in re.findall(r"`([^`]+)`", line):
+                if m not in plan.modules:
+                    plan.modules.append(m)
         if "额外涉及" in line and not line.startswith("#"):
             raw = line.split("：", 1)[-1]
             plan.extra_dimensions = [

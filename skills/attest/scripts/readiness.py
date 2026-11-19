@@ -589,7 +589,7 @@ def _runner_component(parts: list[str]) -> list[str] | None:
 # 「测试全绿」在 jest/vitest/mocha 仓库上是**假绿**（实测复现）。
 _FAIL_PATTERNS = (
     re.compile(r"^not ok \d+ - (.+)$", re.M),        # TAP（node:test）
-    re.compile(r"^\s*[×✕]\s+(.+)$", re.M),          # vitest / jest 的失败用例
+    re.compile(r"^\s*[×✕✖]\s+(.+)$", re.M),        # vitest / jest / node≥24 spec 的失败用例
     re.compile(r"^\s+●\s+(.+)$", re.M),              # jest 的失败详情
     re.compile(r"^\s+\d+\)\s+(.+)$", re.M),           # mocha 的编号失败
     re.compile(r"^(?:FAILED|ERROR)\s+(\S+)", re.M),      # pytest 的短摘要行
@@ -618,12 +618,24 @@ def _pytest_summary(out: str) -> dict[str, int]:
     return res
 
 
+def _spec_case_name(raw: str) -> str:
+    """node≥24 的 spec 失败行 ⇒ 用例名。
+
+    `✖ bad case (0.37ms)` ⇒ `bad case`（剥耗时后缀，否则对不上钉里写的名字）；
+    `✖ failing tests:` 是段标题，不是用例 ⇒ 丢掉。
+    """
+    name = re.sub(r"\s*\(\s*\d[\d.]*\s*(?:ms|s)\s*\)\s*$", "", raw.strip())
+    if not name or name.lower() == "failing tests:":
+        return ""
+    return name
+
+
 def _failed_tests(out: str) -> list[str]:
     """从测试运行器的输出里挑出失败的用例名。"""
     names: list[str] = []
     for pat in _FAIL_PATTERNS:
         for mm in pat.finditer(out):
-            name = mm.group(1).strip()
+            name = _spec_case_name(mm.group(1))
             if name and name not in names:
                 names.append(name)
     return names
@@ -646,14 +658,20 @@ def _looks_like_failed_run(out: str) -> bool:
 def _node_summary(out: str) -> dict[str, int]:
     """测试运行器的汇总。
 
-    TAP（node:test）：`# tests 3` / `# pass 3` / `# fail 0` / `# skipped 0`
+    TAP（node:test ≤ 22）：`# tests 3` / `# pass 3` / `# fail 0` / `# skipped 0`
+    node ≥ 24 默认的 spec 汇总：`ℹ tests 3` / `ℹ pass 3` / `ℹ fail 0`
     vitest：`Tests  1 failed | 1 passed (2)`
     jest：`Tests:  1 failed, 1 passed, 2 total`
     mocha：`1 passing` / `1 failing`
+
+    node 24 起 `--test` 默认不再吐 TAP ⇒ 只认 `# tests N` 的话，在新 Node 上
+    整个测试车道读不出来（判「未实测」，还因为关键判据没测到而退 1）。
     """
     out_d: dict[str, int] = {}
     for key in ("tests", "pass", "fail", "skipped"):
         mm = re.search(rf"^#\s+{key}\s+(\d+)", out, re.M)
+        if not mm:
+            mm = re.search(rf"^ℹ\s+{key}\s+(\d+)", out, re.M)
         out_d[key] = int(mm.group(1)) if mm else 0
     if out_d["tests"]:
         return out_d
@@ -723,8 +741,9 @@ def _classify_run(code: int, out: str, name: str) -> tuple[list[str], list[str]]
                 f"（不是 TAP / jest / vitest / mocha 的汇总？）"]
 
 
+# node 的覆盖率表 —— node ≤ 22 的行前缀是 `#`，node ≥ 24 是 `ℹ`。
 _COV_ROW = re.compile(
-    r"^#\s+(\S+\.(?:ts|tsx|js|mjs|cjs))\s*\|\s*([\d.]+)\s*\|\s*"
+    r"^[#ℹ]\s+(\S+\.(?:ts|tsx|js|mjs|cjs))\s*\|\s*([\d.]+)\s*\|\s*"
     r"([\d.]+)\s*\|\s*([\d.]+)\s*\|(.*)$")
 
 
@@ -759,7 +778,7 @@ def _parse_cov_rows(out: str) -> dict[str, dict]:
             "_uncovered": ranges,
         }
     # node 的汇总行（"all files"）—— 闸门自己的判定就是拿它比阈值
-    am = re.search(r"^#\s+all files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)"
+    am = re.search(r"^[#ℹ]\s+all files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)"
                     r"\s*\|\s*([\d.]+)", out, re.M)
     if am:
         cov["__all__"] = {"line": float(am.group(1)),
@@ -864,6 +883,10 @@ _ENV_ERROR_RE = re.compile(
 #       ---
 _TAP_SUBTEST_RE = re.compile(r"^(\s*)# Subtest: (.+)$")
 _TAP_NOT_OK_RE = re.compile(r"^(\s*)not ok \d+ - (.+)$")
+# node ≥ 24 的 spec 失败行：`✖ 用例名 (0.37ms)`；报错详情在下一行的
+# `Error: ...` / `AssertionError [ERR_...]: ...`。
+_SPEC_FAIL_RE = re.compile(r"^\s*[✖×✕]\s+(.+?)\s*(?:\(\s*\d[\d.]*\s*m?s\s*\))?$")
+_SPEC_ERR_RE = re.compile(r"^\s+(?:Error|AssertionError)\b[^\n]*?:\s*(.+)$")
 _TAP_TYPE_RE = re.compile(r"^\s*type:\s*'?(\w+)'?\s*$")
 _TAP_ERR_RE = re.compile(r"^(\s*)error:\s*(.*)$")
 _TAP_BLOCK_MARKERS = ("|", "|-", "|+", ">", ">-", ">+")
@@ -921,6 +944,8 @@ def _failed_tests_detail(out: str) -> list[str]:
     res: list[str] = []
     lines = out.splitlines()
     stack: list[tuple[int, str]] = []       # (缩进, 名字)
+    spec: dict[str, str] = {}               # node≥24：用例名 ⇒ 报错详情
+    spec_order: list[str] = []
     for i, ln in enumerate(lines):
         sm = _TAP_SUBTEST_RE.match(ln)
         if sm:
@@ -931,6 +956,28 @@ def _failed_tests_detail(out: str) -> list[str]:
             continue
         m = _TAP_NOT_OK_RE.match(ln)
         if not m:
+            # node ≥ 24 的 spec 失败行：`✖ 用例名 (0.37ms)`，
+            # 报错详情在紧随其后的 `Error: ...` 行。
+            sm2 = _SPEC_FAIL_RE.match(ln)
+            if sm2:
+                title = _spec_case_name(sm2.group(1))
+                if not title:
+                    continue
+                detail = ""
+                for j in range(i + 1, min(i + 12, len(lines))):
+                    em2 = _SPEC_ERR_RE.match(lines[j])
+                    if em2:
+                        detail = em2.group(1).strip()
+                        break
+                    if _SPEC_FAIL_RE.match(lines[j]):
+                        break
+                # 同一个用例名会出现两次：摘要行（没详情）+ 明细块（有详情）
+                # ⇒ 合并，详情优先。少了这一步，环境错会被判成产品缺陷。
+                if title not in spec:
+                    spec_order.append(title)
+                    spec[title] = detail
+                elif detail and not spec[title]:
+                    spec[title] = detail
             continue
         detail, is_suite = _tap_error_block(lines, i)
         if is_suite:
@@ -939,6 +986,9 @@ def _failed_tests_detail(out: str) -> list[str]:
         title = m.group(2).strip()
         path = " > ".join([n for (ind, n) in stack if ind < indent] + [title])
         res.append(f"{path} | {detail}" if detail else path)
+    for title in spec_order:
+        d = spec[title]
+        res.append(f"{title} | {d}" if d else title)
     return res
 
 
@@ -1059,6 +1109,12 @@ def run_coverage(m: Module, timeout: int = 120,
             return t, "", f"{t.name}: 测试跑超时（{timeout}s）", 124
         except FileNotFoundError as e:
             return t, "", f"{t.name}: 项目的测试命令跑不起来（{e.filename}）", 127
+        if os.environ.get("ATTEST_DEBUG_LANE"):
+            import sys as _sys
+            print(f"[lane] cmd={c} cwd={m.workspace} rc={r.returncode}",
+                  file=_sys.stderr)
+            print(f"[lane] stdout={r.stdout[:1200]!r}", file=_sys.stderr)
+            print(f"[lane] stderr={r.stderr[:1200]!r}", file=_sys.stderr)
         return t, r.stdout + r.stderr, "", r.returncode
 
     jobs = max(1, min(8, (os.cpu_count() or 2)))

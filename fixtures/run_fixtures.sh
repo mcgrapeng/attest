@@ -97,7 +97,7 @@ check() {
   local problems=() line pat hits a
   local -a alts
   if [ "$want_exit" != "any" ] && [ "$rc" != "$want_exit" ]; then
-    problems+=("退出码：期望 $want_exit，实际 $rc")
+    problems+=("退出码：期望 ${want_exit}，实际 $rc")
   fi
   while IFS= read -r line; do
     [ -z "$line" ] && continue

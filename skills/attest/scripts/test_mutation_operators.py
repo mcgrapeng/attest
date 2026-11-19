@@ -40,14 +40,14 @@ _NOT_OK_RE = re.compile(r"^\s*not ok\s+\d+\s*-?\s*(.*)$", re.M)
 
 
 def _classify(code: int, out: str, name: str) -> tuple[list[str], list[str]]:
-    """三分口径的最小实现：真失败 ⇒ 失败用例名；认不出 ⇒ 判不了。"""
-    fails = [m.group(1).strip() for m in _NOT_OK_RE.finditer(out)
-             if m.group(1).strip()]
-    if fails:
-        return fails, []
-    if code == 0:
-        return [], []
-    return [], [f"{name}: 认不出用例名"]
+    """用**工具自己的**判卷口径。
+
+    之前在这儿抄了一份只认 TAP 的实现 ⇒ node 24 起 `--test` 默认吐 spec 格式
+    （`✖ 用例名 (0.37ms)`），抄的那份认不出来 ⇒ 把「杀死了」误判成「判不了」。
+    测试里不再抄：抄的那份一定会跟工具漂。
+    """
+    from readiness import _classify_run
+    return _classify_run(code, out, name)
 
 
 def node_repo(files: dict[str, str]) -> Path:
@@ -112,6 +112,17 @@ def test_match_case_is_strict():
            "段数不足 ⇒ 不命中")
     expect(match_case("outer group > failing case", "outer group > failing case"),
            "多段完全相等 ⇒ 命中")
+    # 失败条目带报错详情（`用例名 | 报错文本`）⇒ 剥掉详情再比，
+    # 否则钉的用例明明红了却比不中 ⇒ 误判成「这条钉没区分力」。
+    expect(match_case("failing case",
+                      "failing case | connect ECONNREFUSED 127.0.0.1:19530"),
+           "带报错详情 ⇒ 仍命中")
+    expect(match_case("outer group > failing case",
+                      "outer group > failing case | AssertionError: 1 == 2"),
+           "带报错详情的多段路径 ⇒ 仍命中")
+    expect(not match_case("other case",
+                          "failing case | connect ECONNREFUSED 127.0.0.1:19530"),
+           "别的用例红了 ⇒ 不命中")
 
 
 # --------------------------------------------------------------- L2 算子

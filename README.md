@@ -28,12 +28,57 @@ npx skills add mcgrapeng/attest
        width="820">
 </div>
 
-## What it does
+## Your five questions
 
-A coverage number tells you the code ran. It does not tell you that an
-assertion would fail, that the plan's pins point at files that exist, or that
-two stores have not drifted apart. `attest` answers the delivery question with
-**evidence**, sorted into four kinds:
+Most people meet attest with a broad question like "can this module ship?". The
+useful question is narrower, and it comes in five parts: **which tests should
+this requirement have, do those tests really exist, is the suite complete
+enough, can those tests actually catch a defect, and can you run them?** Those
+five are what attest is built around, and it answers each one with evidence
+rather than with a verdict.
+
+| Your question | What attest does | Where you see it |
+| --- | --- | --- |
+| **Which tests should this requirement have?** | It reverse-derives the **decision points** in the module — branches, error paths, resource limits, state changes — and reconciles them, in both directions, with the **invariants** the plan lists. The four high-risk kinds (error path, resource, drop, state) each need an owning invariant or a written exemption; the rest are counted. | `req_plan.py upgrade` / `assign`; the *plan matches the machine-derived decision points*, *the decision points are covered* and *every invariant reaches a decision point* criteria |
+| **Do those tests really exist?** | Every pin in the plan must point at a file in your repository and at a test case that exists in it. `check` verifies each one; a missing file, or a case name that is not there, is red. | `req_plan.py check`; the *requirement is covered* criterion |
+| **Is the suite complete enough?** | Two directions: every high-risk decision point needs an owning invariant or a written exemption, and every invariant needs a decision point that claims it. On top of that it drives your repository's own coverage gate. | the *decision points are covered*, *every invariant reaches a decision point* and *core logic is covered* criteria |
+| **Can those tests actually catch a defect?** | It breaks your source on purpose and runs the pinned test: red means the suite catches that class of defect, still green means it does not. A pin also has to prove it kills the defect **at its own location**. | `--mutation-check` and `--discriminating`; the *the tests can find defects*, *the pin has discriminating power* and *assertion oracles are independent* criteria |
+| **Can you run them and cover the requirement?** | It runs your repository's own test lanes and prints, for each of the 18 criteria, either the evidence — the command, its exit code, its output — or the precondition that was missing. | `readiness.py` |
+
+Two halves of the first question, and only one of them is attest's. The **code**
+side is derived: attest reads your source and finds the decision points in it. The
+**requirement** side is written into the plan by whoever read the requirement —
+attest then holds the two against each other and names what is missing. The
+derivation is only as good as its backend: with a TypeScript AST backend it is
+L3, without one it falls back to lexical heuristics that may over-report, and in
+that case the three decision-point criteria warn instead of failing.
+
+The mutation check sets no score. How many mutants have to die is your
+project's threshold, not attest's call — and a sample of dead mutants is not the
+same as a strong suite, which the report says rather than hides.
+
+**What this does not settle.** A pin proves that a behaviour contract hangs on a
+test case that exists. It does not prove that the contract is the right reading
+of the requirement. Requirement understanding, product behaviour, performance,
+security, availability, operational readiness, concurrency correctness and
+behaviour at scale are out of scope by design: the report lists all eight every
+time and asks who owns each one. A static signal never carries a pass on its own,
+and anything that could not be measured is reported as *not measured*, with the
+missing precondition named.
+
+**So what is attest?** The auditor and the designer of a test suite. It derives
+what the code says should be tested, holds the plan and the code against each
+other, proves that the pinned tests can fail on a real defect, then runs
+everything and reports what is proven, what is not, and what it refuses to
+judge. The delivery decision stays with whoever owns it — the name avoids
+*verify*, *certify* and *sign-off* on purpose.
+
+## The four kinds of evidence
+
+A coverage number tells you the code ran. It does not tell you that an assertion
+would fail, that the plan's pins point at files that exist, or that two stores
+have not drifted apart. `attest` answers the delivery question with **evidence**,
+sorted into four kinds:
 
 <div align="center">
   <img alt="The four kinds of evidence attest reports: measured, static signal, not measured, not judged"
@@ -75,10 +120,6 @@ the tools you already have:
 | An AI-written test plan | attest pins every invariant to a test case **that really exists in your repo**, and when it cannot infer your test framework it refuses to scaffold and tells you (`--framework` is the way out) |
 | "I asked a chatbot whether this looks done" | attest **runs** the checks and prints the commands it ran: every verdict is re-runnable by you |
 | A checklist in a PR comment | attest's report is reproducible: one command, same input, same output |
-
-It reports evidence; the decision stays with whoever owns the delivery. The
-name avoids *verify*, *certify* and *sign-off* on purpose: those promise an
-approval this tool refuses to fake.
 
 ## The two commands
 
@@ -177,7 +218,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.27
+      - uses: mcgrapeng/attest@v0.1.28
         with:
           module: src/auth
 ```
@@ -304,9 +345,35 @@ party and derived by the other, so a gap on either side is named in the report.
 | the decision points are covered | **Static signal.** Every high-risk decision point has an owning invariant or a written exemption, and the pin really exists |
 | every invariant reaches a decision point | **Static signal.** The other direction of the same reconciliation: every invariant has at least one decision point claiming it — one with none is only pinned by a single test case. A composite invariant that has no claiming decision point by nature can be exempted in the plan with `<!-- attest:invariant-exempt I3 reason="…" -->`; the exemption needs a real reason and is reported, never silent |
 
+## Where the line is
+
+The boundaries are deliberate, and most of them are printed in the report rather
+than buried in a document:
+
+- **Eight things it does not judge**: requirement understanding, product
+  behaviour, performance, security, availability, operational readiness,
+  concurrency correctness, behaviour at scale. The report lists all eight every
+  time. The plan asks who owns each one, and the delivery preconditions section
+  names the ones nobody has claimed.
+- **It does not write assertions.** `scaffold` writes the structure and the case
+  names in your conventions; the expected values belong to whoever read the
+  requirement.
+- **It generates reconciliation and baseline scripts as templates.** The table and
+  collection names come from the plan, but the comparison logic is yours to wire.
+  A template with unfilled slots refuses to run rather than reporting "no drift".
+- **The decision-point criteria judge hard only on a decision-point-granularity
+  plan** (`req_plan.py upgrade`) with an L3 derivation. On an older plan they
+  warn instead of failing, and say so.
+- **The mutation-based checks only run when you ask.** `--mutation-check` and
+  `--discriminating auto|quick|full` copy your code and break it on purpose, which
+  is worth the time only when you want the proof.
+- **It reads TS/JS and Python.** For Rust and Go it stops at the plan.
+- **Exit code 0 means "no blocking item and the key criterion was measured".** It
+  is not a delivery verdict; that is what the name means.
+
 ## Status
 
-**Actively developed. Released as `v0.1.27`.** The criteria and the skill
+**Actively developed. Released as `v0.1.28`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 
@@ -322,8 +389,9 @@ matter most:
 - **The self-check copy has no `node_modules`** by default; `--self-check-deps`
   symlinks them in.
 
-attest has also been run against five public repositories — **including
-verdicts that made the tool look wrong**.
+attest has also been run against five public repositories — **including verdicts
+that made the tool look wrong**. That report left the repository together with
+the other internal documents, and is still in the git history.
 
 ## FAQ
 

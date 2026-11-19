@@ -1596,6 +1596,23 @@ def _read_source(root: Path, rel: str) -> str:
         return ""
 
 
+def _join_notes(notes: list[str]) -> str:
+    """相同的说明只说一次，重复的带上次数。
+
+    每个 Python 文件成功解析都会记一条「L3 Python ast 推导」—— 一百个文件
+    就是一百句一模一样的话，报告里读不下去。
+    """
+    counts: dict[str, int] = {}
+    order: list[str] = []
+    for n in notes:
+        if n not in counts:
+            counts[n] = 0
+            order.append(n)
+        counts[n] += 1
+    parts = [n if counts[n] == 1 else f"{n}（{counts[n]} 个文件）" for n in order]
+    return "；".join(parts) or "没有可分析的源文件"
+
+
 def analyze_files(root: Path, files: list[str],
                   prefer: str = "auto") -> DpAnalysis:
     """一组源文件（TS/JS + Python 混合）的判定点推导。
@@ -1644,7 +1661,7 @@ def analyze_files(root: Path, files: list[str],
 
     out = DpAnalysis(level=("L3" if rank == 3 else "L2" if rank == 2 else "L1"),
                      backend=backend, backend_source=backend_source,
-                     note="；".join(notes) or "没有可分析的源文件",
+                     note=_join_notes(notes),
                      points=points)
     out.assign_ids()
     return out

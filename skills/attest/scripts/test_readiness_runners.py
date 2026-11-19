@@ -134,6 +134,43 @@ NESTED_TAP_RUNNER = """console.log(%s);
 process.exitCode = 1;
 """ % json.dumps(NESTED_TAP)
 
+# node 24 起 `node --test` 默认不吐 TAP 了，而是 spec 汇总（`ℹ tests 2`）。
+# 只认 `# tests N` 的话，整个测试车道读不出来 ⇒ 判「未实测」⇒ 关键判据没测到 ⇒ 退 1。
+NODE_SPEC = """✔ ok case (0.366667ms)
+✖ bad case (0.377541ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 1
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+"""
+
+NODE_SPEC_RUNNER = """console.log(%s);
+process.exitCode = 1;
+""" % json.dumps(NODE_SPEC)
+
+
+def test_node_spec_summary_is_read() -> None:
+    print("\\nnode≥24 的 spec 汇总 ⇒ 也要读得出用例数与失败数")
+    s = readiness._node_summary(NODE_SPEC)
+    expect(s["tests"] == 2 and s["pass"] == 1 and s["fail"] == 1,
+           f"读得出 spec 汇总（实际 {s}）")
+
+
+def test_node_spec_failed_case_name_has_no_timing() -> None:
+    print("\\nnode≥24 的失败用例名 ⇒ 剥掉耗时后缀，能对上钉里写的名字")
+    got = readiness._failed_tests(NODE_SPEC)
+    expect(got == ["bad case"], f"用例名不带耗时（实际 {got}）")
+
+
+def test_node_spec_failure_blocks_and_is_read() -> None:
+    print("\\nnode≥24 的 spec 失败 ⇒ 认得出失败用例、判成阻塞项")
+    d = repo_with_runner("node scripts/runner.js", NODE_SPEC_RUNNER)
+    r = run("src", "--repo", str(d))
+    expect("1 项阻塞" in r.stdout, f"1 项阻塞（退出码 {r.returncode}）")
+    expect("bad case" in r.stdout, "点名失败的用例")
+
 
 def test_nested_tap_failure_keeps_full_path() -> None:
     print("\\n嵌套 TAP ⇒ 失败用例要带全路径与真实报错（不是套件聚合行）")
@@ -229,6 +266,9 @@ def main() -> int:
     test_nested_tap_failure_keeps_full_path()
     test_nested_env_error_not_blocking()
     test_nested_env_error_e2e_not_blocking()
+    test_node_spec_summary_is_read()
+    test_node_spec_failed_case_name_has_no_timing()
+    test_node_spec_failure_blocks_and_is_read()
     test_jest_like_failure_blocks()
     test_vitest_like_failure_blocks()
     test_mocha_like_failure_blocks()

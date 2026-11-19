@@ -7,6 +7,47 @@
 
 （暂无）
 
+## [0.1.28] - 2026-11-19
+
+**README 改成先回答「你的五个问题」，再讲机制；英文页纯英文，中文页纯中文；顺带修掉几个让「能力成立与否」失真的缺陷。**
+
+- **新的一节「你的五个问题」**（英文页 *Your five questions*）：这个需求该有哪些测试、这些测试是不是
+  真的存在、套件是否足够全面、是不是真能发现缺陷、能不能跑起来 —— 每一问给出 attest 怎么答、
+  在哪看，并说清第一问的两半：代码侧由工具反推，需求侧由读过需求的人写进计划，工具做对账。
+- **新的一节「边界在哪」**：八项按设计不判、它不写断言、代建的对账/基线脚本只是模板、
+  判定点判据只在 v2 计划且 L3 推导时硬判、变异类检查要主动要求、只读 TS/JS 与 Python、
+  退出码 0 的确切含义。
+- **两种语言各说各话**：英文页去掉中文输出块与中文终端截图，判据表只留英文名；中文页判据列去掉英文
+  括号注释；两页都指向 skill 的判据名中英对照（`skills/attest/references/criteria.md`），
+  退出码规则改成引代码里的英文孪生 `conclusion.exit_rule_en` ⇒ 英文页那句也不会漂。
+- **三张配图各有英文孪生版**（生成器加 `--lang zh|en`）：`attest-flow.en.svg`、`evidence-kinds.en.svg`、
+  `reconcile-2way.en.svg`；中文版逐字节不变。
+- **修 `parse_plan` 清空目标模块**（`req_plan.py:759-766`）：正文里任何提到「目标模块」的行都会把
+  已声明的模块清空（`new` 自己的模板里就有一句），于是 `upgrade` 不带 `--module` 时**判定点推成 0 个**、
+  `check` 的跨存储闸被跳过。改成只认真带反引号路径的声明行并累加 ⇒ 实测同一命令从 0 个变成 4276 个。
+- **修判定点推导等级说明重复**（`decision_points.py:1599-1613`）：每个 Python 文件都追加一句一样的
+  「L3 Python ast 推导」⇒ 一百个文件就是一百句。改成去重并带次数。
+- **修黄金 fixture 脚本在非 UTF-8 locale 下崩掉**（`fixtures/run_fixtures.sh:100`）：`$want_exit，实际`
+  这种「变量后面紧跟中文全角标点」的写法，在 `LANG` 未设的非交互 shell（bash 按 C locale 解析）里
+  会被当成一个含多字节的变量名 ⇒ 「unbound variable」⇒ 整条 fixture 闸挂掉。改成 `${want_exit}`。
+  CI 上 GitHub 默认 `LANG=C.UTF-8` 所以没暴露。
+- **修工具在 node ≥ 24 上读不出测试结果**（`readiness.py` 的 `_node_summary` / `_failed_tests` /
+  `_failed_tests_detail` / `_COV_ROW`）：node 24 起 `node --test` **指定单个文件**时默认不吐 TAP，
+  而是 spec 格式（`ℹ tests 2` / `✔` / `✖ 用例名 (0.37ms)`）⇒ 只认 `# tests N` 的话整个测试车道
+  读不出来 ⇒ 「测试全绿」判成「未实测」⇒ 因为关键判据没测到而退出码 1。现在两套格式都认：
+  汇总认 `ℹ tests N`，失败用例认 `✖`（并剥掉耗时后缀、丢掉 `✖ failing tests:` 段标题），
+  覆盖率表认 `#` 与 `ℹ` 两种行前缀，spec 明细块里的 `Error: ...` 也算报错详情。
+  回归测试见 `test_readiness_runners.py` 的三条 node≥24 用例。
+- **修「钉的用例红了却算没区分力」的假存活**（`mutation_check.py` 的 `match_case`）：失败条目带报错
+  详情（`用例名 | 报错文本`）时，拿整条去比用例名必然比不中 ⇒ 变异检查会把「钉的用例确实杀死了
+  变异」记成**存活** ⇒ 区分力自证给出错误的结论。现在比较前先剥掉详情部分。
+  回归测试见 `test_mutation_operators.py` 的 `test_match_case_is_strict`。
+- 测试车道加了调试开关：设 `ATTEST_DEBUG_LANE=1` 会把每个测试文件跑出来的原始 stdout/stderr
+  打出来 —— 排查「读不出用例结果」这类问题时省事。
+- README 里那句「在五个公开仓库上跑过」补上出处：那份自检报告随其他内部文档退出了仓库，还在 git 历史里。
+- 能力对照底稿刷新到当前版本（`~/workspace/orca/attest/attest-capability-gap-analysis.md`）：
+  五问逐问落到 `file:line`，外加今天挖出的三个缺陷与仍然缺的三样。
+
 ## [0.1.27] - 2026-11-19
 
 **README 做成两种语言各说各话：英文页纯英文，中文页纯中文。**

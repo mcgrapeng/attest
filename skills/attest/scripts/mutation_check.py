@@ -441,9 +441,13 @@ def match_case(case: str, full_path: str) -> bool:
 
     不做「去前缀」「包含」「去标点」—— 那些宽松规则会把别的用例的失败
     算成命中（假杀死）。
+
+    失败条目可能带报错详情（`用例名 | 报错文本`）⇒ 先剥掉详情部分再比。
+    不剥的话，钉的用例明明红了（名字后面跟着详情）却比不中 ⇒ 误判成
+    「这条钉没区分力」（假存活）。
     """
     a = " ".join(case.split())
-    b = " ".join(full_path.split())
+    b = " ".join(full_path.split(" | ", 1)[0].split())
     if not a or not b:
         return False
     if a == b:

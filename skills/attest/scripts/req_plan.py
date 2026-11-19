@@ -528,6 +528,9 @@ class Plan:
     detail_header: list[str] = field(default_factory=list)
     # 正文注释里的豁免：{DP ID: 理由}
     waivers: dict[str, str] = field(default_factory=dict)
+    # 正文注释里的**不变式**豁免：{不变式 ID: 理由}
+    # （复合不变式在判定点粒度下没有认领者 ⇒ 需要一个写明理由的出口）
+    invariant_exemptions: dict[str, str] = field(default_factory=dict)
     newcap_rows: list[list[str]] = field(default_factory=list)
     # 「人工确认」节：谁读过这份计划、什么时候、对不对。需求理解对不对本工具判不了，
     # 但"没人签过字"是一条必须出现在报告里的事实。
@@ -574,6 +577,11 @@ PLAN_FORMAT_V2 = "v2"
 # 正文里的豁免注释：<!-- attest:waive <DP ID> reason="..." -->
 _WAIVE_RE = re.compile(
     r"<!--\s*attest:waive\s+(?P<id>[^\s]+)\s+reason=\"(?P<reason>[^\"]*)\"\s*-->")
+
+# 不变式豁免：写法与判定点豁免一致，只是豁免的是「不变式没有判定点认领」这件事
+# （复合不变式在判定点粒度下天然没有认领者 ⇒ 需要一个写明理由的出口）
+_INV_EXEMPT_RE = re.compile(
+    r"<!--\s*attest:invariant-exempt\s+(?P<id>[^\s]+)\s+reason=\"(?P<reason>[^\"]*)\"\s*-->")
 
 # 豁免理由只有这几个字 ⇒ 没说明豁免了什么（规格 §4.2：提醒）
 _VAGUE_WAIVERS = ("不适用", "n/a", "na", "无", "none")
@@ -733,6 +741,8 @@ def parse_plan(path: Path) -> Plan:
         raise SystemExit(f"读不了计划文件: {e}")
     for m in _WAIVE_RE.finditer(plan.text):
         plan.waivers[m.group("id")] = m.group("reason")
+    for m in _INV_EXEMPT_RE.finditer(plan.text):
+        plan.invariant_exemptions[m.group("id")] = m.group("reason")
 
     sections: list[str] = []
     table_kind: str | None = None
@@ -1690,6 +1700,46 @@ def _waiver_findings(plan: Plan, repo: Repo, fs: list[Finding]) -> None:
             ))
 
 
+def _invariant_exemption_findings(plan: Plan, fs: list[Finding]) -> None:
+    """正文注释里的不变式豁免（<!-- attest:invariant-exempt <不变式 ID> reason="…" -->）。
+
+    豁免的是「这条不变式没有判定点认领」。指向空气、没给理由、理由太笼统
+    都是假豁免 —— 假豁免比不豁免更糟（它把「没测到」藏起来了）。
+    """
+    if not plan.invariant_exemptions:
+        return
+    inv_ids = {ident for ident, _d, _p in plan.invariants}
+    for raw, reason in plan.invariant_exemptions.items():
+        ident = raw.strip()
+        if not ident:
+            fs.append(Finding(
+                "error", "不变式清单",
+                "不变式豁免没写是哪条不变式",
+                "格式：<!-- attest:invariant-exempt I3 reason=\"…\" -->",
+            ))
+            continue
+        if ident not in inv_ids:
+            fs.append(Finding(
+                "error", "不变式清单",
+                f"不变式豁免 {ident} 不在不变式清单里",
+                "清单里没有这条不变式 ⇒ 豁免的是空气",
+            ))
+            continue
+        if not reason.strip():
+            fs.append(Finding(
+                "error", "不变式清单",
+                f"不变式豁免 {ident} 没给理由",
+                "写清楚这条不变式为什么不需要判定点认领",
+            ))
+            continue
+        if _vague_waiver(reason):
+            fs.append(Finding(
+                "warning", "不变式清单",
+                f"不变式豁免 {ident} 的理由「{reason.strip()}」太笼统",
+                "写清楚豁免了什么、为什么（规格 §4.2：提醒）",
+            ))
+
+
 def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
     """计划 vs 代码实况。"""
     fs: list[Finding] = []
@@ -1942,6 +1992,7 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
             ))
     # 正文注释里的豁免：两种格式都要查
     _waiver_findings(plan, repo, fs)
+    _invariant_exemption_findings(plan, fs)
 
     # 4e. 新建能力：已存在同名 ⇒ 重复造轮子；调用点 ≤1 ⇒ 过度设计
     for row in plan.newcap_rows:

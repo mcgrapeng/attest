@@ -3609,17 +3609,35 @@ def check_invariant_coverage(m: Module, plan_path: str | None) -> Check:
         inv = (row.invariant or "").strip()
         if inv:
             counts[inv] = counts.get(inv, 0) + 1
+    exempt = plan.invariant_exemptions or {}
     orphan = []
+    exempted: list[str] = []
     for ident, desc, _pin in plan.invariants:
         if counts.get(ident, 0) == 0:
+            reason = (exempt.get(ident) or "").strip()
+            if reason and not _vague_waiver(reason):
+                exempted.append(f"{ident}（{(desc or '')[:40]}）—— 写明理由豁免：{reason[:60]}")
+                continue
             orphan.append(f"{ident}（{(desc or '')[:40]}）—— 没有判定点认领它")
     if orphan:
+        detail = (f"{len(orphan)}/{len(plan.invariants)} 条不变式"
+                  "在代码里没有对应判定点")
+        evidence = orphan[:8]
+        if exempted:
+            detail += f"（另有 {len(exempted)} 条按写明理由豁免）"
+            evidence = evidence + exempted[:4]
         return Check("invariant-coverage", "不变式有判定点", "warn",
-                    f"{len(orphan)}/{len(plan.invariants)} 条不变式"
-                    "在代码里没有对应判定点",
-                    orphan[:8],
+                    detail,
+                    evidence,
                     "要么给这些不变式认领判定点，要么写明为什么它不需要 —— "
-                    "一个判定点都没有，通常意味着它只靠一条用例钉着，路径没被测全")
+                    "一个判定点都没有，通常意味着它只靠一条用例钉着，路径没被测全"
+                    "（豁免写法：<!-- attest:invariant-exempt I3 reason=\"…\" -->）")
+    if exempted:
+        return Check("invariant-coverage", "不变式有判定点", "pass",
+                     f"{len(plan.invariants) - len(exempted)} 条不变式都有判定点认领"
+                     f"（另有 {len(exempted)} 条按写明理由豁免）",
+                     exempted[:8],
+                     evidence_kind="static")
     return Check("invariant-coverage", "不变式有判定点", "pass",
                  f"{len(plan.invariants)} 条不变式都有判定点认领")
 

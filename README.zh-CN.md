@@ -156,7 +156,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.20
+      - uses: mcgrapeng/attest@v0.1.21
         with:
           module: src/auth
 ```
@@ -279,10 +279,10 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 
 ## 状态
 
-**在维护中，已发 `v0.1.20`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
+**在维护中，已发 `v0.1.21`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
 不会悄悄变。MIT 许可。
 
-仓库里的每个数字都来自一条你能重跑的命令：**37 / 37** 回归套件、**10 / 10** 黄金 fixture、
+仓库里的每个数字都来自一条你能重跑的命令：**38 / 38** 回归套件、**10 / 10** 黄金 fixture、
 **6 / 6** 行为 eval、allowlist 之外 **0** 条安全发现。
 
 已知缺口，全文在 [CHANGELOG.md](CHANGELOG.md)。最要紧的三条：

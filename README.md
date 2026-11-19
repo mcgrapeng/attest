@@ -90,6 +90,7 @@ approval this tool refuses to fake.
 | 5 | `scaffold <plan> --repo .` | Writes the test files the plan asks for, in your conventions; the assertions are left as TODO for you to fill |
 | 6 | `check <plan> --repo .` | Verifies every pin: does the file exist, does the case exist, is the invariant covered |
 | 7 | `reconcile <plan> --repo .` | Generates the cross-store reconciliation script from the plan's data-consistency section — the table and collection names come from the plan, and the slots that are still empty make the script refuse to run, so it cannot silently pass |
+| 8 | `baseline <plan> --repo .` | Generates the baseline-comparison script from the same section — the same contract: empty slots refuse to run, and the plan's original text is kept for the agent to fill from |
 
 Step 4 is what makes the three columns fillable by an agent instead of by hand: in
 its default mode `assign` hands out each decision point's code excerpt, the
@@ -173,7 +174,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.24
+      - uses: mcgrapeng/attest@v0.1.25
         with:
           module: src/auth
 ```
@@ -300,11 +301,11 @@ read the source, and a static signal can never carry a pass on its own.
 | 断言的期望值独立 (assertion oracles are independent) | **Static signal.** Assertions whose expected value comes from the system under test |
 | 计划与机器推导对齐 (the plan matches the machine-derived decision points) | **Static signal.** The decision points are reverse-derived from the source and compared with the plan in both directions |
 | 应有判定点覆盖到位 (the decision points are covered) | **Static signal.** Every high-risk decision point has an owning invariant or a written exemption, and the pin really exists |
-| 不变式有判定点 (every invariant reaches a decision point) | **Static signal.** The other direction of the same reconciliation: every invariant has at least one decision point claiming it — one with none is only pinned by a single test case |
+| 不变式有判定点 (every invariant reaches a decision point) | **Static signal.** The other direction of the same reconciliation: every invariant has at least one decision point claiming it — one with none is only pinned by a single test case. A composite invariant that has no claiming decision point by nature can be exempted in the plan with `<!-- attest:invariant-exempt I3 reason="…" -->`; the exemption needs a real reason and is reported, never silent |
 
 ## Status
 
-**Actively developed. Released as `v0.1.24`.** The criteria and the skill
+**Actively developed. Released as `v0.1.25`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 

@@ -7,6 +7,26 @@
 
 （暂无）
 
+## [0.1.20] - 2026-11-19
+
+**Tier 2 去重判出的两处「同一逻辑两份实现」合并成一份（真冗余修掉了）。**
+
+- **JS/TS 字符串与注释清空**：原先 `decision_points._strip_js_code` 与
+  `mutation_check._strip_js_code` 是**逐字相同**的两份（同一正则、同一 `_blank`，
+  只有 docstring 措辞不同），两个 docstring 里自己写着「改一处要改两处」。
+  现在抽到叶子模块 `scripts/code_strip.py`（`strip_js_code` / `strip_py_code`），
+  `decision_points` / `mutation_check` / `discriminate` 共用同一实现。
+- **模块名识别**：`readiness._module_tokens` 与 `selfcheck._module_tokens` 各写了一份，
+  后者还把 src 布局的包目录识别重写了一遍（两边要人工保持对齐）。
+  现在抽到 `scripts/module_names.py`（`python_package_dir` / `module_tokens`）。
+- `_link_deps` 两份**没动**：形状真不同（一个要处理 workspace 子根、一个要带 Rust 的
+  `target`、返回格式也不同），硬合并要把差异全塞进参数里 —— 那是把「相似」当成「相同」，
+  不值当。
+- **加了回归** `test_shared_helpers.py`（第 37 个套件）：除了行为不变（偏移量/行号保持、
+  字符串在前、Python 用 tokenize），还钉住**各调用方用的是同一个函数对象** ——
+  以后再有人复制一份实现，这里会红。
+- Tier 1 分数不变（93.5 / A）；仓库安全扫描闸「未放行 0 条」。
+
 ## [0.1.19] - 2026-11-18
 
 **更正 v0.1.18 里关于 AE1 的说法：那轮「带 key 后 AE1 消失」是假信号。**

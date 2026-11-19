@@ -38,6 +38,8 @@ from req_plan import (  # noqa: E402
 )
 from decision_points import HIGH_RISK_KINDS, dp_key, normalize_dp_id  # noqa: E402
 import discriminate  # noqa: E402
+import module_names  # noqa: E402
+from module_names import module_tokens  # noqa: E402
 import mutation_check  # noqa: E402
 
 CODE_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
@@ -232,23 +234,15 @@ _TEST_NON_TEST_NAMES = {
 
 
 def _module_tokens(m: Module) -> list[str]:
-    """这个模块在测试文件里可能出现的名字（路径 / 目录名 / Python 包名）。"""
-    toks: list[str] = []
+    """这个模块在测试文件里可能出现的名字（路径 / 目录名 / Python 包名）。
+
+    实现与 selfcheck 共用（module_names）—— 以前两边各写一份，要人工保持对齐。
+    """
     try:
         rel = str(m.base.relative_to(m.root))
     except ValueError:
         rel = ""
-    if rel and rel != ".":
-        toks.append(rel)
-        toks.append(Path(rel).name)
-    pkg = python_package_dir(m)
-    if pkg:
-        toks.append(pkg.name)
-    out: list[str] = []
-    for t in toks:
-        if t and t not in out:
-            out.append(t)
-    return out
+    return module_tokens(rel, module_names.python_package_dir(m.base))
 
 
 def _mentions_module_path(p: Path, tokens: list[str]) -> bool:
@@ -2235,16 +2229,8 @@ _PY_IFACE_BASES = ("Protocol", "ABC", "ABCMeta", "Generic", "TypedDict")
 
 
 def python_package_dir(m: Module) -> Path | None:
-    """src 布局里的包目录（src/<pkg>/__init__.py）。"""
-    if m.base.name in ("src", "lib"):
-        for child in sorted(m.base.iterdir()) if m.base.is_dir() else []:
-            if child.is_dir() and (child / "__init__.py").exists():
-                return child
-        return None
-    if (m.base / "__init__.py").exists():
-        return m.base
-    return None
-
+    """src 布局里的包目录（src/<pkg>/__init__.py）—— 实现在 module_names（与 selfcheck 共用）。"""
+    return module_names.python_package_dir(m.base)
 
 def python_test_cmd(m: Module, root: Path) -> tuple[str | None, list[str]]:
     """找 pytest 可执行文件与测试目录。"""

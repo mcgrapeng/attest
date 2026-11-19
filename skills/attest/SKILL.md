@@ -101,7 +101,7 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> \
 | 3 | agent | 把不变式与覆盖矩阵填进计划；再用 `upgrade` 把维度表换成判定点粒度 |
 | 4 | agent | 用 `assign` 批量认领判定点：拉清单 → 逐条判归属或写豁免理由 → `--apply` 写回 |
 | 5 | agent | `scaffold` 生成测试骨架，**并把断言填掉**（工具不知道期望值，读过需求的 agent 知道） |
-| 5' | agent | 跨存储的模块：跑 `req_plan.py reconcile` 生成对账脚本骨架，填完 `<待填>` ⇒ 下一轮 readiness 会自动认出它并真跑 |
+| 5' | agent | 跨存储的模块：跑 `req_plan.py reconcile` 生成对账脚本骨架，填完 `<待填>` ⇒ 下一轮 readiness 会自动认出它并真跑；要跟「当初的快照」对拍则跑 `req_plan.py baseline`（填完要在 package.json 里加 `eval:baseline:check:<模块>`） |
 | 6 | agent | 跑 `check`，把红清掉（红的都是真的：钉错了、落点不存在、维度没答） |
 | 7 | agent | 填「确认」节（记自己是谁、依据是什么）与「本工具不判定项的归属」八行 |
 | 8 | agent | 跑 `readiness.py`，读交付前置条件：三条齐 ⇒ 可以进交付流程 |
@@ -147,6 +147,7 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> \
 | `scripts/req_plan.py scaffold` | 生成测试文件骨架（断言留 TODO） | 计划写完之后 |
 | `scripts/req_plan.py check` | 核对每一个钉（文件、用例名、维度、豁免） | 交给别人看之前 |
 | `scripts/req_plan.py reconcile` | 按计划的数据一致性节生成对账脚本骨架 | 跨存储的模块 |
+| `scripts/req_plan.py baseline` | 按计划的数据一致性节生成基线对拍脚本骨架 | 要跟「当初的快照」对拍的模块 |
 | `scripts/readiness.py` | 交付就绪度判定（跑仓库自己的车道与闸） | 验收时 |
 | `scripts/selfcheck.py` | 工具自检：往副本注入已知缺陷，验证判据会翻红 | 改了判据逻辑之后 |
 

@@ -2846,6 +2846,158 @@ main().catch((e) => {
 """
 
 
+def _baseline_rows(plan: Plan) -> list[dict]:
+    """从「数据一致性」节抽出每一行的口径：数据 / 权威源 / 基线快照。
+
+    基线快照路径藏在「一致性怎么验（钉）」列里（形如
+    ``scripts/memory-baseline-check.ts`` 基线快照 ``fixtures/baseline.json``）
+    ⇒ 这里取**反引号里以 .json 结尾的那个**；抽不出来就留占位，不猜。
+    """
+    out = []
+    for row in plan.consistency_rows:
+        if len(row) < 3:
+            continue
+        data, auth, mirror = row[0], row[1], row[2]
+        how = row[3] if len(row) > 3 else ""
+        auth_ids = re.findall(r"`([^`]+)`", auth)
+        ids = re.findall(r"`([^`]+)`", how)
+        json_ids = [i for i in ids if i.endswith(".json")]
+        first_auth = auth_ids[0] if auth_ids else ""
+        out.append({
+            "data": data,
+            "auth": auth,
+            "mirror": mirror,
+            "how": how,
+            "pg_table": (first_auth.split(".")[0] if first_auth else ""),
+            "pg_column": (first_auth.split(".", 1)[1] if "." in first_auth else ""),
+            "baseline_path": (json_ids[0] if json_ids else ""),
+        })
+    return out
+
+
+BASELINE_HEADER = """/**
+ * 基线对拍脚本 —— 由 attest 的 `req_plan.py baseline` 生成。
+ *
+ * 生成的依据是计划里的「数据一致性」节：每一行 = 一份数据、它的权威源、
+ * 以及一致性怎么验。**这份脚本只比对，不改数据** —— 改数据是另一个动作。
+ *
+ * 基线对拍与跨存储对账的区别：对账比的是「两个存储之间是否一致」，
+ * 对拍比的是「现在这份数据与**当初的基线快照**是否一致」—— 用来发现
+ * 悄悄变了但没人说的数据漂移。
+ *
+ * ⚠️ 填完之前它**拒绝运行**：脚本启动时先扫自己有没有 `<待填` ⇒ 有就打印
+ * 缺哪几项并退出非零。宁可红，不可静默绿（attest 的一贯口径）。
+ *
+ * 填完之后：在 package.json 里加一条（readiness 靠脚本名认出这条车道）：
+ *   "eval:baseline:check:memory": "tsx scripts/baseline-memory.ts"
+ * ⇒ 下一轮验收会真跑它。
+ */
+
+const TODO_RE = () => /<待填[^>]*>/;
+
+/** 本模块要对拍的数据（来自计划的「数据一致性」节）。 */
+type BaselineItem = {
+  /** 这份数据是什么 */
+  data: string;
+  /** 权威源：PG 表 */
+  pgTable: string;
+  /** 权威源里的主键列 */
+  pkColumn: string;
+  /** 要比对的正文列（空 = 只比存在性） */
+  bodyColumn: string;
+  /** 基线快照（JSON）：键 = 主键，值 = 正文 */
+  baselinePath: string;
+  /** 容差：正文差多少算漂移（数字；0 = 必须完全一致） */
+  tolerance: number;
+};
+
+const ITEMS: BaselineItem[] = [
+/*ITEMS*/
+];
+
+/** 扫描自己有没有没填的占位 —— 有就别跑。 */
+function unfilled(): string[] {
+  const out: string[] = [];
+  for (const [i, it] of ITEMS.entries()) {
+    for (const [k, v] of Object.entries(it)) {
+      if (typeof v === 'string' && TODO_RE().test(v)) {
+        out.push(`第 ${i + 1} 行（${it.data}）的 ${k}`);
+      }
+    }
+  }
+  return out;
+}
+
+function main(): number {
+  const missing = unfilled();
+  if (missing.length > 0) {
+    console.error('这份基线对拍脚本还没填完，拒绝运行（避免静默当成「没有漂移」）：');
+    for (const m of missing) console.error(`  · ${m}`);
+    process.exit(1);
+  }
+  // TODO: 接上仓库自己的 PG 客户端与基线快照读取：
+  //   1. 读基线快照（baselinePath）：{ 主键: 正文 }
+  //   2. 按租户枚举权威源的当前行（pgTable），按主键对齐
+  //   3. 正文差异超过容差 ⇒ 报漂移（写清楚是哪条、主键是什么、差多少）
+  //   4. 基线里有、现在没有的键 ⇒ 报「基线有现在没了」（删除漂移）
+  //   5. 现在有、基线里没有的键 ⇒ 报「新增」（不一定是漂移，但要知道）
+  // 每项都按租户分开报 —— 判交付只看生产租户，测试租户是信息不是阻塞。
+  console.error('还没接上比对逻辑：把上面的 TODO 换成仓库自己的 PG 客户端与基线快照读取。');
+  process.exit(1);
+}
+
+main();
+"""
+
+
+def cmd_baseline(args: argparse.Namespace) -> int:
+    """按计划的「数据一致性」节生成基线对拍脚本（代建侧）。"""
+    root = Path(args.repo).resolve()
+    plan_path = Path(args.plan)
+    if not plan_path.is_absolute() and not plan_path.exists():
+        alt = root / plan_path
+        if alt.exists():
+            plan_path = alt
+    if not plan_path.exists():
+        print(f"计划文件不存在: {plan_path}", file=sys.stderr)
+        return 1
+    plan = parse_plan(plan_path.resolve())
+    rows = _baseline_rows(plan)
+    if not rows:
+        print("计划里没有「数据一致性」节的数据行 ⇒ 没有可生成的对拍口径\n"
+              "（只有一种存储的模块不需要对拍）", file=sys.stderr)
+        return 1
+    items = []
+    for r in rows:
+        pg_table = r["pg_table"] or "<待填：PG 表名>"
+        baseline_path = r["baseline_path"] or "<待填：基线快照路径（JSON）>"
+        items.append(
+            f"  // 计划原文：权威源 {r['auth']} ｜ 镜像 {r['mirror']} ｜ 怎么验 {r['how']}\n"
+            "  {\n"
+            f"    data: '{_js_str(r['data'] or '<待填：这份数据是什么>')}',\n"
+            f"    pgTable: '{_js_str(pg_table)}',\n"
+            "    pkColumn: '<待填：主键列>',\n"
+            f"    bodyColumn: '{_js_str(r['pg_column'] or '<待填：要比对的正文列（空=只比存在性）>')}',\n"
+            f"    baselinePath: '{_js_str(baseline_path)}',\n"
+            "    tolerance: 0,\n"
+            "  },"
+        )
+    out = Path(args.out) if args.out else root / "scripts" / "baseline-memory.ts"
+    if out.exists() and not args.force:
+        print(f"文件已存在，不覆盖: {out}\n"
+              "（要覆盖加 --force；想保留就换 --out 路径）", file=sys.stderr)
+        return 1
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(BASELINE_HEADER.replace("/*ITEMS*/", "\n".join(items)),
+                   encoding="utf-8")
+    print(f"已生成 {out}（{len(rows)} 条对拍口径）")
+    print("填完 `<待填>` 之前它拒绝运行（退出码 1）—— 宁可红，不可静默绿。")
+    print("填完之后：在 package.json 里加一条 "
+          "\"eval:baseline:check:memory\" → \"tsx scripts/baseline-memory.ts\"，"
+          "readiness 就会认出这条车道并真跑。")
+    return 0
+
+
 def cmd_reconcile(args: argparse.Namespace) -> int:
     """按计划的「数据一致性」节生成对账脚本（代建侧）。"""
     root = Path(args.repo).resolve()
@@ -3727,6 +3879,15 @@ def main(argv: list[str]) -> int:
                       help="生成路径（默认 <仓库根>/scripts/reconcile-memory.ts）")
     p_rc.add_argument("--force", action="store_true", help="覆盖已存在的文件")
     p_rc.set_defaults(func=cmd_reconcile)
+
+    p_bl = sub.add_parser(
+        "baseline", help="按计划的「数据一致性」节生成基线对拍脚本")
+    p_bl.add_argument("plan", help="计划文件")
+    p_bl.add_argument("--repo", default=".", help="仓库根")
+    p_bl.add_argument("--out", default=None,
+                      help="生成路径（默认 <仓库根>/scripts/baseline-memory.ts）")
+    p_bl.add_argument("--force", action="store_true", help="覆盖已存在的文件")
+    p_bl.set_defaults(func=cmd_baseline)
 
     p_chk = sub.add_parser("check", help="校验计划 vs 代码实况")
     p_chk.add_argument("plan", help="计划文件")

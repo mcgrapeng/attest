@@ -92,6 +92,13 @@ python3 "$SKILL_DIR/scripts/req_plan.py check <计划文件> --repo <根>
 python3 "$SKILL_DIR/scripts/req_plan.py reconcile <计划文件> --repo <根> \
   [--out scripts/reconcile-<模块>.ts]
 
+# 3''. 生成基线对拍脚本骨架（比「现在」与「当初的快照」）
+python3 "$SKILL_DIR/scripts/req_plan.py baseline <计划文件> --repo <根> \
+  [--out scripts/baseline-<模块>.ts]
+#   填完 <待填> 后在 package.json 里加一条
+#   "eval:baseline:check:<模块>": "tsx scripts/baseline-<模块>.ts"
+#   ⇒ readiness 才会认出这条车道并真跑它
+
 # 4. 模块交付就绪度判定（一条命令，实测）
 python3 "$SKILL_DIR/scripts/readiness.py <模块路径> --repo <根> \
   [--plan <计划文件>] [--include-itest] [--test-tenant <名字或前缀>] [--json]

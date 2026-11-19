@@ -156,7 +156,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.21
+      - uses: mcgrapeng/attest@v0.1.22
         with:
           module: src/auth
 ```
@@ -274,12 +274,9 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 | 应有判定点覆盖到位 (the decision points are covered) | **静态信号。** 每个高危判定点都有不变式认领或写明豁免，且落点真实存在 |
 | 不变式有判定点 (every invariant reaches a decision point) | **静态信号。** 同一套对账的另一头：每条不变式至少有一个判定点认领它 —— 一个都没有的，只靠一条用例钉着 |
 
-每条完整的测法与语言矩阵，在
-**[docs/criteria.md](docs/criteria.md)**。
-
 ## 状态
 
-**在维护中，已发 `v0.1.21`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
+**在维护中，已发 `v0.1.22`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
 不会悄悄变。MIT 许可。
 
 仓库里的每个数字都来自一条你能重跑的命令：**38 / 38** 回归套件、**10 / 10** 黄金 fixture、
@@ -292,8 +289,7 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 - **自检副本默认不带 `node_modules`** ⇒ 多数仓库在副本里跑不动测试，`--self-check-deps`
   把它们软链进来。
 
-attest 还在五个公开仓库上跑过，**并把结论公开了 —— 包括那些让工具显得不好看的**：
-[docs/self-test-report.md](docs/self-test-report.md)。
+attest 还在五个公开仓库上跑过 —— **结论里包括那些让工具显得不好看的**。
 
 ## FAQ
 
@@ -327,9 +323,7 @@ job 失败（`strict: false`）；`strict: true` 才会。`--self-check` 模式�
 
 **有人在维护吗？**
 它有发版、有版本号、改动都公开：
-[CHANGELOG.md](CHANGELOG.md)，还有[路线图](docs/roadmap.md)写着接下来做什么。attest
-也公开自己在五个公开仓库上的结论 —— 包括那些让工具显得不好看的
-（[自测报告](docs/self-test-report.md)）。
+[CHANGELOG.md](CHANGELOG.md)。
 
 ## 参与共建
 
@@ -340,6 +334,3 @@ job 失败（`strict: false`）；`strict: true` 才会。`--self-check` 模式�
 ## License
 
 MIT.
-
-最后一句话归证据所有：attest 在五个公开仓库上得出的结论，**包括那些让工具显得不好看的**
-—— 都在 [docs/self-test-report.md](docs/self-test-report.md)。

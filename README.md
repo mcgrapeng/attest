@@ -173,7 +173,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.21
+      - uses: mcgrapeng/attest@v0.1.22
         with:
           module: src/auth
 ```
@@ -302,12 +302,9 @@ read the source, and a static signal can never carry a pass on its own.
 | 应有判定点覆盖到位 (the decision points are covered) | **Static signal.** Every high-risk decision point has an owning invariant or a written exemption, and the pin really exists |
 | 不变式有判定点 (every invariant reaches a decision point) | **Static signal.** The other direction of the same reconciliation: every invariant has at least one decision point claiming it — one with none is only pinned by a single test case |
 
-How each one is measured in full, and the language matrix, are in
-**[docs/criteria.md](docs/criteria.md)**.
-
 ## Status
 
-**Actively developed. Released as `v0.1.21`.** The criteria and the skill
+**Actively developed. Released as `v0.1.22`.** The criteria and the skill
 contract may still change: but they will change with a changelog entry, not
 silently. MIT licensed.
 
@@ -323,9 +320,8 @@ matter most:
 - **The self-check copy has no `node_modules`** by default; `--self-check-deps`
   symlinks them in.
 
-attest has also been run against five public repositories and **published the
-verdicts, including the ones that made the tool look wrong**:
-[docs/self-test-report.md](docs/self-test-report.md).
+attest has also been run against five public repositories — **including
+verdicts that made the tool look wrong**.
 
 ## FAQ
 
@@ -369,10 +365,7 @@ for a human.
 
 **Is this maintained?**
 It is released, versioned, and the changes to it are published:
-[CHANGELOG.md](CHANGELOG.md), and [the roadmap](docs/roadmap.md) says what is
-being built next. attest also publishes its own verdicts on five public
-repositories — including the ones that made the tool look wrong
-([self-test report](docs/self-test-report.md)).
+[CHANGELOG.md](CHANGELOG.md).
 
 ## Contributing
 
@@ -384,7 +377,3 @@ follows the [Code of Conduct](CODE_OF_CONDUCT.md).
 ## License
 
 MIT.
-
-The last word belongs to the evidence: the verdicts attest produced on five
-public repositories, **including the ones that made the tool look wrong** —
-are published in [docs/self-test-report.md](docs/self-test-report.md).

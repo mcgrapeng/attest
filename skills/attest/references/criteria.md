@@ -2,6 +2,47 @@
 
 每条判据到底怎么测、测不出来时怎么算、报告里怎么分层。入口那张表是速查，这里是不速查时的那份。
 
+## 判据名对照（中英）
+
+工具打印的是**中文名**，英文 README 用的是**英文名**，两边指的是同一条判据。这张表是
+唯一的对照处：`README.md` 与 `README.zh-CN.md` 各自只写自己那一种语言，英文读者靠这张
+表把英文名对回终端里那条中文名。
+
+报告里的四档：
+
+| 报告里的段 | 英文 README 写的 |
+| --- | --- |
+| 已实测 | Measured |
+| 静态信号 | Static signal |
+| 未实测 | Not measured |
+| 本工具不判定 | Not judged |
+
+18 条判据：
+
+| 工具打印的中文名 | 英文 README 写的 |
+| --- | --- |
+| 测试全绿 | tests green |
+| 核心逻辑测试到位 | core logic is covered |
+| 测试能发现缺陷 | the tests can find defects |
+| 表结构基本合规 | schema is basically compliant |
+| 数据流一致（跨存储对账） | data agrees across stores |
+| 数据准确（基线对拍） | data matches the baseline |
+| 钉有区分力 | the pin has discriminating power |
+| 需求覆盖到位 | requirement is covered |
+| 向量集合属性自洽 | vector collection attributes agree |
+| 测试卫生（不留残留、不靠 sleep） | test hygiene |
+| 导出的逻辑都有测试 | every export is referenced by a test |
+| 不过度抽象 | not over-abstracted |
+| 没有重复造轮子 | no reinvented wheels |
+| 使用主流开源库 | uses mainstream open-source libraries |
+| 断言的期望值独立 | assertion oracles are independent |
+| 计划与机器推导对齐 | the plan matches the machine-derived decision points |
+| 应有判定点覆盖到位 | the decision points are covered |
+| 不变式有判定点 | every invariant reaches a decision point |
+
+这张表由回归测试对着代码校验：中文名必须等于工具实际打印的判据名，英文名必须等于
+英文 README 表里那一列 —— 改了工具的判据名而不改这里，测试就会红。
+
 ## 存储类模块：数据流自身要审出来
 
 模块碰了 PG 之外的存储（向量库、对象存储、消息队列），交付判定要覆盖**数据本身**，

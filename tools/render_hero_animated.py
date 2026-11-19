@@ -132,10 +132,10 @@ def render(lines: list[str]) -> str:
         f'<rect width="{w:.0f}" height="{h}" rx="12" fill="{CARD}" stroke="{EDGE}"/>\n'
         f'</g>\n'
         f'<line x1="0" y1="30" x2="{w:.0f}" y2="30" stroke="{EDGE}" opacity=".7"/>\n'
-        f'{dots}\n{title}\n'
+        f'{dots}\n{title}\n{verdict}\n'
         f'<g class="att-mono" font-size="{FS}" fill="{FG}">\n'
         + "\n".join(body)
-        + f'\n</g>\n{verdict}\n{cursor}\n{scan}\n</svg>\n')
+        + f'\n</g>\n{cursor}\n{scan}\n</svg>\n')
 
 
 def main() -> int:

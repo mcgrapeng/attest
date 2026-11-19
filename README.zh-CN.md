@@ -84,6 +84,7 @@ itest 车道能被找到、也能用 `--include-itest` 跑起来，但 pytest �
 | 5 | `scaffold <plan> --repo .` | 按计划生成测试文件，用你仓库的约定；断言留成 TODO 给你填 |
 | 6 | `check <plan> --repo .` | 核对每一个钉：文件在不在、用例在不在、不变式有没有被覆盖 |
 | 7 | `reconcile <plan> --repo .` | 按计划的数据一致性节生成跨存储对账脚本 —— 表名与集合名从计划里抽好，还没填的槽位会让脚本拒绝运行，所以它不可能静默通过 |
+| 8 | `baseline <plan> --repo .` | 按同一节生成基线对拍脚本骨架 —— 同一套契约：空槽位拒绝运行，计划原文保留给 agent 对照着填 |
 
 第 4 步是让那三列能由 agent 填、而不是由人手填的关键：默认状态下 `assign` 把每个判定点的
 源码、候选测试文件、计划自己的不变式一起交出去；`--apply` 把答案收回来并写回计划。核不过的
@@ -156,7 +157,7 @@ jobs:
         with:
           node-version: '22'
       - run: npm ci
-      - uses: mcgrapeng/attest@v0.1.24
+      - uses: mcgrapeng/attest@v0.1.25
         with:
           module: src/auth
 ```
@@ -272,11 +273,11 @@ attest 自己 fixture（`fixtures/ts-colocated`）的真实输出。工具的输
 | 断言的期望值独立 (assertion oracles are independent) | **静态信号。** 断言的期望值来自被测对象自身 |
 | 计划与机器推导对齐 (the plan matches the machine-derived decision points) | **静态信号。** 判定点从源码反推出来，与计划双向对账 |
 | 应有判定点覆盖到位 (the decision points are covered) | **静态信号。** 每个高危判定点都有不变式认领或写明豁免，且落点真实存在 |
-| 不变式有判定点 (every invariant reaches a decision point) | **静态信号。** 同一套对账的另一头：每条不变式至少有一个判定点认领它 —— 一个都没有的，只靠一条用例钉着 |
+| 不变式有判定点 (every invariant reaches a decision point) | **静态信号。** 同一套对账的另一头：每条不变式至少有一个判定点认领它 —— 一个都没有的，只靠一条用例钉着。复合不变式（天然没有认领者的）可以在计划里写 `<!-- attest:invariant-exempt I3 reason="…" -->` 豁免；豁免必须有真实理由，且会出现在报告里（不静默） |
 
 ## 状态
 
-**在维护中，已发 `v0.1.24`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
+**在维护中，已发 `v0.1.25`。** 判据与 skill 契约仍可能变 —— 但会带着 changelog 条目变，
 不会悄悄变。MIT 许可。
 
 仓库里的每个数字都来自一条你能重跑的命令：**38 / 38** 回归套件、**10 / 10** 黄金 fixture、

@@ -5,7 +5,28 @@
 
 ## [Unreleased]
 
-（暂无）
+**按 SkillEvaluator 的评估结果收拾 skill 契约本身：SKILL.md 压到读得下的长度、参考文档收成一层、frontmatter 去掉规范外字段。**
+
+- **`SKILL.md` 压到 OpenClaw 读得下的长度**：按 OpenClaw 的口径（每个 CJK 字符算 4 个字符）
+  原本读作 17,901 字符，超过它的读上限 ⇒ 在那个 harness 上会被截断或拒读，agent 拿不到
+  完整指令。压到 **14,921**（−16.6%）：判据表的「怎么测」速查列收短、「线A 九步」表的细则列
+  并入做法列、「怎么从需求派生不变式」的四条下沉到 `references/workflow.md`。**判据表 18 行与
+  判据名逐字未动**（`test_readiness_r2.py` 对着代码里的 Check 校验），章节结构未变，链接全部
+  仍在一层之内。
+- **`examples/` 并进 `references/`**：案例文件移到 `references/cross-store-reconciliation.md`，
+  与其余四份参考文档平级（`references/`、`templates/`、`assets/`、`scripts/` 之外的目录不被
+  hermes 列进 skill 文件清单）。SKILL.md 里的链接改到新位置；`references/` 内部不再链到别的
+  .md —— 评估器把「references 里再链 .md」判成嵌套引用（效率维度扣 10 分）。
+- **删掉 frontmatter 顶层的 `version`**：agentskills.io 规范里没有这个字段（`metadata.version`
+  还在，harness 不会把顶层字段传给模型）。
+- **已知且接受的一条 finding**：`Unexpected 'LICENSE' in skill root`。LICENSE 必须跟着包走
+  （`package.py` 硬要求它在那个位置），而评估器的允许根目录清单只认 `README.md`，
+  `SKILLEVALUATOR_SCHEMA_ALLOWED_DIRS` 只能加目录 ⇒ 这条消不掉。写进 CONTRIBUTING.md，
+  免得以后有人「顺手修好」它而把打包搞坏。
+
+验证：38 个回归脚本全绿、黄金 fixture 10/10、evals 6/6、`package.py --check` 绿、
+仓库自带安全闸未放行 0 条；`skillevaluator tier1 --no-llm` 的 quality 从 93.5/A 升到
+**95.0/A**（效率维度 90 → 100），medium 级 finding 从 1 条降到 0 条。
 
 ## [0.1.28] - 2026-11-19
 

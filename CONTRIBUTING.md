@@ -46,6 +46,28 @@ the repository, that every path they mention exists, and that the sample
 report is the tool's verbatim output. If you change a criterion count or a
 command, run it before you commit.
 
+### Optional: the skill contract's own score
+
+`skillevaluator tier1 skills/attest --no-llm` (needs `pip install skillevaluator`)
+scores `SKILL.md` itself: structure, wording, and the harnesses it must load
+in. It is not in CI because its Security Scan step cannot complete on any
+skill — the scanner exits non-zero when it finds something, which that step
+reads as "the scanner broke". Two of its findings are known and accepted:
+
+- `Unexpected 'LICENSE' in skill root` — the LICENSE has to ship inside the
+  package (`package.py` requires it at that path), and the validator's
+  allowed-root list only knows `README.md`. `SKILLEVALUATOR_SCHEMA_ALLOWED_DIRS`
+  extends the allowed *directories* only, so this one cannot be silenced. Do
+  not "fix" it by moving the file.
+- `No troubleshooting section documented` and `No mention of error handling` —
+  false positives: the section exists as `## 出错了怎么办` (the validator only
+  looks for the English heading), and the LLM rubric scores it 9/10.
+
+Its `Harness Compatibility` check is the one that matters here: it fails when
+`SKILL.md` gets too long for a harness that counts CJK characters as four.
+Keep it under 15,000 weighted characters — measure with the validator's own
+`_openclaw_read_chars`, not with a byte count.
+
 ## What a pull request looks like
 
 - One behavioural change per commit, with the regression assertion in the same

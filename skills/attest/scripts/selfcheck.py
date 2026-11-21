@@ -36,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import module_names  # noqa: E402
+from dep_links import link_deps  # noqa: E402
 from module_names import module_tokens  # noqa: E402
 
 # ---------------------------------------------------------------- 常量
@@ -45,6 +46,9 @@ ID_UNCOVERED_EXPORTS = "uncovered-exports"
 ID_HYGIENE = "hygiene"
 
 FAULT_KINDS = ("drop-test", "inject-sleep")
+
+#: 反向验证要软链进副本的依赖目录（多一个 Rust 的 target/）。
+SELFCHECK_DEP_DIRS = ("node_modules", ".venv", "venv", "target")
 
 #: 判据里"翻红"算失败的状态（skipped 也算——它不再是绿的）
 RED_STATUS = ("fail", "warn", "skipped")
@@ -286,26 +290,6 @@ def _mentions_module(p: Path, tokens: list[str]) -> bool:
 def _copy_file(src: Path, dst: Path) -> None:
     dst.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(src, dst)
-
-
-def _link_deps(repo: Path, dst: Path) -> list[str]:
-    """把依赖目录**软链**进副本（不复制体积）。
-
-    不带依赖 ⇒ 副本里跑不动测试 ⇒ 反向验证只能证明静态判据抓得住东西。
-    软链（不是复制）既能跑真测试，又不花时间与磁盘。
-    """
-    linked: list[str] = []
-    for name in ("node_modules", ".venv", "venv", "target"):
-        src = repo / name
-        dst_link = dst / name
-        if not src.is_dir() or dst_link.exists() or dst_link.is_symlink():
-            continue
-        try:
-            dst_link.symlink_to(src, target_is_directory=True)
-            linked.append(name)
-        except OSError:
-            pass
-    return linked
 
 
 def _copy_subset(repo: Path, dst: Path, module_rel: str) -> None:
@@ -572,7 +556,8 @@ def _run_one_fault(kind: str, readiness_py: Path, repo: Path,
         if with_deps:
             # 软链依赖目录 ⇒ 副本里能真跑测试 ⇒ 反向验证能覆盖**实测类**判据
             # （默认不带：软链让副本里的测试连到真实依赖，代价与风险都更高）
-            _link_deps(repo, copy_root)
+            link_deps(repo, copy_root,
+                      names=SELFCHECK_DEP_DIRS)
 
         base_checks, base_out = _run_readiness(readiness_py, copy_root,
                                                module_rel, timeout)

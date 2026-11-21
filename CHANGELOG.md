@@ -3,9 +3,73 @@
 本文件记 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的格式，
 版本号用 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.1.29] - 2026-11-21
 
-（暂无）
+**按 SkillEvaluator 的评估结果收拾 skill 契约本身：SKILL.md 压到读得下的长度、参考文档收成一层、Tier 2 判出的两处重复收成一份实现。**
+
+- **`SKILL.md` 压到 OpenClaw 读得下的长度**：按 OpenClaw 的口径（每个 CJK 字符算 4 个字符）
+  原本读作 17,901 字符，超过它的读上限 ⇒ 在那个 harness 上会被截断或拒读，agent 拿不到
+  完整指令。压到 **14,921**（−16.6%）：判据表的「怎么测」速查列收短、「线A 九步」表的细则列
+  并入做法列、「怎么从需求派生不变式」的四条下沉到 `references/workflow.md`。**判据表 18 行与
+  判据名逐字未动**（`test_readiness_r2.py` 对着代码里的 Check 校验），章节结构未变，链接全部
+  仍在一层之内。
+- **`examples/` 并进 `references/`**：案例文件移到 `references/cross-store-reconciliation.md`，
+  与其余四份参考文档平级（`references/`、`templates/`、`assets/`、`scripts/` 之外的目录不被
+  hermes 列进 skill 文件清单）。SKILL.md 里的链接改到新位置；`references/` 内部不再链到别的
+  .md —— 评估器把「references 里再链 .md」判成嵌套引用（效率维度扣 10 分）。
+- **删掉 frontmatter 顶层的 `version`**：agentskills.io 规范里没有这个字段（`metadata.version`
+  还在，harness 不会把顶层字段传给模型）。
+- **Tier 2 判出的两处重复，收成一份实现**（这仓库以前也这么处理过：`_strip_js_code` 抽到
+  `code_strip`、`_module_tokens` 抽到 `module_names`）：
+  - `mutation_check._link_deps` 与 `selfcheck._link_deps`（软链依赖目录，docstring 近乎逐字
+    相同）⇒ 抽到叶子模块 `scripts/dep_links.py`，两个脚本共用同一实现；
+    `test_shared_helpers.py` 加了「各调用方真的是同一个函数对象」的断言。
+  - `test_readiness._blocking` 与 `test_readiness_r2._blocking`（解析结论行的阻塞项数）⇒
+    只在 `test_readiness.py` 留一份，r2 从那里导入。
+- **按 Tier 3 的活体 A/B 改一处工作流**：跑完 `new` 拿到计划骨架后，**把骨架里的车道、已有
+  能力、存储清单答给用户**。原来工作流只让 agent「跑 `new`」，实测里 agent 跑完就只回一句
+  「下一步」，而用户要的正是那份清单 —— 这是 Tier 3 找出来的真问题。
+- **新增 `.github/skillspector-baseline.py`**：把**已复核过的**规则级 allowlist 翻译成
+  SkillSpector 的 baseline。扫描器「扫到 HIGH 就退 1」的约定与评估器「非 0 = 扫描器坏了」
+  对不上 —— 此前 SkillEvaluator 的 Security Scan 那一步永远 incomplete、拿不到安全证据；
+  翻译之后扫描器以 0 退出，那一步能出证（0 critical / 0 high / 59 MEDIUM 照报）。单一事实源
+  仍是 `.github/skillspector-allowlist.yaml`（脚本只做翻译，不新增第二份人工维护的清单）。
+  顺带把 `TP4`（拿 SKILL.md 对整个工具的声明去比对单个叶子模块 ⇒ 判「用途不符」）按误报复核
+  理由加进 allowlist。
+- **新增 `evals/make_tier3_dataset.py`**：从 `evals/evals.json` 生成 Tier 3 数据集（用例只有
+  一份事实源），把 fixture 摆成沙箱里的 `/workspace/input/<仓库名>/`，并补上负样本
+  （取自 `evals/trigger-evals.json` 里 `should_trigger=false` 的条目）。**每条用例一个独立的
+  staged 目录** —— 共用目录时后一条的计划文件会覆盖前一条的（都叫 `docs/refund-test-plan.md`），
+  拿到的输入与提示不符，那一轮的三条「失败」就是这么来的。
+- **已知且接受的一条 finding**：`Unexpected 'LICENSE' in skill root`。LICENSE 必须跟着包走
+  （`package.py` 硬要求它在那个位置），而评估器的允许根目录清单只认 `README.md`，
+  `SKILLEVALUATOR_SCHEMA_ALLOWED_DIRS` 只能加目录 ⇒ 这条消不掉。写进 CONTRIBUTING.md，
+  免得以后有人「顺手修好」它而把打包搞坏。
+- **已知且不修的一条 advisory**：`OW-REF-BUDGET`（`readiness.py` 204KB、`req_plan.py` 166KB、
+  `decision_points.py` 66KB 超过 OpenClaw 的 64KB 单文件读上限）。拆这三个核心脚本是数千行
+  的重构，收益只是 advisory（文件照样能读，只是要多读几次），风险远大于收益 —— 不做。
+
+**Tier 3（活体 A/B）实测**：9 条用例（6 正例 + 3 负例），opencode，带 skill 与不带 skill 各 9 次，
+18 次尝试全部完成（0 执行失败、0 判卷失败）。
+
+- **Overall 80.8% → 90.2%（+9.4 个百分点）**；Skill Lift **+0.094**（过 +0.05 的门槛）。
+- **Pass@1 44.4% → 88.9%（+44.5 个百分点）**；必过项 4/9 → 8/9；达成目标 4/9 → 8/9。
+- 分维度：**Effectiveness 60.2% → 86.1%（+25.9）**、Correctness +2.2、Security 持平（两边都满分）。
+- 逐用例：正例里带 skill 高的有 +0.51（把测试计划列出来 0.46 → 0.97）、+0.30（越界落点拒绝写盘
+  0.70 → 1.00）、+0.13（交付就绪度 0.78 → 0.90）；低的 −0.13 / −0.07 / −0.30 三条都是
+  **agent 没加载 skill**（Discoverability 41.7%）—— 那一臂就是「没带 skill」，与基线同源。
+- **判定是 FAIL**：9 条里 1 条（attest-002）目标未达成。整体质量未到「每维 ≥0.50」的门槛。
+
+**这轮实测最该记住的一条**：**Discoverability 只有 41.7%** —— 6 条正例里有 3 条 agent 压根没
+加载 skill（它自己凭经验答了）。这与仓库早前用 `evals/measure_triggers.py` 测出的「召回率 0.5」
+互相印证：attest 的 description 触发覆盖只到一半左右。**这是下一轮最该改的地方**
+（补触发词 + 用仓库自己的触发率测量复测），而不是继续压 SKILL.md 的长度。
+
+验证：38 个回归脚本全绿、黄金 fixture 10/10、evals 6/6、`package.py --check` 绿（30 个文件）、
+仓库自带安全闸未放行 0 条；`skillevaluator tier1`：quality **95.0/A**（correctness 100 /
+discoverability 95 / reliability 85 / efficiency 100），LLM rubric 九项全 ≥9/10（均分 9.56），
+critical 0 / high 0 / medium 0 —— 唯一 incomplete 的是 Security Scan，原因是扫描器对三个最大
+脚本的分析边界（不是安全问题，细节见 CONTRIBUTING）；`skillevaluator tier2` **通过**（0 findings）。
 
 ## [0.1.28] - 2026-11-19
 

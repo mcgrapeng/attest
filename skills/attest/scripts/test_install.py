@@ -113,7 +113,7 @@ def test_shell_wrapper_is_thin() -> None:
 def test_skill_md_links_resolve_inside_the_package() -> None:
     """skill 里的相对链接必须在**打出的包里**能解析。
 
-    SKILL.md 引用 examples/cross-store-reconciliation.md，而那个文件原先在仓库
+    SKILL.md 引用 references/cross-store-reconciliation.md，而那个文件原先在仓库
     根、不进包 ⇒ 装成独立 skill 的用户点那个链接是断的。打包时只带
     skills/attest/** ⇒ 包内的相对链接必须自洽。
     """

@@ -53,6 +53,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from code_strip import strip_js_code, strip_py_code  # noqa: E402
+from dep_links import link_deps  # noqa: E402
 from decision_points import (  # noqa: E402
     _anchor_at, detect_backend, scope_stacks, structural_points)
 
@@ -476,30 +477,6 @@ def _copy_repo(repo: Path, dst: Path) -> None:
                     symlinks=True)
 
 
-def _link_deps(repo: Path, dst: Path, ws_rel: str) -> list[str]:
-    """把依赖目录**软链**进副本（不复制体积）。
-
-    不带依赖 ⇒ 副本里跑不动测试 ⇒ 这项就"没法测"。
-    软链既能跑真测试，又不花时间与磁盘。
-    """
-    linked: list[str] = []
-    roots = [(repo, dst)]
-    if ws_rel not in (".", ""):
-        roots.append((repo / ws_rel, dst / ws_rel))
-    for src_root, dst_root in roots:
-        for name in ("node_modules", ".venv", "venv"):
-            s = src_root / name
-            d = dst_root / name
-            if not s.is_dir() or d.exists() or d.is_symlink():
-                continue
-            try:
-                d.symlink_to(s, target_is_directory=True)
-                linked.append(str(d.relative_to(dst)))
-            except OSError:
-                pass
-    return linked
-
-
 def _has_deps(repo: Path, ws_rel: str) -> bool:
     """仓库（或工作区）里有没有依赖目录 —— 没有就别提"挂不上依赖"。"""
     roots = [repo]
@@ -675,7 +652,8 @@ def run_mutation_check(repo: Path, ws_rel: str,
         except OSError as e:
             res["notes"].append(f"复制仓库失败：{e}")
             return res
-        linked = _link_deps(repo, dst, ws_rel)
+        linked = link_deps(repo, dst,
+                           extra_roots=() if ws_rel in (".", "") else (ws_rel,))
         if not linked and _has_deps(repo, ws_rel):
             res["notes"].append("副本里没挂上依赖目录 ⇒ 测试可能跑不起来")
         cwd = dst if ws_rel in (".", "") else dst / ws_rel

@@ -84,3 +84,19 @@ rules:
       预授权这些工具与最小权限相反；按扫描器自己的建议，不为消此条而声明
       allowed-tools。
 
+  # TP4「MCP Tool Poisoning」：把 SKILL.md 的**整体声明**拿去比对**单个叶子模块**，
+  # 于是说「声明的用途与实际行为不符」。2026-11-21 实测三条的证据分别是：
+  #   · scripts/code_strip.py —— 「把字符串与注释换成空格的源码处理工具」
+  #     （它是判据推导要用的公共叶子模块，见 test_shared_helpers.py）
+  #   · scripts/module_names.py —— 「识别 Python 包目录、产出候选名 token 的小工具」
+  #   · scripts/check_env_inheritance.py —— 「检查生产代码是否整份继承 os.environ 的审计脚本」
+  # 三者都是 attest 自己的零件，SKILL.md 的声明说的是**整个工具**，拿它跟零件比
+  # 必然「不符」。这条规则要抓的是「声明撒谎」（例如一个自称写作的 skill 却在偷数据），
+  # 这里不成立：声明与工具行为一致。
+  - id: TP4
+    reason: >-
+      误报：规则拿 SKILL.md 对**整个工具**的声明去比对单个叶子模块
+      （code_strip.py / module_names.py / check_env_inheritance.py），
+      于是判「声明的用途与实际行为不符」。这三者都是 attest 自己的零件，
+      声明与工具行为一致。
+

@@ -92,7 +92,7 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> \
 | 步 | 做什么 |
 | --- | --- |
 | 1 | **从需求派生不变式**：抽出「这条需求必须永远成立的性质」，一条一条写下来（方法见 references/workflow.md） |
-| 2 | 跑 `new <feature> --repo . --module <路径>` 拿计划骨架（扫存储清单、helper、测试车道、判定点） |
+| 2 | 跑 `new <feature> --repo . --module <路径>` 拿计划骨架（扫存储清单、helper、测试车道、判定点）；**把骨架里的车道、已有能力、存储清单答给他** |
 | 3 | 把不变式与覆盖矩阵填进计划；再用 `upgrade` 把维度表换成判定点粒度 |
 | 4 | 用 `assign` 批量认领判定点：拉清单 → 逐条判归属或写豁免理由 → `--apply` 写回 |
 | 5 | `scaffold` 生成测试骨架，**并把断言填掉**（期望值只有读过需求的 agent 知道） |
@@ -132,9 +132,9 @@ references/workflow.md。
 | Script | 用途 |
 | --- | --- |
 | `scripts/req_plan.py new` | 生成计划骨架（扫存储、helper、车道） |
-| `scripts/req_plan.py upgrade` | 把模块级维度表换成判定点粒度 |
+| `scripts/req_plan.py upgrade` | 维度表换成判定点粒度 |
 | `scripts/req_plan.py assign` | 拉待填判定点清单 / 校验后写回 |
-| `scripts/req_plan.py scaffold` | 生成测试文件骨架（断言留 TODO） |
+| `scripts/req_plan.py scaffold` | 生成测试骨架（断言留 TODO） |
 | `scripts/req_plan.py check` | 核对每一个钉（文件、用例名、维度、豁免） |
 | `scripts/req_plan.py reconcile` | 按计划的数据一致性节生成对账骨架 |
 | `scripts/req_plan.py baseline` | 按计划的数据一致性节生成基线对拍骨架 |

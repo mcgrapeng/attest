@@ -38,7 +38,7 @@ CASES: dict[int, dict] = {    1: {
         "repo": "shop-backend",
         "fixture": "ts-colocated",
         "edits": [
-            ("仓库在 ~/workspace/shop-backend", "仓库在 /workspace/input/shop-backend"),
+            ("仓库在 ~/workspace/shop-backend", "仓库在 /workspace/input/{repo}"),
             ("代码在 src/orders/", "代码在 src/"),
         ],
     },
@@ -48,7 +48,7 @@ CASES: dict[int, dict] = {    1: {
         "plan": "stale-plan.md",
         "edits": [
             ("上游上周提了个需求测试计划，在 docs/refund-test-plan.md。",
-             "上游上周提了个需求测试计划，仓库在 /workspace/input/shop-backend，"
+             "上游上周提了个需求测试计划，仓库在 /workspace/input/{repo}，"
              "计划文件在 docs/refund-test-plan.md。"),
         ],
     },
@@ -57,7 +57,7 @@ CASES: dict[int, dict] = {    1: {
         "fixture": "ts-colocated",
         "edits": [
             ("我们要给客户交付 src/billing 这个模块了。",
-             "仓库在 /workspace/input/shop-backend，我们要给客户交付 src 这个模块了。"),
+             "仓库在 /workspace/input/{repo}，我们要给客户交付 src 这个模块了。"),
         ],
     },
     4: {
@@ -65,7 +65,7 @@ CASES: dict[int, dict] = {    1: {
         "fixture": "english-reconciler",
         "edits": [
             ("订单数据 PG 和向量库各存了一份，",
-             "仓库在 /workspace/input/order-data-repo。订单数据 PG 和向量库各存了一份，"),
+             "仓库在 /workspace/input/{repo}。订单数据 PG 和向量库各存了一份，"),
         ],
     },
     5: {
@@ -74,7 +74,7 @@ CASES: dict[int, dict] = {    1: {
         "plan": "stale-plan.md",
         "edits": [
             ("上游说这个需求已经测过了，",
-             "仓库在 /workspace/input/shop-backend。上游说这个需求已经测过了，"),
+             "仓库在 /workspace/input/{repo}。上游说这个需求已经测过了，"),
         ],
     },
     6: {
@@ -86,7 +86,7 @@ CASES: dict[int, dict] = {    1: {
             # 「没有 skill」的那条臂，两边都不公平。改成描述任务本身。
             ("按这份计划生成测试骨架：python3 ~/.agents/skills/attest/scripts/req_plan.py "
              "scaffold docs/refund-test-plan.md --repo . --out-dir /tmp/out。",
-             "按这份计划生成测试骨架：仓库在 /workspace/input/shop-backend，"
+             "按这份计划生成测试骨架：仓库在 /workspace/input/{repo}，"
              "计划在 docs/refund-test-plan.md，生成目录 /tmp/out。"),
         ],
     },
@@ -160,6 +160,8 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", required=True,
                     help="skill 目录（数据集会写进 <out>/evals/）")
+    ap.add_argument("--base-image", default="se-base-warm6:latest",
+                    help="Tier 3 沙箱的基础镜像（里面已预装 agent，省掉容器内联网安装）")
     args = ap.parse_args()
 
     skill_dir = Path(args.out)
@@ -176,18 +178,21 @@ def main() -> int:
             print(f"用例 {cid} 没有沙箱化改写规则 —— 补上再说", file=sys.stderr)
             return 1
         prompt = c["prompt"]
+        # 每条用例一个独立的 staged 目录：共用目录时，后一条用例的计划文件会
+        # 覆盖前一条的（都叫 docs/refund-test-plan.md）⇒ 拿到的输入与提示不符。
+        repo = f"{spec['repo']}-{cid:03d}"
         for old, new in spec["edits"]:
             if old not in prompt:
                 print(f"用例 {cid}：提示里找不到待替换的片段 {old!r}", file=sys.stderr)
                 return 1
-            prompt = prompt.replace(old, new)
-        stage_repo(files_dir, spec["repo"], spec["fixture"], spec.get("plan"))
+            prompt = prompt.replace(old, new.format(repo=repo))
+        stage_repo(files_dir, repo, spec["fixture"], spec.get("plan"))
         case = {
             "id": f"attest-{cid:03d}",
             "prompt": prompt,
             "expected_output": c["expected_output"],
             "expected_skill": "attest",
-            "files": [f"files/{spec['repo']}"],
+            "files": [f"files/{repo}"],
         }
         if cid in ASSERTIONS:
             case["assertions"] = ASSERTIONS[cid]
@@ -211,9 +216,22 @@ def main() -> int:
     dataset = {"skill_name": src.get("skill_name", "attest"), "evals": cases}
     (evals_dir / "evals.json").write_text(
         json.dumps(dataset, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+
+    # 自定义环境：Tier 3 的沙箱默认会在容器里现装 agent（下载 node + npm 包），
+    # 慢到会撞上 setup 超时。指定一个已经预装好 agent 的基础镜像，并保留
+    # 这份 Dockerfile（--custom-dockerfile-mode preserve），安装步骤会检测到
+    # agent 已是目标版本而直接跳过。
+    env_dir = evals_dir / "environment"
+    env_dir.mkdir(exist_ok=True)
+    (env_dir / "Dockerfile").write_text(
+        f"FROM {args.base_image}\n"
+        "WORKDIR /workspace\n",
+        encoding="utf-8")
+
     pos = sum(1 for c in cases if c["expected_skill"])
     print(f"写出 {evals_dir / 'evals.json'}：{len(cases)} 条"
           f"（{pos} 正例 + {len(cases) - pos} 负例），staged 仓库在 {files_dir}")
+    print(f"沙箱基础镜像：{args.base_image}")
     return 0
 
 

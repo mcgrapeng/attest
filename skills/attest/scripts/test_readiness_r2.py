@@ -25,6 +25,8 @@ TMPDIRS: list[Path] = []
 
 sys.path.insert(0, str(HERE))
 import readiness  # noqa: E402
+# 结论行的解析只在 test_readiness.py 里有一份（Tier 2 去重扫描判过：各写一份是重复）。
+from test_readiness import blocking_count  # noqa: E402
 
 
 def expect(cond: bool, label: str) -> None:
@@ -63,15 +65,6 @@ def line_of(out: str, needle: str) -> str:
 
 
 
-def _blocking(out: str) -> int:
-    """结论行里的阻塞项数。
-
-    结论措辞从「不可交付 / 达到交付条件」改成三档（阻塞项 / 待人工确认 / 无信号），
-    所以断言改成数阻塞项，而不是匹配旧措辞。
-    """
-    m = re.search(r"结论：(\d+) 项阻塞", out)
-    return int(m.group(1)) if m else -1
-
 def main() -> int:
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -108,7 +101,7 @@ def main() -> int:
            "仓库级 test/ 下的测试被算成这个模块的测试")
     expect("零引用" not in r2.stdout,
            "test/ 布局下不再报「导出零引用」（之前是 1/1 零引用）")
-    expect(_blocking(r2.stdout) == 0, "test/ 布局的健康仓库不被判不可交付")
+    expect(blocking_count(r2.stdout) == 0, "test/ 布局的健康仓库不被判不可交付")
 
     print("\n子项 2：--test-dir 显式指定测试目录")
     qa = mkdtemp()
@@ -238,7 +231,7 @@ def main() -> int:
           "console.log('| default | 0 | consistent |');\n"
           "console.log('| t1 | 3 | drift |');\n")
     r8 = run("src", "--repo", str(eng))
-    expect(_blocking(r8.stdout) > 0, "英文输出的对账脚本不再假绿（漂移被报出来）")
+    expect(blocking_count(r8.stdout) > 0, "英文输出的对账脚本不再假绿（漂移被报出来）")
     expect("漂移" in r8.stdout or "drift" in r8.stdout, "漂移行被列出来")
 
     print("\n子项 8：找不到可比对的 CSV 对 ⇒ 报「无法比对」")
@@ -255,7 +248,7 @@ def main() -> int:
           "// reconcile widgets\n"
           "console.log('| qa-1 | 3 | ❌ 漂移 |');\n")
     r8c = run("src", "--repo", str(eng), "--test-tenant-prefix", "qa-")
-    expect(_blocking(r8c.stdout) == 0,
+    expect(blocking_count(r8c.stdout) == 0,
            "--test-tenant-prefix 声明的前缀算测试租户（不阻塞交付）")
 
     print("\n子项 8：租户列的位置从表头认（不是写死第一列）")
@@ -264,7 +257,7 @@ def main() -> int:
           "console.log('| store | tenant | missing |');\n"
           "console.log('| s1 | itest-x | 3 | ❌ 漂移 |');\n")
     r8e = run("src", "--repo", str(eng))
-    expect(_blocking(r8e.stdout) == 0,
+    expect(blocking_count(r8e.stdout) == 0,
            "租户列不在第一列时也能认对（测试租户不阻塞交付）")
 
     print("\n子项 8：输出目录用工具自己的通用变量")

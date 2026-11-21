@@ -52,7 +52,17 @@ command, run it before you commit.
 scores `SKILL.md` itself: structure, wording, and the harnesses it must load
 in. It is not in CI because its Security Scan step cannot complete on any
 skill — the scanner exits non-zero when it finds something, which that step
-reads as "the scanner broke". Two of its findings are known and accepted:
+reads as "the scanner broke". `bash .github/skillspector-baseline.py --out
+/tmp/ss-baseline.yaml` translates the reviewed rule-level allowlist into the
+baseline SkillSpector expects, and with that baseline the scan exits zero and
+the Security Scan step can report:
+
+```bash
+python3 .github/skillspector-baseline.py --out /tmp/ss-baseline.yaml
+skillevaluator security-scan skills/attest --skillspector-baseline /tmp/ss-baseline.yaml
+```
+
+Two of its findings are known and accepted:
 
 - `Unexpected 'LICENSE' in skill root` — the LICENSE has to ship inside the
   package (`package.py` requires it at that path), and the validator's
@@ -66,7 +76,36 @@ reads as "the scanner broke". Two of its findings are known and accepted:
 Its `Harness Compatibility` check is the one that matters here: it fails when
 `SKILL.md` gets too long for a harness that counts CJK characters as four.
 Keep it under 15,000 weighted characters — measure with the validator's own
-`_openclaw_read_chars`, not with a byte count.
+`_openclaw_read_chars`, not with a byte count. (The other advisory,
+`OW-REF-BUDGET`, says `readiness.py` / `req_plan.py` / `decision_points.py`
+exceed OpenClaw's 64 KB single-file read cap. Splitting those three core
+scripts is a multi-thousand-line refactor for an advisory that only means
+"the model pages more" — not worth it.)
+
+### Optional: live A/B (Tier 3)
+
+Tier 3 runs a real agent with and without the skill. The cases come from this
+repository's own behaviour evals — `evals/make_tier3_dataset.py` translates
+them into the dataset shape and stages the fixtures the way the sandbox
+expects them:
+
+```bash
+python3 package.py --out /tmp/dist && unzip -q /tmp/dist/attest.skill -d /tmp/se_t3/skills
+python3 evals/make_tier3_dataset.py --out /tmp/se_t3/skills/attest
+skillevaluator tier3 validate /tmp/se_t3/skills/attest --strict
+skillevaluator tier3 evaluate /tmp/se_t3/skills/attest -a codex --max-cases 1
+```
+
+Tier 2 (duplicate detection) needs an embeddings endpoint; a local
+OpenAI-compatible one is enough:
+
+```bash
+export SKILL_EVAL_LLM_PROVIDER=openai-compatible
+export SKILL_EVAL_LLM_BASE_URL=http://127.0.0.1:11434/v1   # ollama
+export SKILL_EVAL_LLM_API_KEY=ollama
+export SKILL_EVAL_EMBEDDING_MODEL=qwen3-embedding:0.6b
+skillevaluator tier2 skills/attest
+```
 
 ## What a pull request looks like
 

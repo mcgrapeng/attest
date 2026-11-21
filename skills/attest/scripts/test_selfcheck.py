@@ -146,7 +146,7 @@ def test_with_deps_links_dependencies() -> None:
     (repo / "node_modules" / "left-pad" / "index.js").write_text(
         "module.exports = 1;\n", encoding="utf-8")
     dst = mkdtemp()
-    linked = sc._link_deps(repo, dst)
+    linked = sc.link_deps(repo, dst, names=sc.SELFCHECK_DEP_DIRS)
     expect("node_modules" in linked, "node_modules 被软链进副本")
     link = dst / "node_modules"
     expect(link.is_symlink(), "是软链（不复制体积）")
@@ -158,7 +158,7 @@ def test_with_deps_links_dependencies() -> None:
     repo2 = mkdtemp()
     (repo2 / "src").mkdir(parents=True)
     dst2 = mkdtemp()
-    linked2 = sc._link_deps(repo2, dst2)
+    linked2 = sc.link_deps(repo2, dst2, names=sc.SELFCHECK_DEP_DIRS)
     expect(not linked2, "原仓库没有依赖目录时不软链")
 
 

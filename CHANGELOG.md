@@ -5,7 +5,7 @@
 
 ## [Unreleased]
 
-**按 SkillEvaluator 的评估结果收拾 skill 契约本身：SKILL.md 压到读得下的长度、参考文档收成一层、frontmatter 去掉规范外字段。**
+**按 SkillEvaluator 的评估结果收拾 skill 契约本身：SKILL.md 压到读得下的长度、参考文档收成一层、Tier 2 判出的两处重复收成一份实现。**
 
 - **`SKILL.md` 压到 OpenClaw 读得下的长度**：按 OpenClaw 的口径（每个 CJK 字符算 4 个字符）
   原本读作 17,901 字符，超过它的读上限 ⇒ 在那个 harness 上会被截断或拒读，agent 拿不到
@@ -19,10 +19,28 @@
   .md —— 评估器把「references 里再链 .md」判成嵌套引用（效率维度扣 10 分）。
 - **删掉 frontmatter 顶层的 `version`**：agentskills.io 规范里没有这个字段（`metadata.version`
   还在，harness 不会把顶层字段传给模型）。
+- **Tier 2 判出的两处重复，收成一份实现**（这仓库以前也这么处理过：`_strip_js_code` 抽到
+  `code_strip`、`_module_tokens` 抽到 `module_names`）：
+  - `mutation_check._link_deps` 与 `selfcheck._link_deps`（软链依赖目录，docstring 近乎逐字
+    相同）⇒ 抽到叶子模块 `scripts/dep_links.py`，两个脚本共用同一实现；
+    `test_shared_helpers.py` 加了「各调用方真的是同一个函数对象」的断言。
+  - `test_readiness._blocking` 与 `test_readiness_r2._blocking`（解析结论行的阻塞项数）⇒
+    只在 `test_readiness.py` 留一份，r2 从那里导入。
+- **新增 `.github/skillspector-baseline.py`**：把**已复核过的**规则级 allowlist 翻译成
+  SkillSpector 的 baseline。扫描器「扫到 HIGH 就退 1」的约定与评估器「非 0 = 扫描器坏了」
+  对不上 —— 此前 SkillEvaluator 的 Security Scan 那一步永远 incomplete、拿不到安全证据；
+  翻译之后扫描器以 0 退出，那一步能出证。单一事实源仍是 `.github/skillspector-allowlist.yaml`
+  （脚本只做翻译，不新增第二份人工维护的清单）。
+- **新增 `evals/make_tier3_dataset.py`**：从 `evals/evals.json` 生成 Tier 3 数据集（用例只有
+  一份事实源），把 fixture 摆成沙箱里的 `/workspace/input/<仓库名>/`，并补上负样本
+  （取自 `evals/trigger-evals.json` 里 `should_trigger=false` 的条目）。
 - **已知且接受的一条 finding**：`Unexpected 'LICENSE' in skill root`。LICENSE 必须跟着包走
   （`package.py` 硬要求它在那个位置），而评估器的允许根目录清单只认 `README.md`，
   `SKILLEVALUATOR_SCHEMA_ALLOWED_DIRS` 只能加目录 ⇒ 这条消不掉。写进 CONTRIBUTING.md，
   免得以后有人「顺手修好」它而把打包搞坏。
+- **已知且不修的一条 advisory**：`OW-REF-BUDGET`（`readiness.py` 204KB、`req_plan.py` 166KB、
+  `decision_points.py` 66KB 超过 OpenClaw 的 64KB 单文件读上限）。拆这三个核心脚本是数千行
+  的重构，收益只是 advisory（文件照样能读，只是要多读几次），风险远大于收益 —— 不做。
 
 验证：38 个回归脚本全绿、黄金 fixture 10/10、evals 6/6、`package.py --check` 绿、
 仓库自带安全闸未放行 0 条；`skillevaluator tier1 --no-llm` 的 quality 从 93.5/A 升到

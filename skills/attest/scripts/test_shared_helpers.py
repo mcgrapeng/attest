@@ -6,6 +6,11 @@
 `selfcheck._module_tokens` 也各写了一份（selfcheck 还把 src 布局识别重写了一遍）。
 ⇒ 抽到叶子模块 `code_strip` / `module_names`，各调用方共用同一实现。
 
+第二轮（2026-11-21，SkillEvaluator Tier 2 去重扫描）又判出两处重复：
+`mutation_check._link_deps` 与 `selfcheck._link_deps`（软链依赖目录，docstring 近乎逐字
+相同）、`test_readiness._blocking` 与 `test_readiness_r2._blocking`（解析结论行的阻塞项数）。
+⇒ 前者抽到叶子模块 `dep_links`；后者只在 `test_readiness.py` 里留一份，r2 从那里导入。
+
 本测试要钉住两件事：
 1. 行为不变（偏移量与行号保持、字符串在前、Python 用 tokenize）。
 2. **各调用方真的是同一个函数对象** —— 以后再有人复制一份实现，这里会红。
@@ -20,11 +25,14 @@ sys.path.insert(0, str(HERE))
 
 import code_strip  # noqa: E402
 import decision_points  # noqa: E402
+import dep_links  # noqa: E402
 import discriminate  # noqa: E402
 import module_names  # noqa: E402
 import mutation_check  # noqa: E402
 import readiness  # noqa: E402
 import selfcheck  # noqa: E402
+import test_readiness  # noqa: E402
+import test_readiness_r2  # noqa: E402
 
 
 def expect(cond: bool, msg: str) -> None:
@@ -45,6 +53,12 @@ def main() -> int:
            "readiness 用的是 module_names.module_tokens")
     expect(selfcheck.module_tokens is module_names.module_tokens,
            "selfcheck 用的是 module_names.module_tokens")
+    expect(mutation_check.link_deps is dep_links.link_deps,
+           "mutation_check 用的是 dep_links.link_deps")
+    expect(selfcheck.link_deps is dep_links.link_deps,
+           "selfcheck 用的是 dep_links.link_deps")
+    expect(test_readiness_r2.blocking_count is test_readiness.blocking_count,
+           "test_readiness_r2 用的是 test_readiness.blocking_count")
 
     print("\nstrip_js_code：字符串与注释换成空格，偏移与行号不变")
     src = 'const a = "http://x/y"; // 注释\nlet b = `tpl`; /* multi\nline */\n'

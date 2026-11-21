@@ -45,11 +45,14 @@ def run(*args: str) -> subprocess.CompletedProcess:
 
 
 
-def _blocking(out: str) -> int:
+def blocking_count(out: str) -> int:
     """结论行里的阻塞项数。
 
     结论措辞从「不可交付 / 达到交付条件」改成三档（阻塞项 / 待人工确认 / 无信号），
     所以断言改成数阻塞项，而不是匹配旧措辞。
+
+    定义在这里（不是每个测试文件各写一份）：Tier 2 的去重扫描判这两份逐字重复，
+    改一处要改两处容易漏。test_readiness_r2.py 从这里导入。
     """
     m = re.search(r"结论：(\d+) 项阻塞", out)
     return int(m.group(1)) if m else -1
@@ -232,7 +235,7 @@ def main() -> int:
           "test('ok', () => { assert.equal(1, 1); });\n")
     r12 = run("src", "--repo", str(pg_only))
     expect("只碰了 PG 一个存储" in r12.stdout, "单存储模块判 skipped")
-    expect(_blocking(r12.stdout) == 0, "单存储模块不该被判不可交付")
+    expect(blocking_count(r12.stdout) == 0, "单存储模块不该被判不可交付")
 
     print("\n有派生存储（向量库）却没有对账机制 ⇒ 报红")
     write(pg_only / "src" / "vec.ts",

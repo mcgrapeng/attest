@@ -100,8 +100,30 @@ expects them:
 python3 package.py --out /tmp/dist && unzip -q /tmp/dist/attest.skill -d /tmp/se_t3/skills
 python3 evals/make_tier3_dataset.py --out /tmp/se_t3/skills/attest
 skillevaluator tier3 validate /tmp/se_t3/skills/attest --strict
-skillevaluator tier3 evaluate /tmp/se_t3/skills/attest -a codex --max-cases 1
+skillevaluator tier3 evaluate /tmp/se_t3/skills/attest -a opencode --max-cases 1
 ```
+
+**Give the sandbox containers a proxy.** Harbor installs the agent CLI inside
+the container by downloading it (nvm → node → `npm i -g opencode-ai`), and the
+container reaches the internet *directly* — bypassing the host's proxy, which on
+this machine is the fast path. Without a proxy the install hangs (there is no
+timeout on its `curl`), the trial dies, and the run is scored `incomplete`
+instead of reporting a result. So export the host's proxy with a
+container-reachable host address:
+
+```bash
+export HTTP_PROXY=http://host.docker.internal:7890 HTTPS_PROXY=$HTTP_PROXY
+export http_proxy=$HTTP_PROXY https_proxy=$HTTPS_PROXY
+export ALL_PROXY=$HTTP_PROXY all_proxy=$HTTP_PROXY
+export NO_PROXY=101.237.37.116,127.0.0.1,localhost no_proxy=$NO_PROXY
+```
+
+With that, the install takes ~50s instead of hanging. Two more traps on this
+machine: `--env-mode local` is unusable with opencode (Harbor passes `--model`,
+which opencode 1.19.5 rejects), and Harbor pins codex to
+`model_reasoning_effort=high`, which this gateway rejects (it accepts
+`xhigh`/`medium`/`low`) — edit `_HARBOR_AGENT_KWARGS` in
+`skillevaluator/tier3/harbor/runner.py` if you want to use codex.
 
 Tier 2 (duplicate detection) needs an embeddings endpoint; a local
 OpenAI-compatible one is enough:

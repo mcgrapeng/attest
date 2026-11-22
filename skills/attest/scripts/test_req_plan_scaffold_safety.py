@@ -388,10 +388,11 @@ def main() -> int:
     simhome = mkdtemp() / "home"
     simhome.mkdir(parents=True, exist_ok=True)
     # decision_points.py 是 req_plan.py 的同仓模块（判定点推导），code_strip.py 是
-    # decision_points 的同仓模块（字符串/注释清空）—— 跟着一起复制；
+    # decision_points 的同仓模块（字符串/注释清空），proc_env.py 是 decision_points
+    # 的同仓模块（子进程环境白名单）—— 跟着一起复制；
     # 外部工具（ai-testing-system）才是这个模拟要拿掉的东西
     for name in ("test_req_plan_r3.py", "test_req_plan_r4.py", "req_plan.py",
-                 "decision_points.py", "code_strip.py"):
+                 "decision_points.py", "code_strip.py", "proc_env.py"):
         shutil.copy2(HERE / name, sim / name)
     for name in ("test_req_plan_r3.py", "test_req_plan_r4.py"):
         rr2 = subprocess.run([sys.executable, str(sim / name)],

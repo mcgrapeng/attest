@@ -415,6 +415,14 @@ def main() -> int:
             _os.environ[k] = "secret-value"
     try:
         child = readiness.child_env()
+        # 四处共用同一份白名单（proc_env）—— 各写一份时口径漂过：
+        # mutation_check / decision_points 还在放行 NPM_/PIP_/UV_ 前缀。
+        builders = {
+            "readiness.child_env": child,
+            "selfcheck._child_env": selfcheck._child_env(),
+            "decision_points._node_env": decision_points._node_env(),
+            "mutation_check._child_env": mutation_check._child_env(),
+        }
     finally:
         for k, v in _saved.items():
             if v is None:

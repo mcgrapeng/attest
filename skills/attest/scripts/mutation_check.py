@@ -54,6 +54,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from code_strip import strip_js_code, strip_py_code  # noqa: E402
 from dep_links import link_deps  # noqa: E402
+import proc_env  # noqa: E402
 from decision_points import (  # noqa: E402
     _anchor_at, detect_backend, scope_stacks, structural_points)
 
@@ -491,23 +492,10 @@ def _has_deps(repo: Path, ws_rel: str) -> bool:
 
 
 def _child_env() -> dict[str, str]:
-    """子进程环境：白名单透传，不是整个 os.environ（口径与 readiness 一致）。"""
-    allow_exact = {
-        "PATH", "HOME", "LANG", "LANGUAGE", "TZ", "TMPDIR", "TEMP", "TMP",
-        "SHELL", "USER", "LOGNAME", "TERM", "SYSTEMROOT", "COMSPEC", "CI",
-        "POSTGRES_URL", "DATABASE_URL", "MEMORY_ITEST",
-        "MEMORY_RECONCILE_OUT_DIR", "REQ_PLAN_RECONCILE_OUT_DIR",
-    }
-    allow_prefix = ("LC_", "NODE_", "PYTHON", "NPM_", "PNPM_", "YARN_",
-                    "PIP_", "UV_")
-    env = {k: v for k, v in os.environ.items()
-           if k in allow_exact or k.startswith(allow_prefix)}
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    # 自检不该去连用户的库
-    env["POSTGRES_URL"] = ""
-    env["DATABASE_URL"] = ""
-    return env
+    """子进程环境：白名单透传，不是整个 os.environ（实现在 `proc_env`）。"""
+    return proc_env.child_env(
+        {"PYTHONDONTWRITEBYTECODE": "1"},
+        clear=("POSTGRES_URL", "DATABASE_URL"))
 
 
 def _run_tests(runner: list[str], cwd: Path, test_rels: list[str],

@@ -42,6 +42,7 @@ import discriminate  # noqa: E402
 import module_names  # noqa: E402
 from module_names import module_tokens  # noqa: E402
 import mutation_check  # noqa: E402
+import proc_env  # noqa: E402
 
 CODE_EXT = {".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs",
             ".py", ".pyi"}
@@ -53,22 +54,8 @@ REPO_TEST_DIRS = ("test", "tests", "spec")
 
 # 子进程环境白名单 —— 目标仓库的脚本只拿到这些变量，其余不透传。
 # 之前是 `{**os.environ}`：父进程里的一切（含各家的密钥）都进了子进程。
-ENV_ALLOW_EXACT = {
-    "PATH", "HOME", "LANG", "LANGUAGE", "TZ", "TMPDIR", "TEMP", "TMP",
-    "SHELL", "USER", "LOGNAME", "TERM", "SYSTEMROOT", "COMSPEC", "CI",
-    # 工具自己要用、目标仓库的脚本也可能要的
-    "POSTGRES_URL", "DATABASE_URL", "MEMORY_ITEST",
-    "MEMORY_RECONCILE_OUT_DIR", "REQ_PLAN_RECONCILE_OUT_DIR",
-}
-#: 前缀白名单 —— **只放运行时配置，不放凭据**。
-#: NPM_/PNPM_/YARN_/PIP_/UV_* 这些前缀去掉过：它们会带着仓库凭据
-#: （NPM_TOKEN、PIP_INDEX_URL 里的密码、UV_INDEX_SECRET_PASSWORD）进子进程环境。
-#: 仓库的 test 命令需要 npm/pip 配置时，用配置文件（.npmrc / pip.conf）而不是环境变量。
-ENV_ALLOW_PREFIX = ("LC_", "NODE_", "PYTHON")
-#: 命中前缀也**不**透传的凭据类变量（npm 的 registry token 就在 NODE_ 前缀里）
-ENV_DENY = {
-    "NODE_AUTH_TOKEN",
-}
+# 白名单本体在 `proc_env`（一处定义，四个模块共用）—— 各写一份时口径漂过：
+# `mutation_check` / `decision_points` 还在放行 NPM_/PIP_/UV_ 前缀。
 
 # 脚本白名单 —— 只认这些名字（前缀式：脚本名用冒号分段，前若干段命中即算）。
 # 之前是子串匹配（"coverage" in name）⇒ `reconcile:reset` 这种也会被选中执行。
@@ -163,22 +150,10 @@ class Module:
     lang: str = "other"      # ts / py / other
 
 
-def child_env(extra: dict[str, str] | None = None) -> dict[str, str]:
-    """给子进程的环境：只透传白名单里的，其余不透传。
-
-    之前是 `{**os.environ}` —— 父进程里的一切（含别的服务的密钥）都进了
-    目标仓库的脚本。白名单之外的一律不透传。
-    """
-    env: dict[str, str] = {}
-    for k, v in os.environ.items():
-        if k in ENV_DENY:
-            continue          # 凭据：命中前缀也不给
-        if k in ENV_ALLOW_EXACT or k.startswith(ENV_ALLOW_PREFIX):
-            env[k] = v
-    env["PYTHONUTF8"] = "1"
-    if extra:
-        env.update(extra)
-    return env
+#: 给子进程的环境：只透传白名单里的，其余不透传。
+#: 实现与口径都在 `proc_env`（`selfcheck` / `decision_points` /
+#: `mutation_check` 用同一份）—— 各写一份时白名单漂过。
+child_env = proc_env.child_env
 
 
 # ---------------------------------------------------------------- 发现

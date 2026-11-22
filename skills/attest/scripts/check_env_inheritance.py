@@ -7,8 +7,8 @@
 它把每一处 {**os.environ} 都算成 HIGH，而我们的 allowlist 是**规则级**的
 （不依赖位置，改代码不会误红）。那就需要一条**精确**的检查来真正把关：
 
-- 子进程环境必须走白名单（`readiness.py` 的 `child_env`、
-  `selfcheck.py` 的 `_child_env`）—— 白名单里的键才透传；
+- 子进程环境必须走白名单（`proc_env.child_env`，`readiness` / `selfcheck` /
+  `decision_points` / `mutation_check` 共用同一份）—— 白名单里的键才透传；
 - 整份继承（`**os.environ` / `dict(os.environ)` / `os.environ.copy()`）
   在**生产代码**里一律不允许。
 

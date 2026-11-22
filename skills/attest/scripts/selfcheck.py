@@ -36,6 +36,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import module_names  # noqa: E402
+import proc_env  # noqa: E402
 from dep_links import link_deps  # noqa: E402
 from module_names import module_tokens  # noqa: E402
 
@@ -342,26 +343,14 @@ def _copy_subset(repo: Path, dst: Path, module_rel: str) -> None:
 def _child_env() -> dict[str, str]:
     """子进程环境：**白名单**透传，不是整个 os.environ。
 
-    与 readiness.py 的 child_env 同一套口径：只有 PATH/HOME/LANG 之类与运行有关的
-    变量和工具自己要用的（POSTGRES_URL 等）才传下去，云厂商密钥、npm token 之类
-    不进副本里的进程。POSTGRES_URL / DATABASE_URL 额外清空 —— 自检不该去连用户的库。
+    白名单本体在 `proc_env`（与 readiness / decision_points / mutation_check 同一
+    份）—— 只有 PATH/HOME/LANG 之类与运行有关的变量和工具自己要用的才传下去，
+    云厂商密钥、npm token 之类不进副本里的进程。POSTGRES_URL / DATABASE_URL
+    额外清空 —— 自检不该去连用户的库。
     """
-    allow_exact = {
-        "PATH", "HOME", "LANG", "LANGUAGE", "TZ", "TMPDIR", "TEMP", "TMP",
-        "SHELL", "USER", "LOGNAME", "TERM", "SYSTEMROOT", "COMSPEC", "CI",
-        "POSTGRES_URL", "DATABASE_URL", "MEMORY_ITEST",
-        "MEMORY_RECONCILE_OUT_DIR", "REQ_PLAN_RECONCILE_OUT_DIR",
-    }
-    allow_prefix = ("LC_", "NODE_", "PYTHON")
-    deny = {"NODE_AUTH_TOKEN"}      # 凭据：命中前缀也不给
-    env = {k: v for k, v in os.environ.items()
-           if k not in deny
-           and (k in allow_exact or k.startswith(allow_prefix))}
-    env["PYTHONUTF8"] = "1"
-    env["PYTHONDONTWRITEBYTECODE"] = "1"
-    env["POSTGRES_URL"] = ""
-    env["DATABASE_URL"] = ""
-    return env
+    return proc_env.child_env(
+        {"PYTHONDONTWRITEBYTECODE": "1"},
+        clear=("POSTGRES_URL", "DATABASE_URL"))
 
 
 def _parse_checks(out: str) -> list[dict]:

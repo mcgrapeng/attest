@@ -367,19 +367,27 @@ def main() -> int:
                f"{label} README 的 Action pin 指向最新版本（实际 {sorted(pinned)}）")
 
     print("\nREADME 的环境白名单描述与代码一致")
-    code = (HERE / "readiness.py").read_text(encoding="utf-8")
+    code = (HERE / "proc_env.py").read_text(encoding="utf-8")
     exact = set(re.findall(r'"([A-Z_]+)"',
-                           re.search(r"ENV_ALLOW_EXACT = \{(.*?)\}", code, re.S).group(1)))
+                           re.search(r"ALLOW_EXACT = frozenset\(\{(.*?)\}\)",
+                                     code, re.S).group(1)))
     prefixes = set(re.findall(r'"([^"]+)"',
-                              re.search(r"ENV_ALLOW_PREFIX = \((.*?)\)", code, re.S).group(1)))
+                              re.search(r"ALLOW_PREFIX = \((.*?)\)", code, re.S).group(1)))
     deny = set(re.findall(r'"([A-Z_]+)"',
-                          re.search(r"ENV_DENY = \{(.*?)\}", code, re.S).group(1)))
+                          re.search(r"DENY = frozenset\(\{(.*?)\}\)",
+                                    code, re.S).group(1)))
     # 真不变量在代码侧：凭据类前缀不得进白名单
     cred_prefixes = ("NPM_", "PNPM_", "YARN_", "PIP_", "UV_")
     leaked = sorted(p for p in cred_prefixes if p in prefixes)
     expect(not leaked, f"白名单里没有凭据前缀（代码侧，实际有：{leaked}）")
     expect("NODE_AUTH_TOKEN" in deny,
            "NODE_AUTH_TOKEN 在拒绝名单里（NODE_* 前缀内的 npm registry token）")
+    # 白名单只有一处定义 —— 各写一份时口径漂过（mutation_check 还在放行 NPM_ 前缀）
+    for other in ("readiness.py", "selfcheck.py", "decision_points.py",
+                  "mutation_check.py"):
+        src = (HERE / other).read_text(encoding="utf-8")
+        expect("ALLOW_PREFIX" not in src and "ALLOW_EXACT" not in src,
+               f"{other} 不再自带环境白名单（口径只在 proc_env）")
     # 环境白名单搬到了 SECURITY.md（README 只剩一行链接）
     sec = (ROOT / "SECURITY.md").read_text(encoding="utf-8")
     miss = sorted(x for x in exact if f"`{x}`" not in sec)

@@ -163,6 +163,7 @@ def dp_key(raw: str) -> tuple[str, str, str, int] | None:
 # 字符串与注释清空走共享实现（code_strip）：以前这里与 mutation_check 各有一份
 # 逐字相同的 JS stripper，docstring 里自己写着「改一处要改两处」。
 from code_strip import strip_js_code  # noqa: E402
+import proc_env  # noqa: E402
 
 
 # 判定特征的正则。整词匹配靠 `_norm` + 词表，不靠正则魔法（附录 A 口径 1）。
@@ -516,21 +517,11 @@ _SKIP_DIRS = frozenset({
 
 
 def _node_env(extra: dict[str, str] | None = None) -> dict[str, str]:
-    """子进程环境白名单（口径与 `readiness.child_env` 一致）。
+    """子进程环境白名单（实现在 `proc_env`，与 readiness 同一份）。
 
     本模块不 import readiness —— 将来 readiness 要 import 本模块，会成环。
     """
-    allow_exact = frozenset({
-        "PATH", "HOME", "LANG", "LANGUAGE", "TZ", "TMPDIR", "TEMP", "TMP",
-        "SHELL", "USER", "LOGNAME", "TERM", "SYSTEMROOT", "COMSPEC", "CI",
-    })
-    allow_prefix = ("LC_", "NODE_", "NPM_", "PNPM_", "YARN_")
-    env = {k: v for k, v in os.environ.items()
-           if k in allow_exact or k.startswith(allow_prefix)}
-    env["PYTHONUTF8"] = "1"
-    if extra:
-        env.update(extra)
-    return env
+    return proc_env.child_env(extra)
 
 
 def _scan_repo(root: Path) -> tuple[list[tuple[Path, str]], bool]:

@@ -1,6 +1,6 @@
 ---
 name: attest
-description: "Plan and verify a requirement's test suite. Use when writing or reviewing a feature's test plan, when data drifts between two stores and you need to know which tenant drifted, when asked whether a module can ship, or when choosing which test dimensions to cover. Not for reviewing ordinary application code, and not for performance, security or ops review. Triggers: 写测试计划、覆盖哪些测试维度、这个模块能不能交付、交付就绪度、跨存储数据有没有漂、生成测试骨架。"
+description: "Requirement test plan + delivery readiness: write or check a test plan, cross-store drift, can we ship. 写测试计划、核对测试计划、计划跟代码对不上、覆盖哪些测试维度、这个模块能不能交付、交付就绪度、跨存储数据有没有漂、生成测试骨架。Not for code review, perf, security or ops."
 license: MIT
 metadata:
   author: mcgrapeng <mcgrapengzhang@gmail.com>

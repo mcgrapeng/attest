@@ -62,6 +62,13 @@ python3 .github/skillspector-baseline.py --out /tmp/ss-baseline.yaml
 skillevaluator security-scan skills/attest --skillspector-baseline /tmp/ss-baseline.yaml
 ```
 
+**Run it on a clean tree.** The evaluator scans the working tree in place, and
+SkillSpector gives `SC8` (bytecode) a risk-score floor of **51** — one point
+above the policy threshold of 50. A `__pycache__` left by a local regression
+run therefore fails the whole scan even though the published package cannot
+contain bytecode (`package.py` excludes it and aborts if it is there). So:
+clean `__pycache__` *after* running the tests, right before scanning.
+
 Two of its findings are known and accepted:
 
 - `Unexpected 'LICENSE' in skill root` — the LICENSE has to ship inside the

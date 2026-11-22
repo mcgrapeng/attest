@@ -111,6 +111,8 @@
         "exit_code=1",
         "contains:数据流一致",
         "contains:漂移",
+        "contains:测试租户",
+        "contains:不阻塞交付",
         "not_contains:生产租户无漂移",
         "not_contains:Traceback"
       ],

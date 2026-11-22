@@ -175,6 +175,7 @@ EOF
 check english-reconciler src 1 have_node <<'EOF'
 +数据流漂移
 -生产租户无漂移
++测试租户
 EOF
 
 check no-tests src any true <<'EOF'

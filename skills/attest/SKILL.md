@@ -1,6 +1,6 @@
 ---
 name: attest
-description: "Requirement test plan + delivery readiness: write or check a test plan, cross-store drift, can we ship. 写测试计划、核对测试计划、计划跟代码对不上、覆盖哪些测试维度、这个模块能不能交付、交付就绪度、跨存储数据有没有漂、生成测试骨架。Not for code review, perf, security or ops."
+description: "Use when writing a test plan, checking cross-store drift, or answering can we ship. 写测试计划、核对测试计划、计划跟代码对不上、覆盖哪些测试维度、这个模块能不能交付、交付就绪度、跨存储数据有没有漂、生成测试骨架。Not for code review, perf, security or ops."
 license: MIT
 metadata:
   author: mcgrapeng <mcgrapengzhang@gmail.com>
@@ -159,7 +159,7 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> [--plan <�
 - **跨存储模块的完整做法**（真实案例：权威源、镜像、对账脚本、判据怎么钉）：
   [references/cross-store-reconciliation.md](references/cross-store-reconciliation.md)
 
-## 出错了怎么办
+## Troubleshooting（出错了怎么办）
 
 | 现象 | 多半是 | 怎么办 |
 | --- | --- | --- |
@@ -167,7 +167,7 @@ python3 "$SKILL_DIR/scripts/readiness.py" <模块路径> --repo <根> [--plan <�
 | 退出码 2 | 读不懂这个模块（路径错/语言不支持） | 报错里说了「按什么扩展名识别」，换路径或换工具 |
 | 判据是「未实测」 | 缺前置条件（库连不上、依赖没装、没给 `--plan`） | 报告里点名缺哪个：补上再跑 |
 | 脚本报「没有认出的测试车道」 | 仓库的 test 脚本没被认出来 | 车道在计划里手填，见 references/workflow.md |
-| 报红但看不出该改哪 | 钉指错了地方（文件/用例名/归属） | `check` 的每条红都写了「怎么改」 |
+| `check` failed | 钉指错了地方（文件/用例名/归属） | 每条红都写了「怎么改」 |
 
 **红的别改钉来骗过检查** —— 钉该指哪就指哪。改钉 = 把没测到的东西说成测到了。
 

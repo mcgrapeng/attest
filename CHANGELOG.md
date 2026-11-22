@@ -5,6 +5,32 @@
 
 ## [Unreleased]
 
+**SkillEvaluator 复评挖出来的三个真缺陷 + 一处白名单口径漂移：四份重复实现收成一个共享模块，
+钉越界的两把尺子合成一把，文档里的判据数从 14 改回 18。**
+
+- **子进程环境白名单收成一份**（新 `scripts/proc_env.py`）：`readiness` / `selfcheck` /
+  `decision_points` / `mutation_check` 以前各写一份筛选逻辑，口径已经漂了 ——
+  `readiness` 按 `SECURITY.md` 写明的口径去掉了 `NPM_`/`PNPM_`/`YARN_`/`PIP_`/`UV_` 前缀
+  （它们带着 npm token、pip index 密码进子进程），**`mutation_check` 与 `decision_points`
+  却还在放行** ⇒ 那两处跑目标仓库的脚本时，仓库凭据会跟着进去。现在白名单只有
+  `proc_env` 一处定义，四个模块共用；回归测试（`test_readiness_r2.py` 子项 11b-4）
+  从「只验 readiness」改成四处都验。
+- **钉越界只用一把尺子**：读取面（`check` / `readiness`）与写入面（`scaffold`）以前各有一份
+  实现，**而且不是同一把** —— `req_plan` 一律拒绝路径里的 `..`，`readiness` 却允许规范化后
+  仍在仓库内的写法 ⇒ 同一份计划 `check` 通过、`scaffold` 报红，两边说的却不是同一件事。
+  现在统一成「钉只能是仓库内的相对路径；规范化后落在仓库根之外的一律拒绝」，
+  实现放在 `req_plan.pin_violation`（`readiness` 直接用它，不再自带一份）。
+- **「这个测试文件提到这个模块吗」也合并成一份**（`module_names.mentions_module`）：
+  `readiness` 的测试归属判定与 `selfcheck` 的副本筛选以前各写一份 —— 改一边不改另一边，
+  就会出现「自检查不出自己注入的缺陷」。
+- **`references/criteria.md` 的判据数从 14 改回 18**：同一份文件前面写「18 条判据」，
+  后面写「14 条机械判据」—— 14 是陈旧数字（代码与测试都是 18）。
+- **description 从 211 压到 191 字符，并把「Use when」提到最前面**：原来的长度超出评估器
+  建议上限，且前 57 个字符里没有触发词（有些 harness 只显示前 60 字符）。
+  中文触发词一个没少，「Not for code review, perf, security or ops」也没动。
+- **SKILL.md 的「出错了怎么办」改名 `## Troubleshooting（出错了怎么办）`**：内容本来就有
+  （现象 / 多半是 / 怎么办 三列），只是标题是纯中文，英文 harness 认不出来。
+
 **修掉两处「工具自己造出来的红灯」：把源码片段里的中间件常用词当成「引入了中间件」；
 把基线脚本的「缺产物」提示当成「数据回归」。**
 

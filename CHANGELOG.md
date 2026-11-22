@@ -3,6 +3,45 @@
 本文件记 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的格式，
 版本号用 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.1.30] - 2026-11-22
+
+**把 description 改成「模型真会触发」的样子：压到 211 字符、补上漏掉的中文字面触发词。**
+
+上一版把触发不全的原因查清楚了，不是措辞不够好，是**两个结构性问题**：
+
+1. **长度**：415 字符的 description 在 OpenClaw 上会被截到前 220 字符 ⇒ **整个中文触发词列表
+   和否定范围都被截掉**（实测丢 195 字符）⇒ 模型既不知道什么时候该用，也不知道什么时候不该用。
+2. **漏的字面词**：Tier 3 里那 3 条没加载 skill 的用例全是中文查询（核对已有测试计划、跨存储
+   漂移、上游说测过了但文件不存在），而旧 description 的中文触发词列表里没有对应的说法。
+
+⇒ 新 description（211 字符，OpenClaw 不再截断）：
+
+```
+Requirement test plan + delivery readiness: write or check a test plan,
+cross-store drift, can we ship. 写测试计划、核对测试计划、计划跟代码对不上、
+覆盖哪些测试维度、这个模块能不能交付、交付就绪度、跨存储数据有没有漂、生成测试骨架。
+Not for code review, perf, security or ops.
+```
+
+**Tier 3 实测（同模型、同数据集、同 harness，只换 description）**：
+
+| 指标 | 旧 description | 新 description |
+| --- | --- | --- |
+| Overall（带 skill 臂） | 77.2% | **90.6%** |
+| Discoverability | 41.7% | **69.4%** |
+| Correctness | 84.4% | **100%** |
+| Effectiveness | 86.1% | **93.5%** |
+| 达成目标 | 8/9 | **9/9** |
+
+逐用例也翻了两条：attest-002（核对计划里的钉）从 −0.13 变成 **+0.24**、attest-005（上游说测过了
+但文件不存在）从 −0.07 变成 **+0.22** —— 这两条之前就是**没加载 skill**（那一臂等于没带 skill）。
+
+- **安全扫描那一步也修了一个真陷阱**：SkillSpector 给 `SC8`（字节码）**51 分**的风险分地板分，
+  而策略阈值是 **50** ⇒ 本地跑过回归脚本留下的 `__pycache__` 会让整轮安全扫描差 1 分就挂
+  （而发布物里根本不可能有字节码：`package.py` 排除并在发现时中止）。⇒ `SC8` 按「已复核的误报」
+  进 allowlist（连同扫描器自己造字节码的情况），并在 CONTRIBUTING 写明**扫描前先清字节码**。
+  清干净后：风险分 **41**（阈值 50 之内）、**0 critical / 0 high**、61 条 MEDIUM 照报。
+
 ## [0.1.29] - 2026-11-21
 
 **按 SkillEvaluator 的评估结果收拾 skill 契约本身：SKILL.md 压到读得下的长度、参考文档收成一层、Tier 2 判出的两处重复收成一份实现。**

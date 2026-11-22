@@ -266,23 +266,8 @@ def _reference_files(copy_root: Path, module_rel: str) -> list[Path]:
 
 
 def _module_tokens(copy_root: Path, module_rel: str) -> list[str]:
-    """模块在测试文件里可能出现的名字 —— 实现与 readiness 共用（module_names）。"""
+    """模块名候选（实现见 `module_names`）。"""
     return module_tokens(module_rel, module_names.python_package_dir(copy_root / module_rel))
-
-
-def _mentions_module(p: Path, tokens: list[str]) -> bool:
-    """readiness 的 _mentions_module_path：测试文件算不算这个模块的测试。"""
-    for tag in tokens:
-        if tag and tag in p.name:
-            return True
-    if not tokens:
-        return False
-    text = _read(p)
-    for tag in tokens:
-        pat = r"(?<![A-Za-z0-9_.-])" + re.escape(tag) + r"(?![A-Za-z0-9_-])"
-        if re.search(pat, text):
-            return True
-    return False
 
 
 # ---------------------------------------------------------------- 副本
@@ -591,7 +576,7 @@ def _run_one_fault(kind: str, readiness_py: Path, repo: Path,
             if not cands:
                 tokens = _module_tokens(copy_root, module_rel)
                 cands = [p for p in _repo_test_files(copy_root)
-                         if _mentions_module(p, tokens)]
+                         if module_names.mentions_module(p, tokens)]
             if not cands:
                 return res(kind, None, False, None, None, [],
                            "副本里没有这个模块的测试文件"

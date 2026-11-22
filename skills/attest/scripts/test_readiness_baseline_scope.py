@@ -5,8 +5,7 @@
 指标口径根本不是一回事：记忆域的模块跑上了 RAG 域的基线对拍，
 报出来的差异是别的域的。
 
-收口口径（跟对账车道一致）：脚本要么在模块自己的 workspace 里，
-要么脚本正文/命令提到这个模块（表名或模块路径）。
+收口口径（跟对账车道一致）在 `readiness._baseline_matches_module`，这里只验行为。
 """
 from __future__ import annotations
 

@@ -1776,12 +1776,12 @@ def check_plan(plan: Plan, repo: Repo) -> list[Finding]:
     fs: list[Finding] = []
 
     # 0. 钉越界 ⇒ 报红，而且**不去读仓库外的文件**。
-    #    读取面与写入面同一把尺子（_pin_violation）：钉只能是仓库内的相对路径。
+    #    读取面与写入面同一把尺子（pin_violation）：钉只能是仓库内的相对路径。
     bad_pins: dict[str, str] = {}
     for _section, fpath in _plan_pins(plan):
         if fpath in bad_pins:
             continue
-        reason = _pin_violation(repo.root, fpath)
+        reason = pin_violation(repo.root, fpath)
         if reason:
             bad_pins[fpath] = reason
     for fpath, reason in sorted(bad_pins.items()):
@@ -2461,18 +2461,23 @@ def _go_pkg_for(target: Path) -> str:
     return _go_pkg(target.parent.name)
 
 
-def _pin_violation(repo_root: Path, fpath: str) -> str:
-    """钉里的路径是不是越界 —— 读取面（check）与写入面（scaffold）同一把尺子。
+def pin_violation(repo_root: Path, fpath: str) -> str:
+    """钉里的路径是不是越界 —— 读取面（check/readiness）与写入面（scaffold）同一把尺子。
 
     返回空串表示没问题；否则返回越界理由。
+    规则：钉只能是**仓库内的相对路径** —— 绝对路径不行；规范化（解符号链接）后
+    落在仓库根之外的也不行。`a/../b` 这类规范化后仍在仓库内的写法**允许**：
+    早先 req_plan 一律拒绝 `..`、readiness 却允许 ⇒ 同一份计划 check 通过、
+    scaffold 报红，两边说的却不是同一件事。
     """
-    root = repo_root.resolve()
     raw = Path(fpath)
     if raw.is_absolute():
         return "是绝对路径（只接受仓库内的相对路径）"
-    if ".." in raw.parts:
-        return "含 `..`（会跳到边界之外）"
-    resolved = (root / raw).resolve()
+    try:
+        root = repo_root.resolve()
+        resolved = (root / raw).resolve()
+    except OSError:
+        return "路径无法解析"
     if not resolved.is_relative_to(root):
         return f"规范化后落在仓库根之外（{resolved}）"
     return ""
@@ -2484,7 +2489,7 @@ def _safe_target(out_dir: Path, repo_root: Path, fpath: str) -> tuple[Path | Non
     返回 (目标路径, 拒绝理由)；目标路径是 None 时理由非空。
     边界有两条：--out-dir 与仓库根 —— 任一越界都不写。
     """
-    reason = _pin_violation(repo_root, fpath)
+    reason = pin_violation(repo_root, fpath)
     if reason:
         return None, reason
     target = (out_dir / Path(fpath)).resolve()
@@ -2673,11 +2678,11 @@ def check_test_toolkit(plan: Plan, repo: Repo) -> list[Finding]:
         if len(row) < 2:
             continue
         for fpath, case in parse_pins(row[1]):
-            if case and not _pin_violation(repo.root, fpath):
+            if case and not pin_violation(repo.root, fpath):
                 tool_files.add(fpath)
     for _ident, _desc, pin in plan.invariants:
         for fpath, case in parse_pins(pin):
-            if case and not _pin_violation(repo.root, fpath):
+            if case and not pin_violation(repo.root, fpath):
                 tool_files.add(fpath)
 
     # 严谨性：没有断言的测试文件 = 覆盖率剧场

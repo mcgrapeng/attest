@@ -305,7 +305,10 @@ def test_dead_code_removed() -> None:
     print("\n收尾：check_reconcile 是死代码 ⇒ 已删")
     src = SCRIPT.read_text(encoding="utf-8")
     expect("def check_reconcile" not in src, "readiness.py 里没有 check_reconcile")
-    expect("_pin_outside_repo" in src, "有钉越界的校验函数")
+    expect("pin_violation" in src,
+           "readiness.py 用的是 req_plan 的钉越界校验")
+    expect("_pin_outside_repo" not in src,
+           "readiness.py 不再自带一份钉越界校验（两处口径必须一致）")
 
 
 

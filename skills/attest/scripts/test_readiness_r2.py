@@ -407,6 +407,9 @@ def main() -> int:
 
     print("\n子项 11b-4：凭据类环境变量不进子进程（去掉前缀后的真不变量）")
     import os as _os
+    import decision_points  # noqa: E402
+    import mutation_check  # noqa: E402
+    import selfcheck  # noqa: E402
     _saved = {k: _os.environ.get(k) for k in
               ("NPM_TOKEN", "NODE_AUTH_TOKEN", "PIP_INDEX_URL",
                "UV_INDEX_SECRET_PASSWORD", "AWS_SECRET_ACCESS_KEY")}
@@ -431,7 +434,8 @@ def main() -> int:
                 _os.environ[k] = v
     for k in ("NPM_TOKEN", "NODE_AUTH_TOKEN", "PIP_INDEX_URL",
               "UV_INDEX_SECRET_PASSWORD", "AWS_SECRET_ACCESS_KEY"):
-        expect(k not in child, f"{k} 不进子进程环境")
+        for name, env in builders.items():
+            expect(k not in env, f"{name} 不透传 {k}")
     _os.environ["NODE_ENV"] = "test"
     try:
         child2 = readiness.child_env()

@@ -35,6 +35,7 @@ from req_plan import (  # noqa: E402
     parse_detail_rows,
     parse_pins,
     parse_plan,
+    pin_violation,
     test_case_names,
 )
 from decision_points import HIGH_RISK_KINDS, dp_key, normalize_dp_id  # noqa: E402
@@ -217,33 +218,12 @@ _TEST_NON_TEST_NAMES = {
 
 
 def _module_tokens(m: Module) -> list[str]:
-    """这个模块在测试文件里可能出现的名字（路径 / 目录名 / Python 包名）。
-
-    实现与 selfcheck 共用（module_names）—— 以前两边各写一份，要人工保持对齐。
-    """
+    """这个模块在测试文件里可能出现的名字（实现见 `module_names`）。"""
     try:
         rel = str(m.base.relative_to(m.root))
     except ValueError:
         rel = ""
     return module_tokens(rel, module_names.python_package_dir(m.base))
-
-
-def _mentions_module_path(p: Path, tokens: list[str]) -> bool:
-    """这个测试文件提到这个模块吗（路径片段或文件名）。"""
-    for tag in tokens:
-        if tag and tag in p.name:
-            return True
-    if not tokens:
-        return False
-    try:
-        text = p.read_text(encoding="utf-8", errors="replace")
-    except OSError:
-        return False
-    for tag in tokens:
-        pat = r"(?<![A-Za-z0-9_.-])" + re.escape(tag) + r"(?![A-Za-z0-9_-])"
-        if re.search(pat, text):
-            return True
-    return False
 
 
 def repo_level_tests(root: Path, m: Module,
@@ -280,7 +260,7 @@ def repo_level_tests(root: Path, m: Module,
                 continue
             seen.add(p)
             all_files.append(p)
-            if p in explicit or _mentions_module_path(p, tokens):
+            if p in explicit or module_names.mentions_module(p, tokens):
                 attributed.append(p)
     return all_files, attributed
 
@@ -3349,25 +3329,6 @@ def check_oracle_independence(m: Module) -> Check:
                  evidence_kind="static")
 
 
-def _pin_outside_repo(root: Path, fpath: str) -> str:
-    """钉指向仓库外 ⇒ 返回原因；没问题返回空串。
-
-    与 `req_plan.py` 的 `_pin_violation` 同一把尺子：钉只能是仓库内的相对路径。
-    越界的钉既不读也不写 —— 否则一份计划就能让工具去探测仓库外的文件。
-    """
-    p = Path(fpath)
-    if p.is_absolute():
-        return "是绝对路径"
-    try:
-        base = root.resolve()
-        target = (root / p).resolve()
-    except OSError:
-        return "路径无法解析"
-    if target != base and base not in target.parents:
-        return "含 `..`（会跳到仓库外）"
-    return ""
-
-
 def check_requirement(m: Module, plan_path: str | None) -> Check:
     """R7 需求覆盖 —— 计划里的每条不变式都要有真实用例。"""
     if not plan_path:
@@ -3393,7 +3354,7 @@ def check_requirement(m: Module, plan_path: str | None) -> Check:
             continue
         ok = False
         for fpath, case in pins:
-            why = _pin_outside_repo(m.root, fpath)
+            why = pin_violation(m.root, fpath)
             if why:
                 # 越界的钉不读那个文件，也不当成"覆盖到了"
                 outside.append(f"{ident}: 钉「{fpath}」{why}")

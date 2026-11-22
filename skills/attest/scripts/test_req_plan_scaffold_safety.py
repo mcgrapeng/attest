@@ -205,6 +205,18 @@ def main() -> int:
     expect((repo3 / "src" / "feature" / "new.test.ts").exists(),
            "合法落点 ⇒ 文件生成了")
 
+    print("\n1d. `..` 但规范化后仍在仓库内 ⇒ 放行（check 与 scaffold 同一把尺子）")
+    repo3b = ts_repo()
+    write(repo3b / "docs" / "plan.md",
+          plan_text("src/../src/feature/new.test.ts::keeps threshold at one"))
+    r3b = run("scaffold", str(repo3b / "docs" / "plan.md"), "--repo", str(repo3b))
+    expect(r3b.returncode == 0, "规范化后仍在仓库内的 `..` 落点 ⇒ 退出码 0")
+    expect((repo3b / "src" / "feature" / "new.test.ts").exists(),
+           "规范化后仍在仓库内的 `..` 落点 ⇒ 文件生成了")
+    rc3b = run("check", str(repo3b / "docs" / "plan.md"), "--repo", str(repo3b))
+    expect("钉越界" not in rc3b.stdout,
+           "同一个落点 check 也不报「钉越界」（两处口径一致）")
+
     print("\n2. 代码注入：用例名里的引号被转义，载荷留在字符串里")
     payload = ("x', () => {}); process.stdout.write('PWNED_MARKER\\n'); it('y")
     repo4 = ts_repo()

@@ -64,9 +64,24 @@ CASES: dict[int, dict] = {    1: {
         "repo": "order-data-repo",
         "fixture": "english-reconciler",
         "edits": [
-            ("订单数据 PG 和向量库各存了一份，",
-             "仓库在 /workspace/input/{repo}。订单数据 PG 和向量库各存了一份，"),
+            # **删掉「itest-abc 是故意注入的失败态」那句**：那是 skill 独有的知识
+            # （测试租户只报不拦）⇒ 留着它，基线臂不用 skill 也能答对，这条就不区分；
+            # 而带 skill 那一臂若没加载 skill 还会因 skill_execution 倒扣分 ⇒
+            # 变成一条「既不区分又倒扣」的有害用例。Tier 3 的规则是：基线拿同一提示，
+            # 不能把 skill 的知识喂给它。
+            ("订单数据 PG 和向量库各存了一份，今天有人说两边对不上。我们的对账脚本在 "
+             "package.json 里叫 reconcile，输出是英文的。你跑一下，看哪个租户漂了。"
+             "itest-abc 这个租户是我们故意注入的失败态，别把它当成阻塞项。",
+             "仓库在 /workspace/input/order-data-repo。订单数据 PG 和向量库各存了一份，"
+             "今天有人说两边对不上。我们的对账脚本在 package.json 里叫 reconcile，"
+             "输出是英文的。你跑一下，看哪个租户漂了。"),
         ],
+        # expected_output 也改成**看得见的结果**，别写成「跑 readiness.py：…」
+        # （那是 skill 的用法，不是任务结果）。
+        "expected_output": (
+            "说出是哪个生产租户漂了（acme-prod），它是阻塞项；"
+            "itest-abc 的漂移被报出来但**不算阻塞项**（测试租户不阻塞交付）。"
+        ),
     },
     5: {
         "repo": "shop-backend",
@@ -190,7 +205,7 @@ def main() -> int:
         case = {
             "id": f"attest-{cid:03d}",
             "prompt": prompt,
-            "expected_output": c["expected_output"],
+            "expected_output": spec.get("expected_output") or c["expected_output"],
             "expected_skill": "attest",
             "files": [f"files/{repo}"],
         }

@@ -3,6 +3,21 @@
 本文件记 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/) 的格式，
 版本号用 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+**修掉仓库 eval 4 里一处「声称测了、其实没测」的洞；把 Tier 3 那条跨存储漂移用例改成真能区分。**
+
+- **`fixtures/english-reconciler` 补上注入的测试租户**：行为 eval 4 声称要测「生产租户的漂移判为
+  阻塞项，测试租户的漂移只报不拦」，但 fixture 的对账输出里**只有两个生产租户** ⇒ 提示里那句
+  「itest-abc 是故意注入的失败态」根本无从谈起，那条语义从来没被测到。补上 `itest-abc`（DRIFT）
+  后报告变成「1 个**生产租户**的数据流漂移（另有 1 个测试租户漂移，不阻塞交付）」⇒
+  `run_fixtures.sh` 与 `evals/evals.json` 各加一条断言把它钉住。
+- **Tier 3 数据集里那条「跨存储漂移」用例不再剧透**：原来的提示直接告诉 agent
+  「itest-abc 是故意注入的失败态，别把它当成阻塞项」—— **那是 skill 独有的知识**（测试租户只报
+  不拦）⇒ 留着它，基线臂不用 skill 也能答对，这条既不区分、又因为带 skill 那一臂没加载 skill 而
+  倒扣分。⇒ 提示里删掉那句，期望改成**看得见的结果**（「acme-prod 是阻塞项；itest-abc 报出来
+  但不阻塞」）。这样这条才真的在问「agent 知不知道测试租户的约定」。
+
 ## [0.1.30] - 2026-11-22
 
 **把 description 改成「模型真会触发」的样子：压到 211 字符、补上漏掉的中文字面触发词；

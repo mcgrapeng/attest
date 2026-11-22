@@ -97,6 +97,30 @@ def main() -> int:
     expect(any("中间件" in f.detail for f in fs1b),
            "只有约束节提到中间件 ⇒ 报红")
 
+    print("\n假阳性 4：机器推导的判定点行里抄的源码片段含中间件常用词 ⇒ 不报红")
+    p4 = write(tmp / "dp-row.md", HEAD + """
+## 核心逻辑细节
+
+| 维度 | DP ID | 判定点 | 归属的不变式 | 钉在哪 | 豁免理由 |
+| --- | --- | --- | --- | --- | --- |
+| 分支 | src/mock.ts#handle#branch#7 | if (p === '/internal/feishu/outbox') return json(res, 200, { outbox: feishuOu… | I1 | src/a.test.ts | 替身自己的分支 |
+""")
+    fs4 = check_plan(parse_plan(p4), repo)
+    expect(not any("中间件" in f.detail for f in fs4),
+           "判定点行里的源码片段含 outbox ⇒ 不当成「引入了中间件」")
+
+    print("\n假阳性 4b：人写的行里提中间件 ⇒ 仍要报红")
+    p4b = write(tmp / "human-row.md", HEAD + """
+## 核心逻辑细节
+
+| 维度 | 落点 | 说明 |
+| --- | --- | --- |
+| 一致性 | src/a.test.ts | 用 outbox 表解一致性 |
+""")
+    fs4b = check_plan(parse_plan(p4b), repo)
+    expect(any("中间件" in f.detail for f in fs4b),
+           "人写的行里提中间件 ⇒ 仍报红")
+
     print("\nCRITICAL 2：一个标题混两节 ⇒ 报红")
     p2 = write(tmp / "mixed.md", """# p
 

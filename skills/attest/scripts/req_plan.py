@@ -1439,13 +1439,30 @@ def test_body_shapes(text: str) -> list[str]:
     return shapes
 
 
+def _prose_lines(text: str) -> list[str]:
+    """只留下**人写的**行 —— 机器推导的判定点行不算。
+
+    判定点表与覆盖矩阵里的「判定点」列抄的是**源码片段**：源码里出现一个中间件
+    常用词（替身端点 `/internal/feishu/outbox`、变量名 `outbox`…）就会被抄进计划
+    ⇒ 那不是「拿中间件当解法」，是把别人的源码词汇当成了本项目的方案 ⇒ 报红是误报。
+    机器推导的行长这样：某一格是判定点 ID（`路径#符号#种类[#序号]`，用 dp_key 认）
+    ⇒ 按这个形状跳过整行。人写的行（散文、约束节、数据一致性节、不变式清单）照扫。
+    """
+    out: list[str] = []
+    for ln in text.splitlines():
+        if any(dp_key(cell.strip()) is not None for cell in ln.split("|")):
+            continue
+        out.append(ln)
+    return out
+
+
 def _middleware_used(text: str) -> list[str]:
     """计划正文里真被当作解法的中间件。
 
     否定语境（"不引入消息队列"）不算 —— 那是在说避开它。
     """
     out: list[str] = []
-    for line in text.splitlines():
+    for line in _prose_lines(text):
         low = line.lower()
         for term in _MIDDLEWARE_TERMS:
             t = term.lower()

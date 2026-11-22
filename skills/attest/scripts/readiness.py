@@ -97,6 +97,13 @@ _SUPPORT_RE = re.compile(
     r"(itest-support|test-support|spec-support|fixtures?/|/helpers/|"
     r"\.e2e-support|setup/|/test-utils?/)", re.I)
 
+# 否定语境里的「回归/drift」—— 那是在说「**没**回归」，不是回归。
+# 基线脚本的「缺产物」提示常写成「（缺产物不是数据回归）」：不看否定语境就会把
+# 「环境没准备好」判成「数据回归」，凭空造出一个阻塞项。
+_NEGATED_REGRESSION = re.compile(
+    r"(不是|并非|没有|无)\s*.{0,8}?(回归|regress|drift)"
+    r"|\b(not|no)\b\s*.{0,12}?(regress|drift)", re.I)
+
 # 通用名 —— 同名不等于重复实现（errorMessage / helper / config 这类到处都有）
 _GENERIC_NAMES = {
     "error", "errmsg", "errormessage", "helper", "helpers", "util", "utils",
@@ -2088,8 +2095,11 @@ def check_data_accuracy(m: Module, root: Path) -> Check:
         # "没产物"和"指标不达标"是两回事 —— 前者是环境没准备好
         no_artifact = re.search(
             r"(没有找到|先跑|缺少.*产物|no artifacts|not found.*artifacts)", text)
+        # 脚本自己会说「缺产物**不是数据回归**」⇒ 这句里的"回归"是**否定语境**，
+        # 不能当成回归（否则「没产物」被判成「数据回归」，把阻塞项造出来）。
         bad = [ln.strip() for ln in text.splitlines()
-               if re.search(r"(低于|不达标|超出容差|回归|drift|regress)", ln)]
+               if re.search(r"(低于|不达标|超出容差|回归|drift|regress)", ln)
+               and not _NEGATED_REGRESSION.search(ln)]
         if bad:
             fails += bad[:10]
         elif no_artifact:

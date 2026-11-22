@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import ast
 import re
 import shutil
 import subprocess
@@ -2150,10 +2151,85 @@ _NO_DB_WRITES_RE = re.compile(
     r"(?:<!--|/\*)\s*attest:no-db-writes\s+reason=\"(?P<reason>[^\"]*)\""
     r"\s*(?:-->|\*/)")
 # 字面量的固定等待（flaky 的来源）
+#
+# 只算**正时长**的等待：sleep(0) / sleep(0.0) 是「让出事件循环一次」，
+# 不引入时间依赖，不是 flaky 源（实测：把 sleep(0) 判成固定等待会把
+# 几十处「让出一次」的正常写法全挑出来，噪声压过真问题）。
 _FIXED_WAIT_RE = re.compile(
-    r"sleep\(\s*\d{3,}|time\.sleep\(\s*\d|"
-    r"setTimeout\(\s*['\"]?\d{3,}|asyncio\.sleep\(\s*\d|"
-    r"waitForTimeout\(\s*\d")
+    r"sleep\(\s*(?!0(?:\.0+)?\s*[,)])[\d.]|"
+    r"setTimeout\(\s*['\"]?(?!0(?:\.0+)?\s*[,)])[\d.]|"
+    r"waitForTimeout\(\s*(?!0(?:\.0+)?\s*[,)])[\d.]")
+
+# 显式豁免：这个文件里的固定等待是有意为之（理由必填，进报告）
+_NO_FIXED_WAIT_RE = re.compile(
+    r"(?:<!--|/\*)\s*attest:fixed-wait\s+reason=\"(?P<reason>[^\"]*)\""
+    r"\s*(?:-->|\*/)")
+
+# 会被当成「固定等待」的调用名（sleep 家族）
+_SLEEP_CALL_NAMES = frozenset(
+    {"sleep", "setTimeout", "waitForTimeout", "wait_for_seconds"})
+
+
+def _numeric_seconds(node: ast.AST) -> float | None:
+    """调用参数是不是一个正的数字字面量（固定时长）；是则返回该值。"""
+    if not isinstance(node, ast.Call) or not node.args:
+        return None
+    func = node.func
+    name = None
+    if isinstance(func, ast.Attribute):
+        name = func.attr
+    elif isinstance(func, ast.Name):
+        name = func.id
+    if name not in _SLEEP_CALL_NAMES:
+        return None
+    arg = node.args[0]
+    if isinstance(arg, ast.Constant) and isinstance(arg.value, (int, float)):
+        return float(arg.value)
+    return None
+
+
+def _loop_body_calls(tree: ast.AST) -> set[int]:
+    """轮询循环体里的调用行号集合。
+
+    while/for 体内的 sleep 是**退避间隔**（外层循环按条件退出）⇒ 不算固定等待：
+    它不引入时间依赖，不会让测试变 flaky。
+    """
+    inside: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.While, ast.For, ast.AsyncFor)):
+            continue
+        for stmt in node.body:
+            for child in ast.walk(stmt):
+                if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef,
+                                     ast.ClassDef)):
+                    continue  # 嵌套函数体不算循环内
+                if isinstance(child, ast.Call):
+                    inside.add(child.lineno)
+    return inside
+
+
+def fixed_waits_in_python(text: str) -> list[tuple[int, str]]:
+    """Python 文件里的固定等待：[(行号, 源码片段)]。
+
+    - 只认正时长（sleep(0) 是让出一次事件循环，没有时间依赖）；
+    - 轮询循环体内的 sleep（退避间隔）放行；
+    - 文档字符串/注释里的 "sleep(0.5" 不算（AST 只看真实调用）。
+    """
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    loop_calls = _loop_body_calls(tree)
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        seconds = _numeric_seconds(node)
+        if seconds is None or seconds <= 0:
+            continue
+        if node.lineno in loop_calls:
+            continue
+        snippet = ast.get_source_segment(text, node) or "sleep(...)"
+        out.append((node.lineno, snippet.strip()))
+    return out
 
 
 def check_test_hygiene(m: Module) -> Check:
@@ -2166,15 +2242,31 @@ def check_test_hygiene(m: Module) -> Check:
     sleeps: list[str] = []
     dirty: list[str] = []
     exempted: list[tuple[str, str]] = []
+    wait_exempted: list[tuple[str, str]] = []
     for t in m.tests + m.itests:
         try:
             text = t.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
         rel = str(t.relative_to(m.root))
-        for mm in _FIXED_WAIT_RE.finditer(text):
-            line = text[:mm.start()].count("\n") + 1
-            sleeps.append(f"{rel}:{line} 固定等待 {mm.group(0)!r}")
+        wait_waiver = _NO_FIXED_WAIT_RE.search(text)
+        if wait_waiver:
+            reason = wait_waiver.group("reason").strip()
+            if not reason:
+                findings.append(
+                    f"{rel}：attest:fixed-wait 没给理由 —— "
+                    "写清楚这个等待为什么不是 flaky 源"
+                )
+            else:
+                wait_exempted.append((rel, reason))
+            continue
+        if t.suffix == ".py":
+            for line, snippet in fixed_waits_in_python(text):
+                sleeps.append(f"{rel}:{line} 固定等待 {snippet!r}")
+        else:
+            for mm in _FIXED_WAIT_RE.finditer(text):
+                line = text[:mm.start()].count("\n") + 1
+                sleeps.append(f"{rel}:{line} 固定等待 {mm.group(0)!r}")
         waiver = _NO_DB_WRITES_RE.search(text)
         if waiver:
             reason = waiver.group("reason").strip()
@@ -2206,8 +2298,9 @@ def check_test_hygiene(m: Module) -> Check:
             msg += f"（{len(exempted)} 个文件声明了 attest:no-db-writes：{shown}{more}）"
         return Check("hygiene", "测试卫生（不留残留、不靠 sleep）", "pass", msg, ev)
     status = "fail" if dirty else "warn"
-    ev = findings[:8] + [f"{rel}：attest:no-db-writes — {reason}"
-                         for rel, reason in exempted]
+    ev = (findings[:8]
+          + [f"{rel}：attest:no-db-writes — {reason}" for rel, reason in exempted]
+          + [f"{rel}：attest:fixed-wait — {reason}" for rel, reason in wait_exempted])
     return Check("hygiene", "测试卫生（不留残留、不靠 sleep）", status,
                  f"{len(sleeps)} 处固定等待、{len(dirty)} 处不清理的写库测试",
                  ev[:10],

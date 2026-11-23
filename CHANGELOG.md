@@ -5,9 +5,16 @@
 
 ## [Unreleased]
 
+## [0.1.31] - 2026-11-23
+
 **SkillEvaluator 复评挖出来的三个真缺陷 + 一处白名单口径漂移：四份重复实现收成一个共享模块，
 钉越界的两把尺子合成一把，文档里的判据数从 14 改回 18。**
 
+- **复评结果（SkillEvaluator 1.0.1）**：Tier 1 质量分 **95.0 → 100.0 / A**（四维全 100）；
+  Tier 2 从 **FAIL（6 处 HIGH 重复簇）变 PASS 2/2**（重复 **0**，跨 skill 对照本机 254 个
+  skill 只剩 1 条 MEDIUM advisory）；Tier 1 静态闸 13 项 **0 失败**、1 项 incomplete
+  （`skillspector` 覆盖不到 `readiness.py` / `req_plan.py` 两个大脚本 —— 扫描器侧的分析边界，
+  相关 finding 全部经 LLM 复核判为误报）。
 - **Tier 3（活体 A/B）第一次拿到完整判定**：9 条用例 × 1 尝试 × 2 臂，**18 次尝试零失败**
   （此前每轮都因基础设施故障丢尝试）。带 skill 臂 Overall **85.9% → 92.4%（+6.5）**，
   **Skill Lift +0.065**（过 +0.05 的门槛），Pass@1 **66.7% → 77.8%（+11.1 个百分点）**，
@@ -16,7 +23,13 @@
   「跨存储漂移」0.56）—— 这两条的 `skill_execution` 都是 **0.0**，即 agent 压根没加载 skill。
   ⇒ **剩下的问题是触发率（Discoverability 61.1%），不是 skill 的质量**：
   能在带 skill 时把活干对的两条（attest-001 +0.51、attest-005 +0.27）已经拿到。
-
+- **Tier 3 换了模型独立复现一遍**（agent=qwen3:14b / 裁判=qwen3:8b，本机 ollama）：18 次尝试里
+  17 次成功打分，**Skill Lift +0.075**（同样过门槛）⇒ 「skill 有用、但卡在触发率」这个结论
+  与模型无关。复现里另有两条（attest-002 −0.21、attest-005 −0.24）是**加载了 skill 但答案
+  反而不如基线** ⇒ 与触发问题分开看。
+- **description 的改动用同模型 A/B 验过**：191 字符 +「Use when」提前那版，触发评测
+  （20 条查询、真实装在 skills 目录里测）**召回 0.2 → 0.4、精确率仍 1.0** ⇒ 是改进不是妥协。
+  顺带记下：再补「两边对不上」没有帮助（0.3 = 少一条 = 噪声），已撤回（`evals/README.md`）。
 - **子进程环境白名单收成一份**（新 `scripts/proc_env.py`）：`readiness` / `selfcheck` /
   `decision_points` / `mutation_check` 以前各写一份筛选逻辑，口径已经漂了 ——
   `readiness` 按 `SECURITY.md` 写明的口径去掉了 `NPM_`/`PNPM_`/`YARN_`/`PIP_`/`UV_` 前缀

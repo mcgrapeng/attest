@@ -77,8 +77,32 @@ Two of its findings are known and accepted:
   extends the allowed *directories* only, so this one cannot be silenced. Do
   not "fix" it by moving the file.
 - `No troubleshooting section documented` and `No mention of error handling` —
-  false positives: the section exists as `## 出错了怎么办` (the validator only
-  looks for the English heading), and the LLM rubric scores it 9/10.
+  false positives: the section exists as `## Troubleshooting（出错了怎么办）`
+  (the validator looks for the English heading), and the LLM rubric scores it
+  9/10.
+
+**Why the Security Scan step stays `incomplete` for this skill.** The validator
+only accepts an analysis whose *only* gaps are unresolved references. Scanning
+the published package leaves three kinds of gap, and two of them are inherent
+to what this tool is:
+
+| Gap | Where | Can it go away? |
+| --- | --- | --- |
+| `reference_missing` ×6 | `SKILL.md` (`$SKILL_DIR/...` paths + one prose example) | No — `$SKILL_DIR` is the runtime convention, and a path that resolves only at runtime cannot resolve at scan time |
+| `obfuscated_instruction_text` ×2 | `decision_points.py`, `readiness.py` | Not without rewriting the files |
+| `static_parse_limit` ×2 | `readiness.py` ("expansion boundary"), `req_plan.py` ("printf invocation") | Not without changing how attest assembles command lines |
+
+The last two are the scanner's bounded parser meeting code that *builds*
+commands at runtime — which is exactly what a tool that runs the target
+repository's own test, coverage and reconciliation commands has to do. Making
+them disappear would mean rewriting the core of the tool (or splitting three
+very large scripts) to satisfy a parser, which is a bad trade: the gate would
+only be green, not more true. So: expect `incomplete` here and read the
+finding counts instead (0 critical, 0 high, the medium ones reported verbatim).
+
+One budget knob is worth setting, because a truncated scan is *less* evidence:
+`SKILLSPECTOR_MAX_STATIC_ANALYSIS_SECONDS_PER_ARTIFACT=900` (default 300)
+stops SkillSpector from giving up on the largest scripts.
 
 Its `Harness Compatibility` check is the one that matters here: it fails when
 `SKILL.md` gets too long for a harness that counts CJK characters as four.
@@ -135,6 +159,25 @@ export SKILL_EVAL_LLM_API_KEY=ollama
 export SKILL_EVAL_EMBEDDING_MODEL=qwen3-embedding:0.6b
 skillevaluator tier2 skills/attest
 ```
+
+**Split the embeddings endpoint from the judge.** Both the dedup judge and the
+embedding client read the provider config, but the *embedding* one honours
+`SKILL_EVAL_EMBEDDING_BASE_URL` on its own. Point the judge at a fast remote
+model and keep the embeddings local, or the judge runs on the same 14B model
+that is already resident on this machine — and on a memory-starved box it
+stalls for tens of minutes per cluster instead of a few seconds:
+
+```bash
+export SKILL_EVAL_LLM_BASE_URL="$OPENAI_BASE_URL"        # judge: remote
+export SKILL_EVAL_EMBEDDING_BASE_URL=http://127.0.0.1:11434/v1   # embeddings: local
+export SKILL_EVAL_EMBEDDING_API_KEY=ollama
+export SKILL_EVAL_EMBEDDING_MODEL=qwen3-embedding:0.6b
+```
+
+**Start Docker with `docker desktop start`.** `open -a Docker` reports
+success and then the app exits without creating
+`~/.docker/run/docker.sock`, so every Harbor job fails with "Docker daemon is
+not running". The CLI subcommand waits for the engine properly.
 
 ## What a pull request looks like
 

@@ -8,6 +8,15 @@
 **SkillEvaluator 复评挖出来的三个真缺陷 + 一处白名单口径漂移：四份重复实现收成一个共享模块，
 钉越界的两把尺子合成一把，文档里的判据数从 14 改回 18。**
 
+- **Tier 3（活体 A/B）第一次拿到完整判定**：9 条用例 × 1 尝试 × 2 臂，**18 次尝试零失败**
+  （此前每轮都因基础设施故障丢尝试）。带 skill 臂 Overall **85.9% → 92.4%（+6.5）**，
+  **Skill Lift +0.065**（过 +0.05 的门槛），Pass@1 **66.7% → 77.8%（+11.1 个百分点）**，
+  Correctness +11.2、Effectiveness +8.3、Security 两边满分。
+  **判定仍是 FAIL**：9 条里 2 条目标未达成（attest-002「核对计划里的钉」0.49、attest-004
+  「跨存储漂移」0.56）—— 这两条的 `skill_execution` 都是 **0.0**，即 agent 压根没加载 skill。
+  ⇒ **剩下的问题是触发率（Discoverability 61.1%），不是 skill 的质量**：
+  能在带 skill 时把活干对的两条（attest-001 +0.51、attest-005 +0.27）已经拿到。
+
 - **子进程环境白名单收成一份**（新 `scripts/proc_env.py`）：`readiness` / `selfcheck` /
   `decision_points` / `mutation_check` 以前各写一份筛选逻辑，口径已经漂了 ——
   `readiness` 按 `SECURITY.md` 写明的口径去掉了 `NPM_`/`PNPM_`/`YARN_`/`PIP_`/`UV_` 前缀
